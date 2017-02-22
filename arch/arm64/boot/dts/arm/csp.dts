@@ -1,0 +1,39 @@
+/*
+ *  Copyright (C) 2016 Cadence Design Systems
+ *  All rights reserved worldwide.
+ */
+
+/dts-v1/;
+
+#include "csp.dtsi"
+
+/ {
+    amba {
+        timer {
+            clock-frequency = <30000000>;
+        };
+
+        emac0: emac@fd030000 {
+            compatible = "cdns,zynqmp-gem";
+            reg = <0x0 0xfd030000 0x0 0x4000>;
+            interrupts = <0 1 0>;
+            mac-address = [ 00 4D 49 50 49 30 ];
+            clocks = <&coreclock>, <&coreclock>;
+            clock-names = "pclk", "hclk";
+        };
+
+        i2c0: i2c@fd090000 {
+            compatible = "cdns,i2c-r1p14";
+            clocks = <&coreclock>;
+            interrupts = <0 3 0>;
+            interrupt-parent = <&gic>;
+            reg = <0x0 0xfd010000 0x0 0x1000>;
+            clock-frequency = <100000>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+
+    };
+
+};
+

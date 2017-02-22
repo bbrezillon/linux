@@ -1,0 +1,116 @@
+/*
+ *  Copyright (C) 2016 Cadence Design Systems
+ *  All rights reserved worldwide.
+ */
+
+/ {
+    model = "Cadence CSP";
+    compatible = "cdns,csp-001";
+    #address-cells = <2>;
+    #size-cells = <2>;
+    interrupt-parent = <&gic>;
+
+    aliases {
+        serial0 = &uart0;
+    };
+
+    chosen {
+        bootargs = "earlycon=cdns,0xfd000000,115200 console=ttyPS0,115200 root=/dev/ram0 rw earlyprintk";
+        stdout-path = "serial0:115200n8";
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        cpu@0 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a53", "arm,armv8";
+            reg = <0x0>;
+            next-level-cache = <&cpu_l2>;
+            enable-method = "spin-table";
+            cpu-release-addr = <0x0 0x0000fff8>;
+        };
+
+        cpu_l2: l2-cache0 {
+            compatible = "cache";
+        };
+    };
+
+    memory: ram@0 {
+        device_type = "memory";
+        reg = <0x0 0x0 0x0 0x40000000>;
+    };
+
+    clocks {
+        coreclock: coreclock {
+            #clock-cells = <0>;
+            compatible = "fixed-clock";
+            clock-frequency = <80000000>;
+        };
+    };
+
+    amba {
+        compatible = "simple-bus";
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        sysclock: sysclock@fd020000 {
+            #clock-cells = <0>;
+            compatible = "cdns,csp-clock";
+            reg = <0x0 0xfd020000 0x0 0x1000>;
+        };
+
+        sysregs: sysregs@fd020000 {
+            compatible = "cdns,csp-sysregs";
+            gpio-controller;
+            #gpio-cells = <2>;
+            reg = <0x0 0xfd020000 0x0 0x1000>;
+        };
+
+        gic: interrupt-controller@fd100000 {
+            compatible = "arm,gic-v3";
+            #interrupt-cells = <3>;
+            #address-cells = <2>;
+            #size-cells = <2>;
+            ranges;
+            interrupt-controller;
+            reg = <0x0 0xfd100000 0x0 0x10000>,       // GICD - GIC Distributor interface
+                  <0x0 0xfd140000 0x0 0xC0000>;       // GICR - GIC Redistributors (RD_base + SGI_base)
+            interrupts = <1 9 4>;
+
+            gic-its@fd120000 {
+                compatible = "arm,gic-v3-its";
+                msi-controller;
+                reg = <0x0 0xfd120000 0x0 0x20000>;
+            };
+        };
+
+        timer {
+            compatible = "arm,armv8-timer";
+            interrupts = <1 13 0x8>, // Secure
+                     <1 14 0x8>, // Non secure
+                     <1 11 0x8>, // Virtual timer
+                     <1 12 0x8>; // Hypervisor
+
+            clock-frequency = <100000000>;
+        };
+
+        uart0: uart@fd000000 {
+            compatible = "xlnx,xuartps", "cdns,uart-r1p8";
+            reg = <0x0 0xfd000000 0x0 0x1000>;
+            interrupts = <0 0 0>;
+            interrupt-parent = <&gic>;
+            clocks = <&sysclock>, <&sysclock>;
+            clock-names = "uart_clk", "pclk";
+        };
+
+    };
+
+};
+
+&uart0 {
+    u-boot,dm-pre-reloc;
+    status = "okay";
+};
