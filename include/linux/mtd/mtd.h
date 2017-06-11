@@ -577,16 +577,4 @@ static inline int mtd_is_bitflip_or_eccerr(int err) {
 
 unsigned mtd_mmap_capabilities(struct mtd_info *mtd);
 
-#ifdef CONFIG_MTD_CMDLINE_PARTS
-int mtdpart_parse_cmdline_fmt(const char *def, struct mtd_partition **parts,
-			      int *nparts);
-#else
-static inline int mtdpart_parse_cmdline_fmt(const char *def,
-					    struct mtd_partition **parts,
-					    int *nparts)
-{
-	return -ENOTSUPP;
-}
-#endif
-
 #endif /* __MTD_MTD_H__ */
