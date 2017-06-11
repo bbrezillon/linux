@@ -92,8 +92,8 @@ static int cmdline_parsed;
  * is allocated upon the last definition being found. At that point the
  * syntax has been verified ok.
  */
-static struct mtd_partition * newpart(char *s,
-				      char **retptr,
+static struct mtd_partition * newpart(const char *s,
+				      const char **retptr,
 				      int *num_parts,
 				      int this_part,
 				      unsigned char **extra_mem_ptr,
@@ -101,7 +101,8 @@ static struct mtd_partition * newpart(char *s,
 {
 	struct mtd_partition *parts;
 	unsigned long long size, offset = OFFSET_CONTINUOUS;
-	char *name;
+	const char *name;
+	char *new_s;
 	int name_len;
 	unsigned char *extra_mem;
 	char delim;
@@ -113,11 +114,12 @@ static struct mtd_partition * newpart(char *s,
 		size = SIZE_REMAINING;
 		s++;
 	} else {
-		size = memparse(s, &s);
+		size = memparse(s, &new_s);
 		if (!size) {
 			pr_err("partition has size 0\n");
 			return ERR_PTR(-EINVAL);
 		}
+		s = new_s;
 	}
 
 	/* fetch partition name and flags */
@@ -127,7 +129,8 @@ static struct mtd_partition * newpart(char *s,
 	/* check for offset */
 	if (*s == '@') {
 		s++;
-		offset = memparse(s, &s);
+		offset = memparse(s, &new_s);
+		s = new_s;
 	}
 
 	/* now look for name */
@@ -172,10 +175,12 @@ static struct mtd_partition * newpart(char *s,
 			return ERR_PTR(-EINVAL);
 		}
 		/* more partitions follow, parse them */
-		parts = newpart(s + 1, &s, num_parts, this_part + 1,
+		parts = newpart(s + 1, retptr, num_parts, this_part + 1,
 				&extra_mem, extra_mem_size);
 		if (IS_ERR(parts))
 			return parts;
+
+		s = *retptr;
 	} else {
 		/* this is the last partition: allocate space for all */
 		int alloc_size;
@@ -216,10 +221,23 @@ static struct mtd_partition * newpart(char *s,
 	return parts;
 }
 
+int mtdpart_parse_cmdline_fmt(const char *def, struct mtd_partition **parts,
+			      int *nparts)
+{
+	const char *retptr;
+
+	*parts = newpart(def, &retptr, nparts, 0, NULL, 0);
+	if (IS_ERR(*parts))
+		return PTR_ERR(parts);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(mtdpart_parse_cmdline_fmt);
+
 /*
  * Parse the command line.
  */
-static int mtdpart_setup_real(char *s)
+static int mtdpart_setup_real(const char *s)
 {
 	cmdline_parsed = 1;
 
@@ -228,7 +246,7 @@ static int mtdpart_setup_real(char *s)
 		struct cmdline_mtd_partition *this_mtd;
 		struct mtd_partition *parts;
 		int mtd_id_len, num_parts;
-		char *p, *mtd_id;
+		const char *p, *mtd_id;
 
 		mtd_id = s;
 
