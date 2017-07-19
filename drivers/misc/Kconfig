@@ -4,6 +4,12 @@
 
 menu "Misc devices"
 
+config CDNS_DUMMY_I3C_DRV
+	tristate "Cadence dummy I3C driver"
+	depends on I3C
+	help
+	  Cadence dummy I3C driver. For testing purpose.
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
