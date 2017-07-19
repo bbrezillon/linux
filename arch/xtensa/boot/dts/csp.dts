@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /dts-v1/;
 
+#include <dt-bindings/i3c/i3c.h>
+
 / {
 	compatible = "cdns,xtensa-xtfpga";
 	#address-cells = <1>;
@@ -43,6 +45,12 @@
 			compatible = "fixed-clock";
 			clock-frequency = <80000000>;
 		};
+
+		i3csysclock: i3csysclock {
+			#clock-cells = <0>;
+			compatible = "fixed-clock";
+			clock-frequency = <50000000>;
+		};
 	};
 
 	soc {
@@ -76,7 +84,7 @@
 			compatible = "cdns,zynqmp-gem";
 			reg = <0x0d030000 0x1000>;
 			interrupts = <1 0>;
-			mac-address = [ 00 47 45 4D 30 30 ];
+			mac-address = [ 00 47 45 4D 30 31 ];
 			clocks = <&coreclock>, <&coreclock>;
 			clock-names = "pclk", "hclk";
 			#address-cells = <1>;
@@ -91,11 +99,81 @@
 			};
 		};
 
-		i2c0: i2c@0d010000 {
+		i3c_mst0: i3c-master@0d040000 {
+			compatible = "cdns,i3c-master";
+			clocks = <&coreclock>, <&i3csysclock>;
+			clock-names = "pclk", "sysclk";
+			interrupts = <3 0>;
+			reg = <0x0d040000 0x1000>;
+			#address-cells = <3>;
+			#size-cells = <0>;
+
+			status = "okay";
+			i2c-scl-frequency = <100000>;
+
+			nunchuk: nunchuk@52 {
+				compatible = "nintendo,nunchuk";
+				reg = <I2C_DEV(0x52, 0x10)>;
+			};
+
+			gpio-controller@68,1c9,0 {
+/*
+				reg = <I3C_DEV_WITH_STATIC_ADDR(0x68, 0x1c9,
+								0x0, 0x0, 0x0)>;
+*/
+				reg = <I3C_DEV(0x1c9, 0x13, 0x3, 0x3)>;
+				assigned-address = <0x24>;
+			};
+		};
+
+		i3c_slv0: i3c-slave@0d060000 {
+			compatible = "cdns,i3c-slave";
+			clocks = <&coreclock>, <&i3csysclock>;
+			clock-names = "pclk", "sysclk";
+			interrupts = <8 0>;
+			reg = <0x0d060000 0x1000>;
+		};
+
+		i3c_mst1: i3c-master@0d070000 {
+			compatible = "cdns,i3c-master";
+			clocks = <&coreclock>, <&i3csysclock>;
+			clock-names = "pclk", "sysclk";
+			interrupts = <4 0>;
+			reg = <0x0d070000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			i2c-bus {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				clock-frequency = <400000>;
+			};
+		};
+
+		i3c_mst2: i3c-master@0d080000 {
+			compatible = "cdns,i3c-master";
+			clocks = <&coreclock>, <&i3csysclock>;
+			clock-names = "pclk", "sysclk";
+			interrupts = <5 0>;
+			reg = <0x0d080000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			i2c-bus {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				clock-frequency = <400000>;
+			};
+		};
+
+		i2c0: i2c@0d090000 {
 			compatible = "cdns,i2c-r1p14";
-			clocks = <&coreclock>;
+			clocks = <&coreclock>, <&i3csysclock>;
+			clock-names = "pclk", "sysclk";
 			interrupts = <2 0>;
-			reg = <0x0d010000 0x1000>;
+			reg = <0x0d090000 0x1000>;
 			clock-frequency = <400000>;
 			#address-cells = <1>;
 			#size-cells = <0>;
