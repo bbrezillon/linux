@@ -29,7 +29,6 @@
 #include <linux/mutex.h>
 #include <linux/pm_qos.h>
 #include <linux/sizes.h>
-#include <linux/spi/spi.h>
 
 /* Controller needs driver to swap endian */
 #define QUADSPI_QUIRK_SWAP_ENDIAN	(1 << 0)
@@ -177,7 +176,6 @@
 #define LUT_PAD1		0
 #define LUT_PAD2		1
 #define LUT_PAD4		2
-#define LUT_PAD(x)		(fls(x) - 1)
 
 /* Oprands for the LUT register. */
 #define ADDR24BIT		0x18
@@ -207,7 +205,6 @@
 #define SEQID_RDCR		9
 #define SEQID_EN4B		10
 #define SEQID_BRWR		11
-#define SEQID_DYN		15
 
 #define QUADSPI_MIN_IOMAP SZ_4M
 
@@ -353,106 +350,6 @@ static inline void fsl_qspi_lock_lut(struct fsl_qspi *q)
 {
 	qspi_writel(q, QUADSPI_LUTKEY_VALUE, q->iobase + QUADSPI_LUTKEY);
 	qspi_writel(q, QUADSPI_LCKER_LOCK, q->iobase + QUADSPI_LCKCR);
-}
-
-struct fsl_qspi_seq {
-	u32 lut[4];
-	u8 nentries;
-};
-
-static int fsl_qspi_seq_add_ins(struct fsl_qspi_seq *seq, u8 ins, u8 pad,
-				u8 operand)
-{
-	u32 val = ((u32)ins << 10) | ((u32)pad << 8) | operand;
-
-	if (seq->nentries >= 7)
-		return -EINVAL;
-
-	seq->lut[seq->nentries / 2] |= val << (seq->nentries % 2);
-	seq->nentries++;
-
-	return 0;
-}
-
-static int fsl_qspi_prepare_lut_for_op(struct fsl_qspi *q,
-				       const struct spi_mem_op *op,
-				       unsigned int seqid)
-{
-	struct fsl_qspi_seq seq = { };
-	int i, ret = 0;
-
-	ret = fsl_qspi_seq_add_ins(&seq, LUT_CMD, LUT_PAD(op->cmd.buswidth),
-				   op->cmd.opcode);
-	if (ret)
-		return ret;
-
-	/*
-	 * For unknown reasons, when there's less than 3 address cycles the
-	 * ADDR instruction does not work. Use a sequence of MODE instructions
-	 * to make it work in all cases.
-	 */
-	for (i = 0; i < op->addr.nbytes; i++) {
-		ret = fsl_qspi_seq_add_ins(&seq, LUT_MODE,
-					   LUT_PAD(op->addr.buswidth),
-					   op->addr.buf[i]);
-		if (ret)
-			return ret;
-	}
-
-	if (op->dummy.nbytes) {
-		ret = fsl_qspi_seq_add_ins(&seq, LUT_DUMMY,
-					   LUT_PAD(op->dummy.buswidth),
-					   op->dummy.nbytes * 8 /
-					   op->dummy.buswidth);
-		if (ret)
-			return ret;
-	}
-
-	if (op->data.nbytes) {
-		ret = fsl_qspi_seq_add_ins(&seq,
-					   op->data.dir == SPI_MEM_DATA_IN ?
-					   LUT_FSL_READ : LUT_FSL_WRITE,
-					   LUT_PAD(op->data.buswidth), 0);
-		if (ret)
-			return ret;
-	}
-
-	fsl_qspi_unlock_lut(q);
-	for (i = 0; i < ARRAY_SIZE(seq.lut); i++)
-		qspi_writel(q, seq.lut[i],
-			    q->iobase + QUADSPI_LUT(i + (seqid * 4)));
-        fsl_qspi_lock_lut(q);
-
-	return 0;
-}
-
-static int fsl_qspi_exec_op(struct fsl_qspi *q,
-			    const struct spi_mem_op *op)
-{
-	int ret;
-
-	ret = fsl_qspi_prepare_lut_for_op(q, op, SEQID_DYN);
-	if (ret)
-		return ret;
-
-	/* save the reg */
-	reg = qspi_readl(q, base + QUADSPI_MCR);
-
-	qspi_writel(q, q->memmap_phy + q->chip_base_addr,
-		    q->iobase + QUADSPI_SFAR);
-	qspi_writel(q, QUADSPI_RBCT_WMRK_MASK | QUADSPI_RBCT_RXBRD_USEIPS,
-		    q->iobase + QUADSPI_RBCT);
-	qspi_writel(q, reg | QUADSPI_MCR_CLR_RXF_MASK, base + QUADSPI_MCR);
-
-	do {
-		reg2 = qspi_readl(q, base + QUADSPI_SR);
-		if (reg2 & (QUADSPI_SR_IP_ACC_MASK | QUADSPI_SR_AHB_ACC_MASK)) {
-			udelay(1);
-			dev_dbg(q->dev, "The controller is busy, 0x%x\n", reg2);
-			continue;
-		}
-		break;
-	} while (1);
 }
 
 static irqreturn_t fsl_qspi_irq_handler(int irq, void *dev_id)
