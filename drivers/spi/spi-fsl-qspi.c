@@ -546,6 +546,77 @@ static void fsl_qspi_select_mem(struct fsl_qspi *q, struct spi_device *spi)
 	q->selected = spi->chip_select;
 }
 
+void fsl_qspi_fill_txfifo(struct fsl_qspi *q,
+				 const struct spi_mem_op *op)
+{
+	void __iomem *base = q->iobase;
+	int i, j;
+
+	if (op->data.nbytes && op->data.dir == SPI_MEM_DATA_OUT) {
+		const u8 *buf = op->data.buf.out;
+
+		for (i = 0; i < op->data.nbytes; i += 4) {
+			u32 val = 0;
+
+			memcpy(&val, buf + i, min_t(unsigned int, op->data.nbytes, 4));
+			if (q->big_endian)
+				val = cpu_to_be32(val);
+
+			/*
+			for (j = 0; j < 4 && j + i < op->data.nbytes; j++)
+				val |= buf[i + j] << (j * 8);
+			*/
+
+			qspi_writel(q, val, base + QUADSPI_TBDR);
+		}
+		for (; i < ALIGN(op->data.nbytes, 64); i += 4)
+			qspi_writel(q, 0, base + QUADSPI_TBDR);
+	}
+}
+
+void fsl_qspi_read_rxfifo(struct fsl_qspi *q,
+			  const struct spi_mem_op *op)
+{
+	void __iomem *base = q->iobase;
+	int i, j;
+	u8 *buf = op->data.buf.in;
+
+	for (i = 0; i < op->data.nbytes; i += 4) {
+		u32 val = qspi_readl(q, base + QUADSPI_RBDR(i / 4));
+
+		for (j = 0; j < 4 && j + i < op->data.nbytes; j++) {
+			buf[i + j] = val >> (j * 8);
+		}
+	}
+}
+
+int fsl_qspi_do_op(struct fsl_qspi *q, const struct spi_mem_op *op)
+{
+	void __iomem *base = q->iobase;
+	int err, i, j;
+	u32 val;
+
+	init_completion(&q->c);
+
+	/*
+	 * Always start the sequence at index 0 since we update the LUT at
+	 * each exec_op() call. And no need to specify a DATA len, since it's
+	 * already been specified in the LUT.
+	 */
+	qspi_writel(q, op->data.nbytes | (15 << 24), base + QUADSPI_IPCR);
+
+	/* Wait for the interrupt. */
+	if (!wait_for_completion_timeout(&q->c, msecs_to_jiffies(1000)))
+		err = -ETIMEDOUT;
+	else
+		err = 0;
+
+	if (!err && op->data.nbytes && op->data.dir == SPI_MEM_DATA_IN)
+		fsl_qspi_read_rxfifo(q, op);
+
+	return err;
+}
+
 static int fsl_qspi_exec_op(struct spi_mem *mem,
 			    const struct spi_mem_op *op)
 {
@@ -604,46 +675,8 @@ static int fsl_qspi_exec_op(struct spi_mem *mem,
 	qspi_writel(q, 0x11, base + QUADSPI_SPTRCLR);
 	fsl_qspi_prepare_lut(q, op);
 
-	if (op->data.nbytes && op->data.dir == SPI_MEM_DATA_OUT) {
-		const u8 *buf = op->data.buf.out;
-
-		for (i = 0; i < op->data.nbytes; i += 4) {
-			val = 0;
-			for (j = 0; j < 4 && j + i < op->data.nbytes; j++)
-				val |= buf[i + j] << (j * 8);
-
-			qspi_writel(q, val, base + QUADSPI_TBDR);
-		}
-		for (; i < ALIGN(op->data.nbytes, 64); i += 4)
-			qspi_writel(q, 0, base + QUADSPI_TBDR);
-	}
-
-	init_completion(&q->c);
-
-	/*
-	 * Always start the sequence at index 0 since we update the LUT at
-	 * each exec_op() call. And no need to specify a DATA len, since it's
-	 * already been specified in the LUT.
-	 */
-	qspi_writel(q, op->data.nbytes | (15 << 24), base + QUADSPI_IPCR);
-
-	/* Wait for the interrupt. */
-	if (!wait_for_completion_timeout(&q->c, msecs_to_jiffies(1000)))
-		err = -ETIMEDOUT;
-	else
-		err = 0;
-
-	if (!err && op->data.nbytes && op->data.dir == SPI_MEM_DATA_IN) {
-		u8 *buf = op->data.buf.in;
-
-		for (i = 0; i < op->data.nbytes; i += 4) {
-			val = qspi_readl(q, base + QUADSPI_RBDR(i / 4));
-
-			for (j = 0; j < 4 && j + i < op->data.nbytes; j++) {
-				buf[i + j] = val >> (j * 8);
-			}
-		}
-	}
+	fsl_qspi_fill_txfifo(q, op);
+	err = fsl_qspi_do_op(q, op);
 
 out:
 //	fsl_qspi_clk_disable_unprep(q);
