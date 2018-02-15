@@ -283,6 +283,8 @@ struct fsl_qspi {
 	bool big_endian;
 	struct mutex lock;
 	struct pm_qos_request pm_qos_req;
+	int selected;
+	u32 lut[4];
 };
 
 static inline int needs_swap_endian(struct fsl_qspi *q)
@@ -316,7 +318,7 @@ static void qspi_writel(struct fsl_qspi *q, u32 val, void __iomem *addr)
 	if (q->big_endian)
 		iowrite32be(val, addr);
 	else
-		iowrite32(val, addr);
+		writel_relaxed(val, addr);
 }
 
 static u32 qspi_readl(struct fsl_qspi *q, void __iomem *addr)
@@ -324,7 +326,7 @@ static u32 qspi_readl(struct fsl_qspi *q, void __iomem *addr)
 	if (q->big_endian)
 		return ioread32be(addr);
 	else
-		return ioread32(addr);
+		return readl_relaxed(addr);
 }
 
 /*
@@ -513,9 +515,8 @@ static void fsl_qspi_select_mem(struct fsl_qspi *q, struct spi_device *spi)
 	void __iomem *base = q->iobase;
 	unsigned long rate = spi->max_speed_hz;
 	int ret, i;
-	static bool selected = false;
 
-	if (selected)
+	if (q->selected == spi->chip_select)
 		return;
 
 	for (i = 0; i < 4; i++) {
@@ -542,7 +543,7 @@ static void fsl_qspi_select_mem(struct fsl_qspi *q, struct spi_device *spi)
 	if (ret)
 		return;
 
-	selected = true;
+	q->selected = spi->chip_select;
 }
 
 static int fsl_qspi_exec_op(struct spi_mem *mem,
@@ -554,7 +555,7 @@ static int fsl_qspi_exec_op(struct spi_mem *mem,
 	u32 val;
 
 	mutex_lock(&q->lock);
-	fsl_qspi_clk_prep_enable(q);
+//	fsl_qspi_clk_prep_enable(q);
 	do {
 		u32 status;
 
@@ -645,7 +646,7 @@ static int fsl_qspi_exec_op(struct spi_mem *mem,
 	}
 
 out:
-	fsl_qspi_clk_disable_unprep(q);
+//	fsl_qspi_clk_disable_unprep(q);
 	mutex_unlock(&q->lock);
 
 	return err;
@@ -852,6 +853,7 @@ static int fsl_qspi_probe(struct platform_device *pdev)
 
 	mutex_init(&q->lock);
 
+	q->selected = -1;
 	ctlr->bus_num = -1;
 	ctlr->mem_ops = &fsl_qspi_mem_ops;
 
@@ -868,7 +870,7 @@ static int fsl_qspi_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_destroy_mutex;
 
-	fsl_qspi_clk_disable_unprep(q);
+//	fsl_qspi_clk_disable_unprep(q);
 
 	return 0;
 
@@ -911,13 +913,14 @@ static int fsl_qspi_resume(struct platform_device *pdev)
 	int ret;
 	struct fsl_qspi *q = platform_get_drvdata(pdev);
 
+	q->selected = -1;
 	ret = fsl_qspi_clk_prep_enable(q);
 	if (ret)
 		return ret;
 
 	fsl_qspi_default_setup(q);
 
-	fsl_qspi_clk_disable_unprep(q);
+//	fsl_qspi_clk_disable_unprep(q);
 
 	return 0;
 }
