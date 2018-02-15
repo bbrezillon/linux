@@ -318,7 +318,7 @@ static void qspi_writel(struct fsl_qspi *q, u32 val, void __iomem *addr)
 	if (q->big_endian)
 		iowrite32be(val, addr);
 	else
-		writel_relaxed(val, addr);
+		iowrite32(val, addr);
 }
 
 static u32 qspi_readl(struct fsl_qspi *q, void __iomem *addr)
@@ -326,7 +326,7 @@ static u32 qspi_readl(struct fsl_qspi *q, void __iomem *addr)
 	if (q->big_endian)
 		return ioread32be(addr);
 	else
-		return readl_relaxed(addr);
+		return ioread32(addr);
 }
 
 /*
