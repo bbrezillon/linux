@@ -898,6 +898,17 @@ config GPIO_TS4900
 
 endmenu
 
+menu "I3C GPIO expanders"
+	depends on I3C
+
+config GPIO_CDNS_I3C
+	tristate "Cadence I3C GPIO expander"
+	select GPIOLIB_IRQCHIP
+	help
+	  Say yes here to enabled the driver for Cadence I3C GPIO expander.
+
+endmenu
+
 menu "MFD GPIO expanders"
 
 config GPIO_ADP5520
