@@ -9,6 +9,9 @@
 #include <linux/i3c/device.h>
 #include <linux/module.h>
 
+#include <linux/gpio/consumer.h>
+#include <linux/interrupt.h>
+
 #define OVR		0x0
 #define IVR		0x1
 #define DIR_MODE	0x2
@@ -49,6 +52,9 @@ static int cdns_i3c_gpio_read_reg(struct cdns_i3c_gpio *gpioc, u8 reg,
 	if (!scratchbuf)
 		return -ENOMEM;
 
+	pr_info("%s:%i reading reg[%02x]\n", __func__, __LINE__, reg);
+	reg += 4;
+
 	scratchbuf[0] = reg;
 	xfers[0].data.out = scratchbuf;
 	xfers[0].len = 1;
@@ -61,6 +67,7 @@ static int cdns_i3c_gpio_read_reg(struct cdns_i3c_gpio *gpioc, u8 reg,
 	if (!ret)
 		*val = *scratchbuf;
 
+	pr_info("%s:%i reg[%02x] = %02x\n", __func__, __LINE__, reg - 4, *val);
 	kfree(scratchbuf);
 
 	return ret;
@@ -83,6 +90,9 @@ static int cdns_i3c_gpio_write_reg(struct cdns_i3c_gpio *gpioc, u8 reg,
 	if (!scratchbuf)
 		return -ENOMEM;
 
+	pr_info("%s:%i writing reg[%02x] = %02x\n", __func__, __LINE__, reg, val);
+	reg += 4;
+
 	scratchbuf[0] = reg;
 	scratchbuf[1] = val;
 	xfers[0].data.out = scratchbuf;
@@ -93,6 +103,7 @@ static int cdns_i3c_gpio_write_reg(struct cdns_i3c_gpio *gpioc, u8 reg,
 	ret = i3c_device_do_priv_xfers(gpioc->i3cdev, xfers,
 				       ARRAY_SIZE(xfers));
 
+	pr_info("%s:%i writing reg[%02x] = %02x\n", __func__, __LINE__, reg, val);
 	kfree(scratchbuf);
 
 	return ret;
@@ -185,6 +196,7 @@ static int cdns_i3c_gpio_get_multiple(struct gpio_chip *g,
 
 	*bits = ivr & *mask & gpioc->dir;
 	*bits |= gpioc->ovr & *mask & ~gpioc->dir;
+	pr_info("%s:%i ivr = %02x ovr = %02x dir = %02x mask = %08lx bits = %08lx\n", __func__, __LINE__, ivr, gpioc->ovr, gpioc->dir, *mask, *bits);
 
 	return 0;
 }
@@ -297,6 +309,77 @@ static int cdns_i3c_gpio_irq_set_type(struct irq_data *data, unsigned int type)
 	return 0;
 }
 
+static ssize_t ivr_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct i3c_device *i3cdev = dev_to_i3cdev(dev);
+	struct cdns_i3c_gpio *gpioc = i3cdev_get_drvdata(i3cdev);
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	ret = cdns_i3c_gpio_write_reg(gpioc, IVR, val);
+	if (ret)
+		return ret;
+
+	return count;
+}
+static const DEVICE_ATTR_WO(ivr);
+
+static ssize_t isr_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct i3c_device *i3cdev = dev_to_i3cdev(dev);
+	struct cdns_i3c_gpio *gpioc = i3cdev_get_drvdata(i3cdev);
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	ret = cdns_i3c_gpio_write_reg(gpioc, ISR, val);
+	if (ret)
+		return ret;
+
+	return count;
+}
+static const DEVICE_ATTR_WO(isr);
+
+static irqreturn_t dummy_handler(int irq, void *data)
+{
+	pr_info("%s:%i\n", __func__, __LINE__);
+
+	return IRQ_HANDLED;
+}
+
+static void crappy_init(struct i3c_device *i3cdev)
+{
+	struct device *parent = i3cdev_to_dev(i3cdev);
+	struct cdns_i3c_gpio *gpioc = i3cdev_get_drvdata(i3cdev);
+	struct gpio_desc *gpiod;
+	int irq, ret;
+
+	pr_info("%s:%i\n", __func__, __LINE__);
+	device_create_file(parent, &dev_attr_ivr);
+	device_create_file(parent, &dev_attr_isr);
+
+	pr_info("%s:%i\n", __func__, __LINE__);
+	gpiod = gpiochip_request_own_desc(&gpioc->gpioc, 7, "i3c-int-pin");
+	if (IS_ERR(gpiod))
+		return;
+
+	pr_info("%s:%i\n", __func__, __LINE__);
+	gpiod_direction_input(gpiod);
+	irq = gpiod_to_irq(gpiod);
+	pr_info("%s:%i irq = %d\n", __func__, __LINE__, irq);
+	ret = request_any_context_irq(irq, dummy_handler, 0, "toto", gpioc);
+	pr_info("%s:%i ret = %d\n", __func__, __LINE__, ret);
+}
+
 static int cdns_i3c_gpio_probe(struct i3c_device *i3cdev)
 {
 	struct cdns_i3c_gpio *gpioc;
@@ -376,6 +459,7 @@ static int cdns_i3c_gpio_probe(struct i3c_device *i3cdev)
 	if (ret)
 		goto err_free_ibi;
 
+	crappy_init(i3cdev);
 	return 0;
 
 err_free_ibi:
