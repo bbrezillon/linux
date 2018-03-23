@@ -51,6 +51,59 @@ int i3c_device_do_priv_xfers(struct i3c_device *dev,
 EXPORT_SYMBOL_GPL(i3c_device_do_priv_xfers);
 
 /**
+ * i3c_device_send_hdr_cmds() - send HDR commands to a specific device
+ *
+ * @dev: device to which these commands should be sent
+ * @cmds: array of commands
+ * @ncmds: number of commands
+ *
+ * Send one or several HDR commands to @dev.
+ *
+ * This function can sleep and thus cannot be called in atomic context.
+ *
+ * Return: 0 in case of success, a negative error core otherwise.
+ */
+int i3c_device_send_hdr_cmds(struct i3c_device *dev,
+			     struct i3c_hdr_cmd *cmds,
+			     int ncmds)
+{
+	struct i3c_master_controller *master;
+	enum i3c_hdr_mode mode;
+	int ret, i;
+
+	if (ncmds < 1)
+		return 0;
+
+	if (!cmds)
+		return -EINVAL;
+
+	mode = cmds[0].mode;
+	for (i = 1; i < ncmds; i++) {
+		if (mode != cmds[i].mode)
+			return -EINVAL;
+	}
+
+	master = i3c_device_get_master(dev);
+	if (!master)
+		return -EINVAL;
+
+	if (!master->ops->send_hdr_cmds)
+		return -ENOTSUPP;
+
+	for (i = 0; i < ncmds; i++) {
+		if (!(master->this->info.hdr_cap & BIT(cmds->mode)))
+			return -ENOTSUPP;
+	}
+
+	i3c_bus_normaluse_lock(master->bus);
+	ret = master->ops->send_hdr_cmds(dev, cmds, ncmds);
+	i3c_bus_normaluse_unlock(master->bus);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(i3c_device_send_hdr_cmds);
+
+/**
  * i3c_device_get_info() - get I3C device information
  *
  * @dev: device we want information on
