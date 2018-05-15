@@ -1,0 +1,27 @@
+SPI NAND flash
+
+Required properties:
+- compatible: should be "spi-nand"
+- reg: should encode the chip-select line used to access the NAND chip
+
+Optional properties
+- spi-max-frequency: maximum frequency of the SPI bus the chip can operate at.
+		     This should encode board limitations (i.e. max freq can't
+		     be achieved due to crosstalk on IO lines).
+		     When unspecified, the driver assumes the chip can run at
+		     the max frequency defined in the spec (information
+		     extracted chip detection time).
+- spi-tx-bus-width: The bus width (number of data wires) that is used for MOSI.
+		    Only encodes the board constraints (i.e. when not all IO
+		    signals are routed on the board). Device constraints are
+		    extracted when detecting the chip, and controller
+		    constraints are exposed by the SPI mem controller. If this
+		    property is missing that means no constraint at the board
+		    level.
+- spi-rx-bus-width: The bus width (number of data wires) that is used for MISO.
+		    Only encodes the board constraints (i.e. when not all IO
+		    signals are routed on the board). Device constraints are
+		    extracted when detecting the chip, and controller
+		    constraints are exposed by the SPI mem controller. If this
+		    property is missing that means no constraint at the board
+		    level.
