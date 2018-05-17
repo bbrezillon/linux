@@ -1,0 +1,5 @@
+config CLK_ZYNQ_CLK_WIZARD
+	tristate "Xilinx clocking wizard driver"
+	depends on ARCH_ZYNQ || COMPILE_TEST
+	help
+	  Enable the driver for Xilinx clocking wizard IP.

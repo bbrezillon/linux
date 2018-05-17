@@ -339,5 +339,6 @@ source "drivers/clk/tegra/Kconfig"
 source "drivers/clk/ti/Kconfig"
 source "drivers/clk/uniphier/Kconfig"
 source "drivers/clk/zynqmp/Kconfig"
+source "drivers/clk/zynq/Kconfig"
 
 endmenu
