@@ -984,7 +984,7 @@ static int spinand_init(struct spinand_device *spinand)
 		goto err_free_bufs;
 	}
 
-	/* After power up, all blocks are locked, so unlock it here. */
+	/* After power up, all blocks are locked, so unlock them here. */
 	for (i = 0; i < nand->memorg.ntargets; i++) {
 		spinand_select_target(spinand, i);
 		spinand_lock_block(spinand, BL_ALL_UNLOCKED);
