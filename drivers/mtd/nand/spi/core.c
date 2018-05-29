@@ -184,27 +184,20 @@ static int spinand_init_cfg_cache(struct spinand_device *spinand)
 	return 0;
 }
 
-static void spinand_init_quad_enable(struct spinand_device *spinand)
+static int spinand_init_quad_enable(struct spinand_device *spinand)
 {
 	bool enable = false;
-	u8 cfg = 0;
 
 	if (!(spinand->flags & SPINAND_HAS_QE_BIT))
-		return;
+		return 0;
 
 	if (spinand->op_templates.read_cache->data.buswidth == 4 ||
 	    spinand->op_templates.write_cache->data.buswidth == 4 ||
 	    spinand->op_templates.update_cache->data.buswidth == 4)
 		enable = true;
 
-	WARN_ON(spinand_get_cfg(spinand, &cfg));
-
-	if (enable)
-		cfg |= CFG_QUAD_ENABLE;
-	else
-		cfg &= ~CFG_QUAD_ENABLE;
-
-	WARN_ON(spinand_set_cfg(spinand, cfg));
+	return spinand_upd_cfg(spinand, CFG_QUAD_ENABLE,
+			       enable ? CFG_QUAD_ENABLE : 0);
 }
 
 static void spinand_ecc_enable(struct spinand_device *spinand,
@@ -874,8 +867,6 @@ int spinand_match_and_init(struct spinand_device *spinand,
 					       info->op_variants.update_cache);
 		spinand->op_templates.update_cache = op;
 
-		spinand_init_quad_enable(spinand);
-
 		return 0;
 	}
 
@@ -978,6 +969,10 @@ static int spinand_init(struct spinand_device *spinand)
 	spinand->oobbuf = spinand->databuf + nanddev_page_size(nand);
 
 	ret = spinand_init_cfg_cache(spinand);
+	if (ret)
+		goto err_free_bufs;
+
+	ret = spinand_init_quad_enable(spinand);
 	if (ret)
 		goto err_free_bufs;
 
