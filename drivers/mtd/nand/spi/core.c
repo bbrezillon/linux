@@ -203,16 +203,8 @@ static int spinand_init_quad_enable(struct spinand_device *spinand)
 static void spinand_ecc_enable(struct spinand_device *spinand,
 			       bool enable)
 {
-	u8 cfg = 0;
-
-	WARN_ON(spinand_get_cfg(spinand, &cfg));
-
-	if (enable)
-		cfg |= CFG_ECC_ENABLE;
-	else
-		cfg &= ~CFG_ECC_ENABLE;
-
-	WARN_ON(spinand_set_cfg(spinand, cfg));
+	WARN_ON(spinand_upd_cfg(spinand, CFG_ECC_ENABLE,
+				enable ? CFG_ECC_ENABLE : 0));
 }
 
 static int spinand_write_enable_op(struct spinand_device *spinand)
