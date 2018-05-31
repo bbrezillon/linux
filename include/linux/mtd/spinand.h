@@ -299,6 +299,11 @@ struct spinand_info {
 		__VA_ARGS__						\
 	}
 
+struct spinand_dirmap {
+	struct spi_mem_dirmap_desc *write;
+	struct spi_mem_dirmap_desc *read;
+};
+
 /**
  * struct spinand_device - SPI NAND device instance
  * @base: NAND device instance
@@ -337,6 +342,8 @@ struct spinand_device {
 		const struct spi_mem_op *write_cache;
 		const struct spi_mem_op *update_cache;
 	} op_templates;
+
+	struct spinand_dirmap *dirmaps;
 
 	int (*select_target)(struct spinand_device *spinand,
 			     unsigned int target);
