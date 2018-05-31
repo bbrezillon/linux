@@ -620,11 +620,10 @@ static bool spinand_isbad(struct nand_device *nand, const struct nand_pos *pos)
 		.oobbuf.in = spinand->oobbuf,
 		.mode = MTD_OPS_RAW,
 	};
-	int ret;
 
 	memset(spinand->oobbuf, 0, 2);
 	spinand_select_target(spinand, pos->target);
-	ret = spinand_read_page(spinand, &req, false);
+	spinand_read_page(spinand, &req, false);
 	if (spinand->oobbuf[0] != 0xff || spinand->oobbuf[1] != 0xff)
 		return true;
 
