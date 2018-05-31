@@ -1002,7 +1002,7 @@ static int spinand_init(struct spinand_device *spinand)
 
 	ret = nanddev_init(nand, &spinand_ops, THIS_MODULE);
 	if (ret)
-		goto err_free_bufs;
+		goto err_manuf_cleanup;
 
 	/*
 	 * Right now, we don't support ECC, so let the whole oob
@@ -1029,6 +1029,9 @@ static int spinand_init(struct spinand_device *spinand)
 err_cleanup_nanddev:
 	nanddev_cleanup(nand);
 
+err_manuf_cleanup:
+	spinand_manufacturer_cleanup(spinand);
+
 err_free_bufs:
 	kfree(spinand->databuf);
 	kfree(spinand->scratchbuf);
@@ -1039,8 +1042,8 @@ static void spinand_cleanup(struct spinand_device *spinand)
 {
 	struct nand_device *nand = &spinand->base;
 
-	spinand_manufacturer_cleanup(spinand);
 	nanddev_cleanup(nand);
+	spinand_manufacturer_cleanup(spinand);
 	kfree(spinand->databuf);
 	kfree(spinand->scratchbuf);
 }
