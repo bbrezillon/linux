@@ -183,6 +183,150 @@ static void mxic_spi_hw_init(struct mxic_spi *mxic)
 	       mxic->regs + HC_CFG);
 }
 
+static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
+			      void *rxbuf, unsigned int len)
+{
+	unsigned int pos = 0;
+
+	while (pos < len) {
+		unsigned int nbytes = len - pos;
+		u32 data = 0xffffffff;
+		u32 sts;
+		int ret;
+
+		if (nbytes > 4)
+			nbytes = 4;
+
+		if (txbuf)
+			memcpy(&data, txbuf + pos, nbytes);
+
+		ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
+					 sts & INT_TX_EMPTY, 0, USEC_PER_SEC);
+		if (ret)
+			return ret;
+
+
+		writel(data, mxic->regs + TXD(nbytes % 4));
+
+		if (rxbuf) {
+			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
+						 sts & INT_TX_EMPTY, 0,
+						 USEC_PER_SEC);
+			if (ret)
+				return ret;
+
+			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
+						 sts & INT_RX_NOT_EMPTY, 0,
+						 USEC_PER_SEC);
+			if (ret)
+				return ret;
+
+			data = readl(mxic->regs + RXD);
+			memcpy(rxbuf + pos, &data, nbytes);
+			WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
+		} else {
+			readl(mxic->regs + RXD);
+		}
+		WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
+
+		pos += nbytes;
+	}
+
+	return 0;
+}
+
+static bool mxic_spi_mem_supports_op(struct spi_mem *mem,
+				     const struct spi_mem_op *op)
+{
+	if (op->data.buswidth > 4 || op->addr.buswidth > 4 ||
+	    op->dummy.buswidth > 4 || op->cmd.buswidth > 4)
+		return false;
+
+	if (op->data.nbytes && op->dummy.nbytes &&
+	    op->data.buswidth != op->dummy.buswidth)
+		return false;
+
+	if (op->addr.nbytes > 7)
+		return false;
+
+	return true;
+}
+
+static int mxic_spi_mem_exec_op(struct spi_mem *mem,
+				const struct spi_mem_op *op)
+{
+	struct mxic_spi *mxic = spi_master_get_devdata(mem->spi->master);
+	int nio = 1, i, ret;
+	u32 ss_ctrl;
+	u8 addr[8];
+
+	if (mem->spi->mode & (SPI_TX_QUAD | SPI_RX_QUAD))
+		nio = 4;
+	else if (mem->spi->mode & (SPI_TX_DUAL | SPI_RX_DUAL))
+		nio = 2;
+
+	writel(HC_CFG_NIO(nio) |
+	       HC_CFG_TYPE(mem->spi->chip_select, HC_CFG_TYPE_SPI_NOR) |
+	       HC_CFG_SLV_ACT(mem->spi->chip_select) | HC_CFG_IDLE_SIO_LVL(1) |
+	       HC_CFG_MAN_CS_EN,
+	       mxic->regs + HC_CFG);
+	writel(HC_EN_BIT, mxic->regs + HC_EN);
+
+	ss_ctrl = OP_CMD_BYTES(1) | OP_CMD_BUSW(fls(op->cmd.buswidth) - 1);
+
+	if (op->addr.nbytes)
+		ss_ctrl |= OP_ADDR_BYTES(op->addr.nbytes) |
+			   OP_ADDR_BUSW(fls(op->addr.buswidth) - 1);
+
+	if (op->dummy.nbytes)
+		ss_ctrl |= OP_DUMMY_CYC(op->addr.nbytes);
+
+	if (op->data.nbytes) {
+		ss_ctrl |= OP_DATA_BUSW(fls(op->data.buswidth) - 1);
+		if (op->data.dir == SPI_MEM_DATA_IN)
+			ss_ctrl |= OP_READ;
+	}
+
+	writel(ss_ctrl, mxic->regs + SS_CTRL(mem->spi->chip_select));
+
+	writel(readl(mxic->regs + HC_CFG) | HC_CFG_MAN_CS_ASSERT,
+	       mxic->regs + HC_CFG);
+
+	ret = mxic_spi_data_xfer(mxic, &op->cmd.opcode, NULL, 1);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < op->addr.nbytes; i++)
+		addr[i] = op->addr.val >> (8 * (op->addr.nbytes - i - 1));
+
+	ret = mxic_spi_data_xfer(mxic, addr, NULL, op->addr.nbytes);
+	if (ret)
+		goto out;
+
+	ret = mxic_spi_data_xfer(mxic, NULL, NULL, op->dummy.nbytes);
+	if (ret)
+		goto out;
+
+	ret = mxic_spi_data_xfer(mxic,
+				 op->data.dir == SPI_MEM_DATA_OUT ?
+				 op->data.buf.out : NULL,
+				 op->data.dir == SPI_MEM_DATA_IN ?
+				 op->data.buf.in : NULL,
+				 op->data.nbytes);
+
+out:
+	writel(readl(mxic->regs + HC_CFG) & ~HC_CFG_MAN_CS_ASSERT,
+	       mxic->regs + HC_CFG);
+	writel(0, mxic->regs + HC_EN);
+
+	return ret;
+}
+
+static const struct spi_controller_mem_ops mxic_spi_mem_ops = {
+	.supports_op = mxic_spi_mem_supports_op,
+	.exec_op = mxic_spi_mem_exec_op,
+};
+
 static void mxic_spi_set_cs(struct spi_device *spi, bool lvl)
 {
 	struct mxic_spi *mxic = spi_master_get_devdata(spi->master);
@@ -206,7 +350,6 @@ static int mxic_spi_transfer_one(struct spi_master *master,
 {
 	struct mxic_spi *mxic = spi_master_get_devdata(master);
 	unsigned int busw = OP_BUSW_1;
-	unsigned int pos = 0;
 	int ret;
 
 	if (t->rx_buf && t->tx_buf) {
@@ -233,48 +376,9 @@ static int mxic_spi_transfer_one(struct spi_master *master,
 	       OP_DATA_BUSW(busw) | (t->rx_buf ? OP_READ : 0),
 	       mxic->regs + SS_CTRL(0));
 
-	WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
-	while (pos < t->len) {
-		unsigned int nbytes = t->len - pos;
-		u32 data = 0xffffffff;
-		u32 sts;
-
-		if (nbytes > 4)
-			nbytes = 4;
-
-		if (t->tx_buf)
-			memcpy(&data, t->tx_buf + pos, nbytes);
-
-		ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
-					 sts & INT_TX_EMPTY, 0, USEC_PER_SEC);
-		if (ret)
-			return ret;
-
-		writel(data, mxic->regs + TXD(nbytes % 4));
-
-		if (t->rx_buf) {
-			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
-						 sts & INT_TX_EMPTY, 0,
-						 USEC_PER_SEC);
-			if (ret)
-				return ret;
-
-			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
-						 sts & INT_RX_NOT_EMPTY, 0,
-						 USEC_PER_SEC);
-			if (ret)
-				return ret;
-
-			data = readl(mxic->regs + RXD);
-			memcpy(t->rx_buf + pos, &data, nbytes);
-			WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
-		} else {
-			readl(mxic->regs + RXD);
-		}
-		WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
-
-		pos += nbytes;
-	}
+	ret = mxic_spi_data_xfer(mxic, t->tx_buf, t->rx_buf, t->len);
+	if (ret)
+		return ret;
 
 	spi_finalize_current_transfer(master);
 
@@ -298,7 +402,7 @@ static void mxic_spi_set_input_delay_dqs(struct mxic_spi *mxic, u8 idly_code)
 int mxic_spi_setup(struct spi_device *spi)
 {
 	struct mxic_spi *mxic = spi_master_get_devdata(spi->master);
-	unsigned long freq = 25000000;
+	unsigned long freq = spi->max_speed_hz;
 	int ret;
 
 	ret = clk_set_rate(mxic->send_clk, freq);
@@ -362,6 +466,7 @@ static int mxic_spi_probe(struct platform_device *pdev)
 
 	master->num_chipselect = 1;
 	master->setup = mxic_spi_setup;
+	master->mem_ops = &mxic_spi_mem_ops;
 
 	master->set_cs = mxic_spi_set_cs;
 	master->transfer_one = mxic_spi_transfer_one;
