@@ -50,6 +50,8 @@
 			compatible = "spi-nand";
 			reg = <0>;
 			spi-max-frequency = <25000000>;
+			spi-tx-bus-width = <4>;
+			spi-rx-bus-width = <4>;
 		};
 	};
 };
