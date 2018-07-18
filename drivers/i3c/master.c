@@ -76,6 +76,7 @@ static int i3c_master_send_ccc_cmd_locked(struct i3c_master_controller *master,
 
 	ret = master->ops->send_ccc_cmd(master, cmd);
 	if (ret) {
+		pr_info("%s:%i err = %d\n", __func__, __LINE__, cmd->err);
 		if (cmd->err != I3C_ERROR_UNKNOWN)
 			return cmd->err;
 
@@ -783,6 +784,7 @@ static int i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 	enum i3c_addr_slot_status status;
 	int ret;
 
+	pr_info("%s:%i old_dyn_addr = %d new_dyn_addr %d\n", __func__, __LINE__, old_dyn_addr, dev->info.dyn_addr);
 	if (dev->info.dyn_addr != old_dyn_addr) {
 		status = i3c_bus_get_addr_slot_status(master->bus,
 						      dev->info.dyn_addr);
@@ -793,6 +795,7 @@ static int i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 					     I3C_ADDR_SLOT_I3C_DEV);
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (master->ops->reattach_i3c_dev) {
 		ret = master->ops->reattach_i3c_dev(dev, old_dyn_addr);
 		if (ret) {
@@ -801,6 +804,7 @@ static int i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 		}
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	return 0;
 }
 
@@ -877,13 +881,17 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 	struct i3c_dev_desc *desc;
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (!master->init_done)
 		return;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_bus_for_each_i3cdev(master->bus, desc) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (desc->dev || !desc->info.dyn_addr)
 			continue;
 
+		pr_info("%s:%i\n", __func__, __LINE__);
 		desc->dev = kzalloc(sizeof(*desc->dev), GFP_KERNEL);
 		if (!desc->dev)
 			continue;
@@ -891,23 +899,31 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 		desc->dev->bus = master->bus;
 		desc->dev->desc = desc;
 		desc->dev->dev.parent = &master->bus->dev;
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (desc == master->this)
 			desc->dev->dev.type = &i3c_master_type;
 		else
 			desc->dev->dev.type = &i3c_device_type;
+		pr_info("%s:%i\n", __func__, __LINE__);
 		desc->dev->dev.bus = &i3c_bus_type;
 		desc->dev->dev.release = i3c_device_release;
+		pr_info("%s:%i\n", __func__, __LINE__);
 		dev_set_name(&desc->dev->dev, "%d-%llx", master->bus->id,
 			     desc->info.pid);
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		if (desc->boardinfo)
 			desc->dev->dev.of_node = desc->boardinfo->of_node;
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		ret = device_register(&desc->dev->dev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (ret)
 			dev_err(master->parent,
 				"Failed to add I3C device (err = %d)\n", ret);
+		pr_info("%s:%i\n", __func__, __LINE__);
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 /**
@@ -929,16 +945,24 @@ int i3c_master_do_daa(struct i3c_master_controller *master)
 {
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_bus_maintenance_lock(master->bus);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = master->ops->do_daa(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_bus_maintenance_unlock(master->bus);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_bus_normaluse_lock(master->bus);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_master_register_new_i3c_devs(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_bus_normaluse_unlock(master->bus);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	return 0;
 }
@@ -1009,26 +1033,37 @@ static void i3c_master_detach_free_devs(struct i3c_master_controller *master)
 	struct i3c_dev_desc *i3cdev, *i3ctmp;
 	struct i2c_dev_desc *i2cdev, *i2ctmp;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	list_for_each_entry_safe(i3cdev, i3ctmp, &master->bus->devs.i3c,
 				 common.node) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		i3c_master_detach_i3c_dev(i3cdev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		if (i3cdev->boardinfo && i3cdev->boardinfo->init_dyn_addr)
 			i3c_bus_set_addr_slot_status(master->bus,
 					i3cdev->boardinfo->init_dyn_addr,
 					I3C_ADDR_SLOT_FREE);
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		i3c_master_free_i3c_dev(i3cdev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	list_for_each_entry_safe(i2cdev, i2ctmp, &master->bus->devs.i2c,
 				 common.node) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		i3c_master_detach_i2c_dev(i2cdev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		i3c_bus_set_addr_slot_status(master->bus,
 					i2cdev->boardinfo->base.addr,
 					I3C_ADDR_SLOT_FREE);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		i3c_master_free_i2c_dev(i2cdev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 /**
@@ -1070,6 +1105,7 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 	struct i2c_dev_desc *i2cdev;
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/*
 	 * First attach all devices with static definitions provided by the
 	 * FW.
@@ -1098,6 +1134,8 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 			goto err_detach_devs;
 		}
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
+
 	list_for_each_entry(i3cboardinfo, &master->boardinfo.i3c, node) {
 		struct i3c_device_info info = {
 			.static_addr = i3cboardinfo->static_addr,
@@ -1126,6 +1164,7 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 			goto err_detach_devs;
 		}
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/*
 	 * Now execute the controller specific ->bus_init() routine, which
@@ -1134,6 +1173,7 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 	ret = master->ops->bus_init(master);
 	if (ret)
 		goto err_detach_devs;
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/*
 	 * The master device should have been instantiated in ->bus_init(),
@@ -1145,44 +1185,56 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
 		ret = -EINVAL;
 		goto err_bus_cleanup;
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/*
 	 * Reset all dynamic address that may have been assigned before
 	 * (assigned by the bootloader for example).
 	 */
 	ret = i3c_master_rstdaa_locked(master, I3C_BROADCAST_ADDR);
+	pr_info("%s:%i ret = %d\n", __func__, __LINE__, ret);
 	if (ret && ret != I3C_ERROR_M2)
 		goto err_bus_cleanup;
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/* Disable all slave events before starting DAA. */
 	ret = i3c_master_disec_locked(master, I3C_BROADCAST_ADDR,
 				      I3C_CCC_EVENT_SIR | I3C_CCC_EVENT_MR |
 				      I3C_CCC_EVENT_HJ);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret && ret != I3C_ERROR_M2)
 		goto err_bus_cleanup;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/*
 	 * Pre-assign dynamic address and retrieve device information if
 	 * needed.
 	 */
 	i3c_bus_for_each_i3cdev(master->bus, i3cdev)
 		i3c_master_pre_assign_dyn_addr(i3cdev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	ret = i3c_master_do_daa(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret)
 		goto err_rstdaa;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	return 0;
 
 err_rstdaa:
 	i3c_master_rstdaa_locked(master, I3C_BROADCAST_ADDR);
 
 err_bus_cleanup:
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (master->ops->bus_cleanup)
 		master->ops->bus_cleanup(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 err_detach_devs:
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_master_detach_free_devs(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	return ret;
 }
@@ -1235,30 +1287,42 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 	bool enable_ibi = false;
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (!master)
 		return -EINVAL;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	newdev = i3c_master_alloc_i3c_dev(master, &info);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (IS_ERR(newdev))
 		return PTR_ERR(newdev);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = i3c_master_attach_i3c_dev(master, newdev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret) {
 		ret = PTR_ERR(newdev);
 		goto err_free_dev;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = i3c_master_retrieve_dev_info(newdev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret)
 		goto err_free_dev;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	olddev = i3c_master_search_i3c_dev_duplicate(newdev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (olddev) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		newdev->boardinfo = olddev->boardinfo;
 		newdev->info.static_addr = olddev->info.static_addr;
 		newdev->dev = olddev->dev;
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (newdev->dev)
 			newdev->dev->desc = newdev;
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		/*
 		 * We need to restore the IBI state too, so let's save the
@@ -1267,27 +1331,41 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 		 * the associated resources have been freed.
 		 */
 		mutex_lock(&olddev->ibi_lock);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (olddev->ibi) {
+			pr_info("%s:%i\n", __func__, __LINE__);
 			ibireq.handler = olddev->ibi->handler;
 			ibireq.max_payload_len = olddev->ibi->max_payload_len;
 			ibireq.num_slots = olddev->ibi->num_slots;
+			pr_info("%s:%i\n", __func__, __LINE__);
 
 			if (olddev->ibi->enabled) {
+				pr_info("%s:%i\n", __func__, __LINE__);
 				enable_ibi = true;
+				pr_info("%s:%i\n", __func__, __LINE__);
 				i3c_dev_disable_ibi_locked(olddev);
+				pr_info("%s:%i\n", __func__, __LINE__);
 			}
 
+			pr_info("%s:%i\n", __func__, __LINE__);
 			i3c_dev_free_ibi_locked(olddev);
+			pr_info("%s:%i\n", __func__, __LINE__);
 		}
 		mutex_unlock(&olddev->ibi_lock);
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		old_dyn_addr = olddev->info.dyn_addr;
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		i3c_master_detach_i3c_dev(olddev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		i3c_master_free_i3c_dev(olddev);
+		pr_info("%s:%i\n", __func__, __LINE__);
 	}
 
+	pr_info("%s:%i old_dyn_addr = %d new_dyn_addr %d\n", __func__, __LINE__, old_dyn_addr, newdev->info.dyn_addr);
 	ret = i3c_master_reattach_i3c_dev(newdev, old_dyn_addr);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret)
 		goto err_detach_dev;
 
@@ -1308,18 +1386,24 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 	else
 		expected_dyn_addr = newdev->info.dyn_addr;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (newdev->info.dyn_addr != expected_dyn_addr) {
 		/*
 		 * Try to apply the expected dynamic address. If it fails, keep
 		 * the address assigned by the master.
 		 */
+		pr_info("%s:%i\n", __func__, __LINE__);
 		ret = i3c_master_setnewda_locked(master,
 						 newdev->info.dyn_addr,
 						 expected_dyn_addr);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (!ret) {
+			pr_info("%s:%i\n", __func__, __LINE__);
 			old_dyn_addr = newdev->info.dyn_addr;
+			pr_info("%s:%i\n", __func__, __LINE__);
 			newdev->info.dyn_addr = expected_dyn_addr;
 			i3c_master_reattach_i3c_dev(newdev, old_dyn_addr);
+			pr_info("%s:%i\n", __func__, __LINE__);
 		} else {
 			dev_err(master->parent,
 				"Failed to assign reserved/old address to device %d%llx",
@@ -1334,9 +1418,12 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 	 * should request the IBI again instead of trying to hide that from
 	 * him.
 	 */
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ibireq.handler) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		mutex_lock(&newdev->ibi_lock);
 		ret = i3c_dev_request_ibi_locked(newdev, &ibireq);
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (ret) {
 			dev_err(master->parent,
 				"Failed to request IBI on device %d-%llx",
@@ -1348,19 +1435,25 @@ int i3c_master_add_i3c_dev_locked(struct i3c_master_controller *master,
 					"Failed to re-enable IBI on device %d-%llx",
 					master->bus->id, newdev->info.pid);
 		}
+		pr_info("%s:%i\n", __func__, __LINE__);
 		mutex_lock(&newdev->ibi_lock);
 	}
 
 	return 0;
 
 err_detach_dev:
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (newdev->dev && newdev->dev->desc)
 		newdev->dev->desc = NULL;
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	i3c_master_detach_i3c_dev(newdev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 err_free_dev:
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_master_free_i3c_dev(newdev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	return ret;
 }
@@ -1870,31 +1963,38 @@ int i3c_master_register(struct i3c_master_controller *master,
 {
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/* We do not support secondary masters yet. */
 	if (secondary)
 		return -ENOTSUPP;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = i3c_master_check_ops(ops);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	master->parent = parent;
 	master->ops = ops;
 	master->secondary = secondary;
 	INIT_LIST_HEAD(&master->boardinfo.i2c);
 	INIT_LIST_HEAD(&master->boardinfo.i3c);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = i3c_master_create_bus(master);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	master->wq = alloc_workqueue("%s", 0, 0, dev_name(parent));
 	if (!master->wq) {
 		ret = -ENOMEM;
 		goto err_destroy_bus;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = i3c_master_bus_init(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret)
 		goto err_destroy_wq;
 
@@ -1903,6 +2003,7 @@ int i3c_master_register(struct i3c_master_controller *master,
 	 * through the I2C subsystem.
 	 */
 	ret = i3c_master_i2c_adapter_init(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret)
 		goto err_cleanup_bus;
 
@@ -1912,8 +2013,10 @@ int i3c_master_register(struct i3c_master_controller *master,
 	 */
 	master->init_done = true;
 	i3c_bus_normaluse_lock(master->bus);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_master_register_new_i3c_devs(master);
 	i3c_bus_normaluse_unlock(master->bus);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	return 0;
 

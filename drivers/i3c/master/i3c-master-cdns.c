@@ -484,7 +484,11 @@ static int cdns_i3c_master_disable(struct cdns_i3c_master *master)
 {
 	u32 status;
 
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+		readl(master->regs + CTRL));
 	writel(readl(master->regs + CTRL) & ~CTRL_DEV_EN, master->regs + CTRL);
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+		readl(master->regs + CTRL));
 
 	return readl_poll_timeout(master->regs + MST_STATUS0, status,
 				  status & MST_STATUS0_IDLE, 10, 1000000);
@@ -492,7 +496,11 @@ static int cdns_i3c_master_disable(struct cdns_i3c_master *master)
 
 static void cdns_i3c_master_enable(struct cdns_i3c_master *master)
 {
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+		readl(master->regs + CTRL));
 	writel(readl(master->regs + CTRL) | CTRL_DEV_EN, master->regs + CTRL);
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+		readl(master->regs + CTRL));
 }
 
 static struct cdns_i3c_xfer *
@@ -522,28 +530,55 @@ static void cdns_i3c_master_start_xfer_locked(struct cdns_i3c_master *master)
 	struct cdns_i3c_xfer *xfer = master->xferqueue.cur;
 	unsigned int i;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (!xfer)
 		return;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
+	pr_info("%s:%i IMR = %08x ISR = %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR),
+		readl(master->regs + MST_ISR));
 	writel(MST_INT_CMDD_EMP, master->regs + MST_ICR);
+	pr_info("%s:%i IMR = %08x ISR = %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR),
+		readl(master->regs + MST_ISR));
 	for (i = 0; i < xfer->ncmds; i++) {
 		struct cdns_i3c_cmd *cmd = &xfer->cmds[i];
 
+		pr_info("%s:%i cmd->tx_len = %d\n", __func__, __LINE__,
+			cmd->tx_len);
 		cdns_i3c_master_wr_to_tx_fifo(master, cmd->tx_buf,
 					      cmd->tx_len);
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	for (i = 0; i < xfer->ncmds; i++) {
 		struct cdns_i3c_cmd *cmd = &xfer->cmds[i];
 
+		pr_info("%s:%i cmd %08x %08x\n", __func__, __LINE__, cmd->cmd0, cmd->cmd1);
 		writel(cmd->cmd1 | CMD1_FIFO_CMDID(i),
 		       master->regs + CMD1_FIFO);
 		writel(cmd->cmd0, master->regs + CMD0_FIFO);
 	}
+	pr_info("%s:%i IMR = %08x ISR = %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR),
+		readl(master->regs + MST_ISR));
 
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+		readl(master->regs + CTRL));
+	writel(MST_INT_CMDD_EMP, master->regs + MST_IER);
+	pr_info("%s:%i IMR = %08x ISR = %08x MST_STATUS0 %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR),
+		readl(master->regs + MST_ISR),
+		readl(master->regs + MST_STATUS0));
 	writel(readl(master->regs + CTRL) | CTRL_MCS,
 	       master->regs + CTRL);
-	writel(MST_INT_CMDD_EMP, master->regs + MST_IER);
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+		readl(master->regs + CTRL));
+	pr_info("%s:%i IMR = %08x ISR = %08x MST_STATUS0 %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR),
+		readl(master->regs + MST_ISR),
+		readl(master->regs + MST_STATUS0));
 }
 
 static void cdns_i3c_master_end_xfer_locked(struct cdns_i3c_master *master,
@@ -553,13 +588,30 @@ static void cdns_i3c_master_end_xfer_locked(struct cdns_i3c_master *master,
 	int i, ret = 0;
 	u32 status0;
 
-	if (!xfer)
-		return;
+	pr_info("%s:%i\n", __func__, __LINE__);
+	if (!xfer) {
+		for (status0 = readl(master->regs + MST_STATUS0);
+		     !(status0 & MST_STATUS0_CMDR_EMP);
+		     status0 = readl(master->regs + MST_STATUS0)) {
+			u32 cmdr, id;
 
+			cmdr = readl(master->regs + CMDR);
+			id = CMDR_CMDID(cmdr);
+			WARN_ON(id != CMDR_CMDID_HJACK_DISEC &&
+				id != CMDR_CMDID_HJACK_ENTDAA);
+		}
+		pr_info("%s:%i\n", __func__, __LINE__);
+		return;
+	}
+
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (!(isr & MST_INT_CMDD_EMP))
 		return;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	writel(MST_INT_CMDD_EMP, master->regs + MST_IDR);
+	pr_info("%s:%i IMR = %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR));
 
 	for (status0 = readl(master->regs + MST_STATUS0);
 	     !(status0 & MST_STATUS0_CMDR_EMP);
@@ -578,9 +630,12 @@ static void cdns_i3c_master_end_xfer_locked(struct cdns_i3c_master *master,
 		rx_len = min_t(u32, CMDR_XFER_BYTES(cmdr), cmd->rx_len);
 		cdns_i3c_master_rd_from_rx_fifo(master, cmd->rx_buf, rx_len);
 		cmd->error = CMDR_ERROR(cmdr);
+		pr_info("%s:%i\n", __func__, __LINE__);
 	}
 
 	for (i = 0; i < xfer->ncmds; i++) {
+		if (xfer->cmds[i].error != CMDR_NO_ERROR)
+			pr_info("%s:%i error = %d\n", __func__, __LINE__, xfer->cmds[i].error);
 		switch (xfer->cmds[i].error) {
 		case CMDR_NO_ERROR:
 			break;
@@ -645,6 +700,8 @@ static void cdns_i3c_master_unqueue_xfer(struct cdns_i3c_master *master,
 	if (master->xferqueue.cur == xfer) {
 		u32 status;
 
+		pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__,
+			readl(master->regs + CTRL));
 		writel(readl(master->regs + CTRL) & ~CTRL_DEV_EN,
 		       master->regs + CTRL);
 		readl_poll_timeout_atomic(master->regs + MST_STATUS0, status,
@@ -654,9 +711,15 @@ static void cdns_i3c_master_unqueue_xfer(struct cdns_i3c_master *master,
 		writel(FLUSH_RX_FIFO | FLUSH_TX_FIFO | FLUSH_CMD_FIFO |
 		       FLUSH_CMD_RESP,
 		       master->regs + FLUSH_CTRL);
+		pr_info("%s:%i IMR = %08x ISR = %08x\n", __func__, __LINE__,
+			readl(master->regs + MST_IMR), readl(master->regs + MST_ISR));
 		writel(MST_INT_CMDD_EMP, master->regs + MST_IDR);
+		pr_info("%s:%i IMR = %08x ISR = %08x\n", __func__, __LINE__,
+			readl(master->regs + MST_IMR), readl(master->regs + MST_ISR));
 		writel(readl(master->regs + CTRL) | CTRL_DEV_EN,
 		       master->regs + CTRL);
+		pr_info("%s:%i IMR = %08x ISR = %08x\n", __func__, __LINE__,
+			readl(master->regs + MST_IMR), readl(master->regs + MST_ISR));
 	} else {
 		list_del_init(&xfer->node);
 	}
@@ -712,9 +775,11 @@ static int cdns_i3c_master_send_ccc_cmd(struct i3c_master_controller *m,
 		ccmd->tx_len = cmd->dests[0].payload.len;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	cdns_i3c_master_queue_xfer(master, xfer);
 	if (!wait_for_completion_timeout(&xfer->comp, msecs_to_jiffies(1000)))
 		cdns_i3c_master_unqueue_xfer(master, xfer);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	ret = xfer->ret;
 	cmd->err = cdns_i3c_cmd_get_err(&xfer->cmds[0]);
@@ -1082,15 +1147,24 @@ static u32 prepare_rr0_dev_address(u32 addr)
 
 static void cdns_i3c_master_upd_i3c_addr(struct i3c_dev_desc *dev)
 {
+	pr_info("%s:%i\n", __func__, __LINE__);
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	struct cdns_i3c_master *master = to_cdns_i3c_master(m);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	struct cdns_i3c_i2c_dev_data *data = i3c_dev_get_master_data(dev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	u32 rr;
 
+	pr_info("%s:%i dev = %px\n", __func__, __LINE__, dev);
 	rr = prepare_rr0_dev_address(dev->info.dyn_addr ?
 				     dev->info.dyn_addr :
 				     dev->info.static_addr);
+	pr_info("%s:%i master = %px\n", __func__, __LINE__, master);
+	pr_info("%s:%i master->regs = %px\n", __func__, __LINE__, master->regs);
+	pr_info("%s:%i data = %px\n", __func__, __LINE__, data);
 	writel(DEV_ID_RR0_IS_I3C | rr, master->regs + DEV_ID_RR0(data->id));
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 static int cdns_i3c_master_get_rr_slot(struct cdns_i3c_master *master,
@@ -1127,7 +1201,9 @@ static int cdns_i3c_master_get_rr_slot(struct cdns_i3c_master *master,
 static int cdns_i3c_master_reattach_i3c_dev(struct i3c_dev_desc *dev,
 					    u8 old_dyn_addr)
 {
+	pr_info("%s:%i\n", __func__, __LINE__);
 	cdns_i3c_master_upd_i3c_addr(dev);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	return 0;
 }
@@ -1152,13 +1228,16 @@ static int cdns_i3c_master_attach_i3c_dev(struct i3c_dev_desc *dev)
 	data->ibi = -1;
 	data->id = slot;
 	i3c_dev_set_master_data(dev, data);
+	pr_info("%s:%i dev %px data %px\n", __func__, __LINE__, dev, data);
 	master->free_rr_slots &= ~BIT(slot);
 
 	if (!dev->info.dyn_addr) {
+		pr_info("%s:%i dev->info.dyn_addr = %d dev->info.static_addr %d\n", __func__, __LINE__, dev->info.dyn_addr, dev->info.static_addr);
 		cdns_i3c_master_upd_i3c_addr(dev);
 		writel(readl(master->regs + DEVS_CTRL) |
 		       DEVS_CTRL_DEV_ACTIVE(data->id),
 		       master->regs + DEVS_CTRL);
+		pr_info("%s:%i DEVS_CTRL %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 	}
 
 	return 0;
@@ -1173,7 +1252,9 @@ static void cdns_i3c_master_detach_i3c_dev(struct i3c_dev_desc *dev)
 	writel(readl(master->regs + DEVS_CTRL) |
 	       DEVS_CTRL_DEV_CLR(data->id),
 	       master->regs + DEVS_CTRL);
+	pr_info("%s:%i DEVS_CTRL %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 
+	pr_info("%s:%i dev %px data %px\n", __func__, __LINE__, dev, i3c_dev_get_master_data(dev));
 	i3c_dev_set_master_data(dev, NULL);
 	master->free_rr_slots |= BIT(data->id);
 	kfree(data);
@@ -1206,6 +1287,7 @@ static int cdns_i3c_master_attach_i2c_dev(struct i2c_dev_desc *dev)
 	writel(readl(master->regs + DEVS_CTRL) |
 	       DEVS_CTRL_DEV_ACTIVE(data->id),
 	       master->regs + DEVS_CTRL);
+	pr_info("%s:%i DEVS_CTRL %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 
 	return 0;
 }
@@ -1219,6 +1301,7 @@ static void cdns_i3c_master_detach_i2c_dev(struct i2c_dev_desc *dev)
 	writel(readl(master->regs + DEVS_CTRL) |
 	       DEVS_CTRL_DEV_CLR(data->id),
 	       master->regs + DEVS_CTRL);
+	pr_info("%s:%i DEVS_CTRL %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 	master->free_rr_slots |= BIT(data->id);
 
 	i2c_dev_set_master_data(dev, NULL);
@@ -1256,9 +1339,11 @@ static void cdns_i3c_master_upd_i3c_scl_lim(struct cdns_i3c_master *master)
 	struct i3c_dev_desc *dev;
 	u32 prescl1, ctrl;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_bus_for_each_i3cdev(m->bus, dev) {
 		unsigned long max_fscl;
 
+		pr_info("%s:%i\n", __func__, __LINE__);
 		max_fscl = max(I3C_CCC_MAX_SDR_FSCL(dev->info.max_read_ds),
 			       I3C_CCC_MAX_SDR_FSCL(dev->info.max_write_ds));
 		switch (max_fscl) {
@@ -1280,17 +1365,24 @@ static void cdns_i3c_master_upd_i3c_scl_lim(struct cdns_i3c_master *master)
 			break;
 		}
 
+		pr_info("%s:%i max_fscl = %ld\n", __func__, __LINE__, max_fscl);
+
 		if (max_fscl &&
 		    (new_i3c_scl_lim > max_fscl || !new_i3c_scl_lim))
 			new_i3c_scl_lim = max_fscl;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Only update PRESCL_CTRL1 if the I3C SCL limitation has changed. */
 	if (new_i3c_scl_lim == master->i3c_scl_lim)
 		return;
+
+	pr_info("%s:%i\n", __func__, __LINE__);
 	master->i3c_scl_lim = new_i3c_scl_lim;
 	if (!new_i3c_scl_lim)
 		return;
+
+	pr_info("%s:%i\n", __func__, __LINE__);
 	pres_step = 1000000000UL / (master->base.bus->scl_rate.i3c * 4);
 
 	/* Configure PP_LOW to meet I3C slave limitations. */
@@ -1298,6 +1390,7 @@ static void cdns_i3c_master_upd_i3c_scl_lim(struct cdns_i3c_master *master)
 		  ~PRESCL_CTRL1_PP_LOW_MASK;
 	ctrl = readl(master->regs + CTRL);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_lim_period = DIV_ROUND_UP(1000000000, master->i3c_scl_lim);
 	ncycles = DIV_ROUND_UP(i3c_lim_period, pres_step);
 	if (ncycles < 4)
@@ -1305,16 +1398,19 @@ static void cdns_i3c_master_upd_i3c_scl_lim(struct cdns_i3c_master *master)
 	else
 		ncycles -= 4;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	prescl1 |= PRESCL_CTRL1_PP_LOW(ncycles);
 
 	/* Disable I3C master before updating PRESCL_CTRL1. */
 	if (ctrl & CTRL_DEV_EN)
 		cdns_i3c_master_disable(master);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	writel(prescl1, master->regs + PRESCL_CTRL1);
 
 	if (ctrl & CTRL_DEV_EN)
 		cdns_i3c_master_enable(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 static int cdns_i3c_master_do_daa(struct i3c_master_controller *m)
@@ -1326,17 +1422,22 @@ static int cdns_i3c_master_do_daa(struct i3c_master_controller *m)
 	u8 addrs[MAX_DEVS] = { };
 	u8 last_addr = 0;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	olddevs = readl(master->regs + DEVS_CTRL) & DEVS_CTRL_DEVS_ACTIVE_MASK;
 
+	pr_info("%s:%i maxdevs = %d\n", __func__, __LINE__, master->maxdevs);
 	/* Prepare RR slots before launching DAA. */
 	for (slot = 1; slot <= master->maxdevs; slot++) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (olddevs & BIT(slot))
 			continue;
 
+		pr_info("%s:%i slot %d\n", __func__, __LINE__, slot);
 		ret = i3c_master_get_free_addr(m, last_addr + 1);
 		if (ret < 0)
 			return -ENOSPC;
 
+		pr_info("%s:%i slot %d addr = %d\n", __func__, __LINE__, slot, ret);
 		last_addr = ret;
 		addrs[slot] = last_addr;
 		writel(prepare_rr0_dev_address(last_addr) | DEV_ID_RR0_IS_I3C,
@@ -1344,16 +1445,22 @@ static int cdns_i3c_master_do_daa(struct i3c_master_controller *m)
 		writel(0, master->regs + DEV_ID_RR1(slot));
 		writel(0, master->regs + DEV_ID_RR2(slot));
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	ret = i3c_master_entdaa_locked(&master->base);
+	pr_info("%s:%i ret = %d\n", __func__, __LINE__, ret);
 	if (ret && ret != I3C_ERROR_M2)
 		return ret;
 
+	pr_info("%s:%i DEVS_CTRL = %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 	newdevs = readl(master->regs + DEVS_CTRL) & DEVS_CTRL_DEVS_ACTIVE_MASK;
 	newdevs &= ~olddevs;
+	pr_info("%s:%i newdevs = %08x olddevs = %08x\n", __func__, __LINE__,
+		newdevs, olddevs);
 
 	/* Save the old limitation before add devices. */
 	old_i3c_scl_lim = master->i3c_scl_lim;
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/*
 	 * Clear all retaining registers filled during DAA. We already
@@ -1363,6 +1470,7 @@ static int cdns_i3c_master_do_daa(struct i3c_master_controller *m)
 		if (newdevs & BIT(slot))
 			i3c_master_add_i3c_dev_locked(m, addrs[slot]);
 	}
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/*
 	 * Clear slots that ended up not being used. Can be caused by I3C
@@ -1373,14 +1481,19 @@ static int cdns_i3c_master_do_daa(struct i3c_master_controller *m)
 	writel(readl(master->regs + DEVS_CTRL) |
 	       master->free_rr_slots << DEVS_CTRL_DEV_CLR_SHIFT,
 	       master->regs + DEVS_CTRL);
+	pr_info("%s:%i DEVS_CTRL %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 
 	i3c_master_defslvs_locked(&master->base);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	cdns_i3c_master_upd_i3c_scl_lim(master);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/* Unmask Hot-Join and Mastership request interrupts. */
 	i3c_master_enec_locked(m, I3C_BROADCAST_ADDR,
 			       I3C_CCC_EVENT_HJ | I3C_CCC_EVENT_MR);
+	pr_info("%s:%i\n", __func__, __LINE__);
+	pr_info("%s:%i DEVS_CTRL = %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 
 	return 0;
 }
@@ -1466,8 +1579,10 @@ static int cdns_i3c_master_bus_init(struct i3c_master_controller *m)
 	 *
 	 * We will issue ENTDAA afterwards from the threaded IRQ handler.
 	 */
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ctrl |= CTRL_HJ_ACK | CTRL_HJ_DISEC | CTRL_HALT_EN | CTRL_MCS_EN;
 	writel(ctrl, master->regs + CTRL);
+	pr_info("%s:%i CTRL = %08x\n", __func__, __LINE__, readl(master->regs + CTRL));
 
 	cdns_i3c_master_enable(master);
 
@@ -1563,6 +1678,10 @@ static irqreturn_t cdns_i3c_master_interrupt(int irq, void *data)
 	u32 status;
 
 	status = readl(master->regs + MST_ISR);
+	pr_info("%s:%i IMR = %08x ISR = %08x MST_STATUS0 %08x\n", __func__, __LINE__,
+		readl(master->regs + MST_IMR),
+		readl(master->regs + MST_ISR),
+		readl(master->regs + MST_STATUS0));
 	if (!(status & readl(master->regs + MST_IMR)))
 		return IRQ_NONE;
 
@@ -1723,8 +1842,25 @@ static void cdns_i3c_master_hj(struct work_struct *work)
 						      struct cdns_i3c_master,
 						      hj_work);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	i3c_master_do_daa(&master->base);
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
+
+static ssize_t enec_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct cdns_i3c_master *master = platform_get_drvdata(pdev);
+
+	i3c_bus_maintenance_lock(master->base.bus);
+	i3c_master_enec_locked(&master->base, I3C_BROADCAST_ADDR,
+			       I3C_CCC_EVENT_HJ | I3C_CCC_EVENT_MR);
+	i3c_bus_maintenance_unlock(master->base.bus);
+
+	return count;
+}
+static const DEVICE_ATTR_WO(enec);
 
 static int cdns_i3c_master_probe(struct platform_device *pdev)
 {
@@ -1733,40 +1869,49 @@ static int cdns_i3c_master_probe(struct platform_device *pdev)
 	int ret, irq;
 	u32 val;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	master = devm_kzalloc(&pdev->dev, sizeof(*master), GFP_KERNEL);
 	if (!master)
 		return -ENOMEM;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	master->regs = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(master->regs))
 		return PTR_ERR(master->regs);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	master->pclk = devm_clk_get(&pdev->dev, "pclk");
 	if (IS_ERR(master->pclk))
 		return PTR_ERR(master->pclk);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	master->sysclk = devm_clk_get(&pdev->dev, "sysclk");
 	if (IS_ERR(master->pclk))
 		return PTR_ERR(master->pclk);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = clk_prepare_enable(master->pclk);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = clk_prepare_enable(master->sysclk);
 	if (ret)
 		goto err_disable_pclk;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (readl(master->regs + DEV_ID) != DEV_ID_I3C_MASTER) {
 		ret = -EINVAL;
 		goto err_disable_sysclk;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	spin_lock_init(&master->xferqueue.lock);
 	INIT_LIST_HEAD(&master->xferqueue.list);
 
@@ -1778,6 +1923,7 @@ static int cdns_i3c_master_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_disable_sysclk;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	platform_set_drvdata(pdev, master);
 
 	val = readl(master->regs + CONF_STATUS0);
@@ -1790,9 +1936,14 @@ static int cdns_i3c_master_probe(struct platform_device *pdev)
 	master->caps.cmdfifodepth = CONF_STATUS1_CMD_DEPTH(val);
 	master->caps.rxfifodepth = CONF_STATUS1_RX_DEPTH(val);
 	master->caps.txfifodepth = CONF_STATUS1_TX_DEPTH(val);
+	/*
 	master->caps.ibirfifodepth = CONF_STATUS0_IBIR_DEPTH(val);
 	master->caps.cmdrfifodepth = CONF_STATUS0_CMDR_DEPTH(val);
+	*/
+	master->caps.ibirfifodepth = 16;
+	master->caps.cmdrfifodepth = 16;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	spin_lock_init(&master->ibi.lock);
 	master->ibi.num_slots = CONF_STATUS1_IBI_HW_RES(val);
 	master->ibi.slots = devm_kcalloc(&pdev->dev, master->ibi.num_slots,
@@ -1804,11 +1955,16 @@ static int cdns_i3c_master_probe(struct platform_device *pdev)
 	writel(IBIR_THR(1), master->regs + CMD_IBI_THR_CTRL);
 	writel(MST_INT_IBIR_THR, master->regs + MST_IER);
 	writel(DEVS_CTRL_DEV_CLR_ALL, master->regs + DEVS_CTRL);
+	pr_info("%s:%i DEVS_CTRL %08x\n", __func__, __LINE__, readl(master->regs + DEVS_CTRL));
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = i3c_master_register(&master->base, &pdev->dev,
 				  &cdns_i3c_master_ops, false);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret)
 		goto err_disable_sysclk;
+
+	device_create_file(&pdev->dev, &dev_attr_enec);
 
 	return 0;
 
