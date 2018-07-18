@@ -869,11 +869,11 @@ static u8 update_crc5(u8 crc5, u16 word)
 	return crc5 & 0x1F;
 }
 
-static int cdns_i3c_master_send_hdr_cmd(struct i3c_device *dev,
-					const struct i3c_hdr_cmd *cmds,
+static int cdns_i3c_master_send_hdr_cmd(struct i3c_dev_desc *dev,
+					struct i3c_hdr_cmd *cmds,
 					int ncmds)
 {
-	struct i3c_master_controller *m = i3c_device_get_master(dev);
+	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct cdns_i3c_master *master = to_cdns_i3c_master(m);
 	int ret, i, ntxwords = 1, nrxwords = 0;
 	struct cdns_i3c_xfer *xfer;
@@ -973,6 +973,17 @@ static int cdns_i3c_master_send_hdr_cmd(struct i3c_device *dev,
 	}
 
 	ret = xfer->ret;
+	if (ret) {
+		for (i = 0; i < 2; i++) {
+			enum i3c_error_code err;
+
+			err = cdns_i3c_cmd_get_err(&xfer->cmds[i]);
+			if (err != I3C_ERROR_UNKNOWN) {
+				cmds[0].err = err;
+				break;
+			}
+		}
+	}
 	cdns_i3c_master_free_xfer(xfer);
 
 out_free_buf:
