@@ -1969,6 +1969,31 @@ int i3c_dev_do_priv_xfers_locked(struct i3c_dev_desc *dev,
 	return master->ops->priv_xfers(dev, xfers, nxfers);
 }
 
+int i3c_dev_send_hdr_cmds_locked(struct i3c_dev_desc *dev,
+				 struct i3c_hdr_cmd *cmds,
+				 int ncmds)
+{
+	struct i3c_master_controller *master;
+	int i;
+
+	if (!dev)
+		return -ENOENT;
+
+	master = i3c_dev_get_master(dev);
+	if (!master)
+		return -EINVAL;
+
+	if (!master->ops->send_hdr_cmds)
+		return -ENOTSUPP;
+
+	for (i = 0; i < ncmds; i++) {
+		if (!(master->this->info.hdr_cap & BIT(cmds->mode)))
+			return -ENOTSUPP;
+	}
+
+	return master->ops->send_hdr_cmds(dev, cmds, ncmds);
+}
+
 int i3c_dev_disable_ibi_locked(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *master;

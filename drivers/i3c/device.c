@@ -67,7 +67,6 @@ int i3c_device_send_hdr_cmds(struct i3c_device *dev,
 			     struct i3c_hdr_cmd *cmds,
 			     int ncmds)
 {
-	struct i3c_master_controller *master;
 	enum i3c_hdr_mode mode;
 	int ret, i;
 
@@ -83,21 +82,9 @@ int i3c_device_send_hdr_cmds(struct i3c_device *dev,
 			return -EINVAL;
 	}
 
-	master = i3c_device_get_master(dev);
-	if (!master)
-		return -EINVAL;
-
-	if (!master->ops->send_hdr_cmds)
-		return -ENOTSUPP;
-
-	for (i = 0; i < ncmds; i++) {
-		if (!(master->this->info.hdr_cap & BIT(cmds->mode)))
-			return -ENOTSUPP;
-	}
-
-	i3c_bus_normaluse_lock(master->bus);
-	ret = master->ops->send_hdr_cmds(dev, cmds, ncmds);
-	i3c_bus_normaluse_unlock(master->bus);
+	i3c_bus_normaluse_lock(dev->bus);
+	ret = i3c_dev_send_hdr_cmds_locked(dev->desc, cmds, ncmds);
+	i3c_bus_normaluse_unlock(dev->bus);
 
 	return ret;
 }

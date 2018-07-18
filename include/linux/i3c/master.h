@@ -434,10 +434,10 @@ struct i3c_master_controller_ops {
 	int (*send_ccc_cmd)(struct i3c_master_controller *master,
 			    struct i3c_ccc_cmd *cmd);
 	int (*send_hdr_cmds)(struct i3c_dev_desc *dev,
-			     const struct i3c_hdr_cmd *cmds,
+			     struct i3c_hdr_cmd *cmds,
 			     int ncmds);
 	int (*priv_xfers)(struct i3c_dev_desc *dev,
-			  const struct i3c_priv_xfer *xfers,
+			  struct i3c_priv_xfer *xfers,
 			  int nxfers);
 	int (*attach_i2c_dev)(struct i2c_dev_desc *dev);
 	void (*detach_i2c_dev)(struct i2c_dev_desc *dev);

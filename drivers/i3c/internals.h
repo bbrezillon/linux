@@ -28,6 +28,9 @@ enum i3c_addr_slot_status i3c_bus_get_addr_slot_status(struct i3c_bus *bus,
 int i3c_dev_do_priv_xfers_locked(struct i3c_dev_desc *dev,
 				 struct i3c_priv_xfer *xfers,
 				 int nxfers);
+int i3c_dev_send_hdr_cmds_locked(struct i3c_dev_desc *dev,
+				 struct i3c_hdr_cmd *cmds,
+				 int ncmds);
 int i3c_dev_disable_ibi_locked(struct i3c_dev_desc *dev);
 int i3c_dev_enable_ibi_locked(struct i3c_dev_desc *dev);
 int i3c_dev_request_ibi_locked(struct i3c_dev_desc *dev,
