@@ -62,6 +62,7 @@ enum i3c_hdr_mode {
  *	  set this is a read, otherwise this is a write
  * @ndatawords: number of data words (a word is 16bits wide) to transfer
  * @data: input/output buffer
+ * @err: I3C error code
  */
 struct i3c_hdr_cmd {
 	enum i3c_hdr_mode mode;
@@ -71,6 +72,7 @@ struct i3c_hdr_cmd {
 		u16 *in;
 		const u16 *out;
 	} data;
+	enum i3c_error_code err;
 };
 
 /**
