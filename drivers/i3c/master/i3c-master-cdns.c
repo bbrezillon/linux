@@ -419,7 +419,7 @@ to_cdns_i3c_master(struct i3c_master_controller *master)
 static void cdns_i3c_master_wr_to_tx_fifo(struct cdns_i3c_master *master,
 					  const u8 *bytes, int nbytes)
 {
-	writesl(master->regs + TX_FIFO, bytes, nbytes & ~3);
+	writesl(master->regs + TX_FIFO, bytes, nbytes / 4);
 	if (nbytes & 3) {
 		u32 tmp = 0;
 
@@ -431,7 +431,7 @@ static void cdns_i3c_master_wr_to_tx_fifo(struct cdns_i3c_master *master,
 static void cdns_i3c_master_rd_from_rx_fifo(struct cdns_i3c_master *master,
 					    u8 *bytes, int nbytes)
 {
-	readsl(master->regs + RX_FIFO, bytes, nbytes & ~3);
+	readsl(master->regs + RX_FIFO, bytes, nbytes / 4);
 	if (nbytes & 3) {
 		u32 tmp = __raw_readl(master->regs + RX_FIFO);
 
@@ -1315,7 +1315,7 @@ static void cdns_i3c_master_handle_ibi(struct cdns_i3c_master *master,
 	buf = slot->data;
 
 	nbytes = IBIR_XFER_BYTES(ibir);
-	readsl(master->regs + IBI_DATA_FIFO, buf, nbytes & ~3);
+	readsl(master->regs + IBI_DATA_FIFO, buf, nbytes / 4);
 	if (nbytes % 3) {
 		u32 tmp = __raw_readl(master->regs + IBI_DATA_FIFO);
 
