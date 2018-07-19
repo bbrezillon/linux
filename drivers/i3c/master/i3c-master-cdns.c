@@ -902,7 +902,7 @@ static int cdns_i3c_master_send_hdr_cmd(struct i3c_dev_desc *dev,
 	    nrxwords > master->caps.rxfifodepth)
 		return -ENOTSUPP;
 
-	buf = kzalloc((nrxwords + ntxwords) * sizeof(*buf), GFP_KERNEL);
+	buf = kcalloc(nrxwords + ntxwords, sizeof(*buf), GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
