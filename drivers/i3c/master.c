@@ -845,7 +845,6 @@ static void i3c_master_detach_i2c_dev(struct i2c_dev_desc *dev)
 static void i3c_master_pre_assign_dyn_addr(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *master = i3c_dev_get_master(dev);
-	struct i3c_device_info info;
 	int ret;
 
 	if (!dev->boardinfo || !dev->boardinfo->init_dyn_addr ||
@@ -860,13 +859,11 @@ static void i3c_master_pre_assign_dyn_addr(struct i3c_dev_desc *dev)
 	dev->info.dyn_addr = dev->boardinfo->init_dyn_addr;
 	ret = i3c_master_reattach_i3c_dev(dev, 0);
 	if (ret)
-		return;
+		goto err_rstdaa;
 
 	ret = i3c_master_retrieve_dev_info(dev);
 	if (ret)
 		goto err_rstdaa;
-
-	dev->info = info;
 
 	return;
 
@@ -906,7 +903,7 @@ i3c_master_register_new_i3c_devs(struct i3c_master_controller *master)
 		if (desc->boardinfo)
 			desc->dev->dev.of_node = desc->boardinfo->of_node;
 
-		pr_info("%s:%i\n", __func__, __LINE__);
+		ret = device_register(&desc->dev->dev);
 		if (ret)
 			dev_err(master->parent,
 				"Failed to add I3C device (err = %d)\n", ret);
