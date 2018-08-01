@@ -1,0 +1,28 @@
+Device Tree Clock bindings for the "Clocking Wizard" IP provided by Xilinx
+
+This block can be used to generate up to 4 clock signals out of a single input
+clock. It embeds a PLL to generate an intermediate clock which then feeds 4
+clock dividers whose divider value can be adjusted based on the user needs.
+
+Required properties:
+ - #clock-cells: must be 1. The cell is encoding the id of the output clk
+		 (from 0 to xlnx,clk-wizard-num-outputs - 1)
+ - compatible: must be "xlnx,clk-wizard-5.1"
+ - clocks: 2 clocks are required
+ - clock-names: should contain 2 clock names: "aclk" and "clkin".
+		"aclk" is driving the register interface and "clk_in" is the
+		input clock signal that is used by the PLL block
+ - xlnx,clk-wizard-num-outputs: this describe the number of output clocks
+				(chosen at synthesization time)
+ - reg: registers used to configure the Clocking wizard block
+
+Example:
+
+	clkwizard: clkwizard@43c20000 {
+		compatible = "xlnx,clk-wizard-5.1";
+		reg = <0x43c20000 0x10000>;
+		clocks = <&clkc 18>, <&clkc 18>;
+		clock-names = "aclk", "clk_in1";
+		#clock-cells = <1>;
+		xlnx,clk-wizard-num-outputs = <2>;
+	};
