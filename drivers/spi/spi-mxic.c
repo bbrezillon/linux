@@ -222,6 +222,8 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 				return ret;
 
 			data = readl(mxic->regs + RXD);
+			data >>= (8 * (4 - nbytes));
+
 			memcpy(rxbuf + pos, &data, nbytes);
 			WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
 		} else {
