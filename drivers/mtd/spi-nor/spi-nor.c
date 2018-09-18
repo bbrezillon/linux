@@ -61,7 +61,7 @@ struct flash_info {
 	u16		page_size;
 	u16		addr_width;
 
-	u16		flags;
+	u32		flags;
 #define SECT_4K			BIT(0)	/* SPINOR_OP_BE_4K works uniformly */
 #define SPI_NOR_NO_ERASE	BIT(1)	/* No erase command needed */
 #define SST_WRITE		BIT(2)	/* use SST byte programming */
@@ -89,6 +89,8 @@ struct flash_info {
 #define NO_CHIP_ERASE		BIT(12) /* Chip does not support chip erase */
 #define SPI_NOR_SKIP_SFDP	BIT(13)	/* Skip parsing of SFDP tables */
 #define USE_CLSR		BIT(14)	/* use CLSR command */
+#define SPI_NOR_OCTO		BIT(15)	/* Supports OCTO READ/WRITE/ERASE */
+#define SPI_NOR_DTR		BIT(16)	/* Supports double transfer rate */
 
 	int	(*quad_enable)(struct spi_nor *nor);
 };
@@ -107,7 +109,11 @@ static int read_sr(struct spi_nor *nor)
 	int ret;
 	u8 val;
 
-	ret = nor->read_reg(nor, SPINOR_OP_RDSR, &val, 1);
+	if (spi_nor_get_protocol_inst_nbits(nor->reg_proto) == 8)
+		ret = nor->read_reg2(nor, SPINOR_OP_RDSR, RDSR_ADDR, 4,
+				     &val, 1);
+	else
+		ret = nor->read_reg(nor, SPINOR_OP_RDSR, &val, 1);
 	if (ret < 0) {
 		pr_err("error %d reading SR\n", (int) ret);
 		return ret;
@@ -145,7 +151,11 @@ static int read_cr(struct spi_nor *nor)
 	int ret;
 	u8 val;
 
-	ret = nor->read_reg(nor, SPINOR_OP_RDCR, &val, 1);
+	if (spi_nor_get_protocol_inst_nbits(nor->reg_proto) == 8)
+		ret = nor->read_reg2(nor, SPINOR_OP_RDCR, RDCR_ADDR, 4,
+				     &val, 1);
+	else
+		ret = nor->read_reg(nor, SPINOR_OP_RDCR, &val, 1);
 	if (ret < 0) {
 		dev_err(nor->dev, "error %d reading CR\n", ret);
 		return ret;
@@ -161,7 +171,39 @@ static int read_cr(struct spi_nor *nor)
 static inline int write_sr(struct spi_nor *nor, u8 val)
 {
 	nor->cmd_buf[0] = val;
-	return nor->write_reg(nor, SPINOR_OP_WRSR, nor->cmd_buf, 1);
+
+	if (spi_nor_get_protocol_inst_nbits(nor->reg_proto) == 8)
+		return nor->write_reg2(nor, SPINOR_OP_WRSR, RDSR_ADDR, 4,
+				       nor->cmd_buf, 1);
+	else
+		return nor->write_reg(nor, SPINOR_OP_WRSR, nor->cmd_buf, 1);
+}
+
+/*
+ * Read Configuration Register 2
+ * Returns negative if error occurred.
+ */
+static int read_cr2(struct spi_nor *nor, loff_t addr)
+{
+	int ret;
+	u8 val;
+
+	ret = nor->read_reg2(nor, SPINOR_OP_RDCR2, addr, 4, &val, 1);
+	if (ret < 0) {
+		dev_err(nor->dev, "error %d reading CR2\n", ret);
+		return ret;
+	}
+
+	return val;
+}
+
+/*
+ * Write Configuration Register 2
+ * Returns negative if error occurred.
+ */
+static inline int write_cr2(struct spi_nor *nor, loff_t addr, u8 val)
+{
+	return nor->write_reg2(nor, SPINOR_OP_WRCR2, addr, 4, &val, 1);
 }
 
 /*
@@ -484,6 +526,10 @@ static int spi_nor_erase_sector(struct spi_nor *nor, u32 addr)
 
 	if (nor->erase)
 		return nor->erase(nor, addr);
+
+	if (nor->octo_enable)
+		return nor->write_reg2(nor, nor->erase_opcode, addr,
+				       nor->addr_width, NULL, 0);
 
 	/*
 	 * Default implementation, if driver doesn't have a specialized HW
@@ -1095,6 +1141,7 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "mx66u51235f", INFO(0xc2253a, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_4B_OPCODES) },
 	{ "mx66l1g45g",  INFO(0xc2201b, 0, 64 * 1024, 2048, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "mx66l1g55g",  INFO(0xc2261b, 0, 64 * 1024, 2048, SPI_NOR_QUAD_READ) },
+	{ "mx25uw51245g", INFO(0xc2813a, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_4B_OPCODES | SPI_NOR_OCTO | SPI_NOR_DTR) },
 
 	/* Micron */
 	{ "n25q016a",	 INFO(0x20bb15, 0, 64 * 1024,   32, SECT_4K | SPI_NOR_QUAD_READ) },
@@ -1516,6 +1563,55 @@ static int macronix_quad_enable(struct spi_nor *nor)
 }
 
 /*
+ * macronix_octo_enable() - set OPI bit in Configuration Register 2.
+ * @nor:	pointer to a 'struct spi_nor'
+ *
+ * Set the SOPI / DOPI bit in the Configuration Register 2.
+ *
+ * bit 0 of the Configuration Register 2 is the SOPI bit for Macronix OcatFlash.
+ *
+ * bit 1 of the Configuration Register 2 is the DOPI bit for Macronix OcatFlash.
+ *
+ * Return: 0 on success, -errno otherwise.
+ */
+static int macronix_octo_enable(struct spi_nor *nor)
+{
+	int ret, val, mode;
+
+	mode = spi_nor_protocol_is_dtr(nor->read_proto) ? CR2_DOPI_EN :
+							  CR2_SOPI_EN;
+
+	val = read_cr2(nor, CR2_ADDR_MODE_EN);
+	if (val < 0)
+		return val;
+	if (val & mode)
+		return 0;
+
+	write_enable(nor);
+
+	write_cr2(nor, CR2_ADDR_MODE_EN, val | mode);
+
+	if (mode == CR2_SOPI_EN)
+		nor->reg_proto = SNOR_PROTO_8_8_8;
+	else if (mode == CR2_DOPI_EN)
+		nor->reg_proto = SNOR_PROTO_8_8_8_DTR;
+
+	nor->dual_cmd_enable = true;
+
+	ret = spi_nor_wait_till_ready(nor);
+	if (ret)
+		return ret;
+
+	ret = read_cr2(nor, CR2_ADDR_MODE_EN);
+	if (!(ret > 0 && (ret & mode))) {
+		dev_err(nor->dev, "Macronix Octo enable bit not set\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/*
  * Write status Register and configuration register with 2 bytes
  * The first byte will be written to the status register, while the
  * second byte will be written to the configuration register.
@@ -1806,6 +1902,7 @@ enum spi_nor_read_command_index {
 	SNOR_CMD_READ_1_8_8,
 	SNOR_CMD_READ_8_8_8,
 	SNOR_CMD_READ_1_8_8_DTR,
+	SNOR_CMD_READ_8_8_8_DTR,
 
 	SNOR_CMD_READ_MAX
 };
@@ -1822,6 +1919,7 @@ enum spi_nor_pp_command_index {
 	SNOR_CMD_PP_1_1_8,
 	SNOR_CMD_PP_1_8_8,
 	SNOR_CMD_PP_8_8_8,
+	SNOR_CMD_PP_8_8_8_DTR,
 
 	SNOR_CMD_PP_MAX
 };
@@ -1835,6 +1933,7 @@ struct spi_nor_flash_parameter {
 	struct spi_nor_pp_command	page_programs[SNOR_CMD_PP_MAX];
 
 	int (*quad_enable)(struct spi_nor *nor);
+	int (*octo_enable)(struct spi_nor *nor);
 };
 
 static void
@@ -2489,10 +2588,36 @@ static int spi_nor_init_params(struct spi_nor *nor,
 					  SNOR_PROTO_1_1_4);
 	}
 
+	if (info->flags & SPI_NOR_OCTO && !(info->flags & SPI_NOR_DTR)) {
+		params->hwcaps.mask |= SNOR_HWCAPS_READ_8_8_8;
+		spi_nor_set_read_settings(&params->reads[SNOR_CMD_READ_8_8_8],
+					  0, 20, SPINOR_OP_READ_8_8_8,
+					  SNOR_PROTO_8_8_8);
+	}
+
+	if (info->flags & SPI_NOR_OCTO && info->flags & SPI_NOR_DTR) {
+		params->hwcaps.mask |= SNOR_HWCAPS_READ_8_8_8_DTR;
+		spi_nor_set_read_settings(&params->reads[SNOR_CMD_READ_8_8_8_DTR],
+					  0, 40, SPINOR_OP_READ_8_8_8_DTR,
+					  SNOR_PROTO_8_8_8_DTR);
+	}
+
 	/* Page Program settings. */
 	params->hwcaps.mask |= SNOR_HWCAPS_PP;
 	spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP],
 				SPINOR_OP_PP, SNOR_PROTO_1_1_1);
+
+	if (info->flags & SPI_NOR_OCTO && !(info->flags & SPI_NOR_DTR)) {
+		params->hwcaps.mask |= SNOR_HWCAPS_PP_8_8_8;
+		spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP_8_8_8],
+					SPINOR_OP_PP_4B, SNOR_PROTO_8_8_8);
+	}
+
+	if (info->flags & SPI_NOR_OCTO && info->flags & SPI_NOR_DTR) {
+		params->hwcaps.mask |= SNOR_HWCAPS_PP_8_8_8_DTR;
+		spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP_8_8_8_DTR],
+					SPINOR_OP_PP_4B, SNOR_PROTO_8_8_8_DTR);
+	}
 
 	/* Select the procedure to set the Quad Enable bit. */
 	if (params->hwcaps.mask & (SNOR_HWCAPS_READ_QUAD |
@@ -2519,6 +2644,15 @@ static int spi_nor_init_params(struct spi_nor *nor,
 		 */
 		if (info->quad_enable)
 			params->quad_enable = info->quad_enable;
+	}
+
+	/* Select the procedure to set the Octo Enable bit. */
+	if (params->hwcaps.mask & (SNOR_HWCAPS_PP_8_8_8 |
+				   SNOR_HWCAPS_PP_8_8_8_DTR |
+				   SNOR_HWCAPS_READ_8_8_8 |
+				   SNOR_HWCAPS_READ_8_8_8_DTR)) {
+		if (JEDEC_MFR(info) == SNOR_MFR_MACRONIX)
+			params->octo_enable = macronix_octo_enable;
 	}
 
 	/* Override the parameters with data read from SFDP tables. */
@@ -2569,6 +2703,7 @@ static int spi_nor_hwcaps_read2cmd(u32 hwcaps)
 		{ SNOR_HWCAPS_READ_1_8_8,	SNOR_CMD_READ_1_8_8 },
 		{ SNOR_HWCAPS_READ_8_8_8,	SNOR_CMD_READ_8_8_8 },
 		{ SNOR_HWCAPS_READ_1_8_8_DTR,	SNOR_CMD_READ_1_8_8_DTR },
+		{ SNOR_HWCAPS_READ_8_8_8_DTR,	SNOR_CMD_READ_8_8_8_DTR },
 	};
 
 	return spi_nor_hwcaps2cmd(hwcaps, hwcaps_read2cmd,
@@ -2585,6 +2720,7 @@ static int spi_nor_hwcaps_pp2cmd(u32 hwcaps)
 		{ SNOR_HWCAPS_PP_1_1_8,		SNOR_CMD_PP_1_1_8 },
 		{ SNOR_HWCAPS_PP_1_8_8,		SNOR_CMD_PP_1_8_8 },
 		{ SNOR_HWCAPS_PP_8_8_8,		SNOR_CMD_PP_8_8_8 },
+		{ SNOR_HWCAPS_PP_8_8_8_DTR,	SNOR_CMD_PP_8_8_8_DTR },
 	};
 
 	return spi_nor_hwcaps2cmd(hwcaps, hwcaps_pp2cmd,
@@ -2675,6 +2811,7 @@ static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 {
 	u32 ignored_mask, shared_mask;
 	bool enable_quad_io;
+	bool enable_octo_io;
 	int err;
 
 	/*
@@ -2686,9 +2823,7 @@ static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 	/* SPI n-n-n protocols are not supported yet. */
 	ignored_mask = (SNOR_HWCAPS_READ_2_2_2 |
 			SNOR_HWCAPS_READ_4_4_4 |
-			SNOR_HWCAPS_READ_8_8_8 |
-			SNOR_HWCAPS_PP_4_4_4 |
-			SNOR_HWCAPS_PP_8_8_8);
+			SNOR_HWCAPS_PP_4_4_4);
 	if (shared_mask & ignored_mask) {
 		dev_dbg(nor->dev,
 			"SPI n-n-n protocols are not supported yet.\n");
@@ -2727,6 +2862,14 @@ static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 	else
 		nor->quad_enable = NULL;
 
+	/* Enable OCTO I/O if needed. */
+	enable_octo_io = (spi_nor_get_protocol_width(nor->read_proto) == 8 &&
+			  spi_nor_get_protocol_width(nor->write_proto) == 8);
+	if (enable_octo_io && params->octo_enable)
+		nor->octo_enable = params->octo_enable;
+	else
+		nor->octo_enable = NULL;
+
 	return 0;
 }
 
@@ -2754,6 +2897,18 @@ static int spi_nor_init(struct spi_nor *nor)
 			return err;
 		}
 	}
+
+	if (nor->octo_enable) {
+		err = nor->octo_enable(nor);
+		if (err) {
+			dev_err(nor->dev, "failed to activate octo mode\n");
+			return err;
+		}
+	}
+
+	if ((nor->read_proto & SNOR_PROTO_IS_DTR) &&
+	    (nor->write_proto & SNOR_PROTO_IS_DTR))
+		nor->dtr_enable = true;
 
 	if ((nor->addr_width == 4) &&
 	    (JEDEC_MFR(nor->info) != SNOR_MFR_SPANSION) &&

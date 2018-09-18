@@ -33,6 +33,31 @@ struct m25p {
 	struct spi_nor		spi_nor;
 };
 
+static void m25p80_dtr_reg_data_in_set(struct spi_mem_op *op, u8 *read_data)
+{
+	op->data.buf.in = read_data;
+	op->data.nbytes *= 2;
+}
+
+static void m25p80_dtr_reg_data_out_set(struct spi_mem_op *op, u8 *write_data)
+{
+	u8 data[2];
+
+	if (op->data.nbytes > 0) {
+		data[0] = write_data[0];
+		data[1] = write_data[0];
+	}
+
+	op->data.buf.out = data;
+	op->data.nbytes *= 2;
+}
+
+static void m25p80_2cmd_enable(struct spi_mem_op *op, u8 opcode)
+{
+	op->cmd.opcode = opcode | ((u16)~opcode) << 8;
+	op->cmd.nbytes = 2;
+}
+
 static int m25p80_read_reg(struct spi_nor *nor, u8 code, u8 *val, int len)
 {
 	struct m25p *flash = nor->priv;
@@ -58,6 +83,85 @@ static int m25p80_write_reg(struct spi_nor *nor, u8 opcode, u8 *buf, int len)
 					  SPI_MEM_OP_NO_DUMMY,
 					  SPI_MEM_OP_DATA_OUT(len, buf, 1));
 
+	/* get transfer protocols. */
+	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->reg_proto);
+	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->reg_proto);
+	op.dummy.buswidth = op.addr.buswidth;
+	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->reg_proto);
+	op.cmd.dtr = spi_nor_protocol_is_dtr(nor->reg_proto);
+
+	if (nor->dual_cmd_enable)
+		m25p80_2cmd_enable(&op, opcode);
+
+	return spi_mem_exec_op(flash->spimem, &op);
+}
+
+static int m25p80_read_reg2(struct spi_nor *nor, u8 code, loff_t from,
+			    int addrlen, u8 *val, int len)
+{
+	struct m25p *flash = nor->priv;
+	struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(code, 1),
+					  SPI_MEM_OP_ADDR(addrlen, from, 1),
+					  SPI_MEM_OP_NO_DUMMY,
+					  SPI_MEM_OP_DATA_IN(len, val, 1));
+	int ret;
+	int i;
+	u8 dval[6];
+
+	/* get transfer protocols. */
+	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->reg_proto);
+	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->reg_proto);
+	op.dummy.buswidth = op.addr.buswidth;
+	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->reg_proto);
+	op.cmd.dtr = spi_nor_protocol_is_dtr(nor->reg_proto);
+
+	/* Set Register Dummy in the OCTO mode */
+	if (op.cmd.buswidth == 8)
+		op.dummy.nbytes = 4;
+	if (op.cmd.dtr)
+		op.dummy.nbytes *= 2;
+
+	if (nor->dual_cmd_enable)
+		m25p80_2cmd_enable(&op, code);
+
+	if (nor->dtr_enable)
+		m25p80_dtr_reg_data_in_set(&op, dval);
+
+	ret = spi_mem_exec_op(flash->spimem, &op);
+	if (ret < 0)
+		dev_err(&flash->spimem->spi->dev, "error %d reading %x\n", ret,
+			code);
+
+	if (nor->dtr_enable) {
+		for (i = 0; i < len; i++)
+			val[i] = dval[i * 2];
+	}
+
+	return ret;
+}
+
+static int m25p80_write_reg2(struct spi_nor *nor, u8 opcode, loff_t to,
+			     int addrlen, u8 *buf, int len)
+{
+	struct m25p *flash = nor->priv;
+	struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(opcode, 1),
+					  SPI_MEM_OP_ADDR(addrlen, to, 1),
+					  SPI_MEM_OP_NO_DUMMY,
+					  SPI_MEM_OP_DATA_OUT(len, buf, 1));
+
+	/* get transfer protocols. */
+	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->reg_proto);
+	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->reg_proto);
+	op.dummy.buswidth = op.addr.buswidth;
+	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->reg_proto);
+	op.cmd.dtr = spi_nor_protocol_is_dtr(nor->reg_proto);
+
+	if (nor->dual_cmd_enable)
+		m25p80_2cmd_enable(&op, opcode);
+
+	if (nor->dtr_enable)
+		m25p80_dtr_reg_data_out_set(&op, buf);
+
 	return spi_mem_exec_op(flash->spimem, &op);
 }
 
@@ -73,10 +177,19 @@ static ssize_t m25p80_write(struct spi_nor *nor, loff_t to, size_t len,
 	size_t remaining = len;
 	int ret;
 
+	if (nor->dual_cmd_enable)
+		m25p80_2cmd_enable(&op, nor->program_opcode);
+
+	if (nor->dtr_enable && (len & 0x01)) {
+		op.data.nbytes++;
+		remaining++;
+	}
+
 	/* get transfer protocols. */
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->write_proto);
 	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->write_proto);
 	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->write_proto);
+	op.cmd.dtr = spi_nor_protocol_is_dtr(nor->write_proto);
 
 	if (nor->program_opcode == SPINOR_OP_AAI_WP && nor->sst_write_second)
 		op.addr.nbytes = 0;
@@ -115,11 +228,20 @@ static ssize_t m25p80_read(struct spi_nor *nor, loff_t from, size_t len,
 	size_t remaining = len;
 	int ret;
 
+	if (nor->dual_cmd_enable)
+		m25p80_2cmd_enable(&op, nor->read_opcode);
+
+	if (nor->dtr_enable && (len & 0x01)) {
+		op.data.nbytes++;
+		remaining++;
+	}
+
 	/* get transfer protocols. */
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->read_proto);
 	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->read_proto);
 	op.dummy.buswidth = op.addr.buswidth;
 	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->read_proto);
+	op.cmd.dtr = spi_nor_protocol_is_dtr(nor->read_proto);
 
 	/* convert the dummy cycles to the number of bytes */
 	op.dummy.nbytes = (nor->read_dummy * op.dummy.buswidth) / 8;
@@ -174,6 +296,8 @@ static int m25p_probe(struct spi_mem *spimem)
 	nor->write = m25p80_write;
 	nor->write_reg = m25p80_write_reg;
 	nor->read_reg = m25p80_read_reg;
+	nor->write_reg2 = m25p80_write_reg2;
+	nor->read_reg2 = m25p80_read_reg2;
 
 	nor->dev = &spimem->spi->dev;
 	spi_nor_set_flash_node(nor, spi->dev.of_node);
@@ -182,7 +306,18 @@ static int m25p_probe(struct spi_mem *spimem)
 	spi_mem_set_drvdata(spimem, flash);
 	flash->spimem = spimem;
 
-	if (spi->mode & SPI_RX_QUAD) {
+	if (spi->mode & SPI_RX_OCTO && (spi->mode & SPI_DTR)) {
+		hwcaps.mask |= SNOR_HWCAPS_READ_8_8_8_DTR;
+
+		if (spi->mode & SPI_TX_OCTO && (spi->mode & SPI_DTR))
+			hwcaps.mask |= SNOR_HWCAPS_PP_8_8_8_DTR;
+
+	} else if (spi->mode & SPI_RX_OCTO) {
+		hwcaps.mask |= SNOR_HWCAPS_READ_8_8_8;
+
+		if (spi->mode & SPI_TX_OCTO)
+			hwcaps.mask |= SNOR_HWCAPS_PP_8_8_8;
+	} else if (spi->mode & SPI_RX_QUAD) {
 		hwcaps.mask |= SNOR_HWCAPS_READ_1_1_4;
 
 		if (spi->mode & SPI_TX_QUAD)
