@@ -17,12 +17,29 @@
 	{							\
 		.buswidth = __buswidth,				\
 		.opcode = __opcode,				\
+		.nbytes = 1,					\
 	}
 
 #define SPI_MEM_OP_DTR_CMD(__opcode, __buswidth)		\
 	{							\
 		.buswidth = __buswidth,				\
 		.opcode = __opcode,				\
+		.nbytes = 1,					\
+		.dtr = true,					\
+	}
+
+#define SPI_MEM_OP_CMD_16B(__opcode, __buswidth)		\
+	{							\
+		.buswidth = __buswidth,				\
+		.opcode = __opcode,				\
+		.nbytes = 2,					\
+	}
+
+#define SPI_MEM_OP_DTR_CMD_16B(__opcode, __buswidth)		\
+	{							\
+		.buswidth = __buswidth,				\
+		.opcode = __opcode,				\
+		.nbytes = 2,					\
 		.dtr = true,					\
 	}
 
@@ -107,6 +124,7 @@ enum spi_mem_data_dir {
 
 /**
  * struct spi_mem_op - describes a SPI memory operation
+ * @cmd.nbytes: number of opcode bytes (only 1 or 2 are valid)
  * @cmd.buswidth: number of IO lines used to transmit the command
  * @cmd.dtr: set true to transfer opcode in double transfer rate mode
  * @cmd.opcode: operation opcode
@@ -132,9 +150,10 @@ enum spi_mem_data_dir {
  */
 struct spi_mem_op {
 	struct {
+		u8 nbytes;
 		u8 buswidth;
 		bool dtr;
-		u8 opcode;
+		u16 opcode;
 	} cmd;
 
 	struct {
