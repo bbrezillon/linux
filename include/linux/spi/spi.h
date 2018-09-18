@@ -165,6 +165,7 @@ struct spi_device {
 #define	SPI_RX_QUAD	0x800			/* receive with 4 wires */
 #define	SPI_TX_OCTO	0x1000			/* transmit with 8 wires */
 #define	SPI_RX_OCTO	0x2000			/* receive with 8 wires */
+#define	SPI_DTR		0x4000			/* double transfer rate */
 	int			irq;
 	void			*controller_state;
 	void			*controller_data;
