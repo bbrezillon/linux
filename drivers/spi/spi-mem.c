@@ -161,7 +161,7 @@ static bool spi_mem_buswidth_is_valid(u8 buswidth)
 
 static int spi_mem_check_op(const struct spi_mem_op *op)
 {
-	if (!op->cmd.buswidth)
+	if (!op->cmd.buswidth || (op->cmd.nbytes != 2 && op->cmd.nbytes != 1))
 		return -EINVAL;
 
 	if ((op->addr.nbytes && !op->addr.buswidth) ||
