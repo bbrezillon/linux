@@ -43,15 +43,12 @@
 #define SPINOR_OP_WRSR		0x01	/* Write status register 1 byte */
 #define SPINOR_OP_RDSR2		0x3f	/* Read status register 2 */
 #define SPINOR_OP_WRSR2		0x3e	/* Write status register 2 */
-#define SPINOR_OP_RDCR2		0x71	/* Read configuration register 2 */
-#define SPINOR_OP_WRCR2		0x72	/* Write configuration register 2 */
 #define SPINOR_OP_READ		0x03	/* Read data bytes (low frequency) */
 #define SPINOR_OP_READ_FAST	0x0b	/* Read data bytes (high frequency) */
 #define SPINOR_OP_READ_1_1_2	0x3b	/* Read data bytes (Dual Output SPI) */
 #define SPINOR_OP_READ_1_2_2	0xbb	/* Read data bytes (Dual I/O SPI) */
 #define SPINOR_OP_READ_1_1_4	0x6b	/* Read data bytes (Quad Output SPI) */
 #define SPINOR_OP_READ_1_4_4	0xeb	/* Read data bytes (Quad I/O SPI) */
-#define SPINOR_OP_READ_8_8_8	0xec	/* Read data bytes (OCTO I/O SPI) */
 #define SPINOR_OP_PP		0x02	/* Page program (up to 256 bytes) */
 #define SPINOR_OP_PP_1_1_4	0x32	/* Quad page program */
 #define SPINOR_OP_PP_1_4_4	0x38	/* Quad page program */
@@ -86,7 +83,6 @@
 #define SPINOR_OP_READ_1_1_1_DTR	0x0d
 #define SPINOR_OP_READ_1_2_2_DTR	0xbd
 #define SPINOR_OP_READ_1_4_4_DTR	0xed
-#define SPINOR_OP_READ_8_8_8_DTR	0xee
 
 #define SPINOR_OP_READ_1_1_1_DTR_4B	0x0e
 #define SPINOR_OP_READ_1_2_2_DTR_4B	0xbe
@@ -167,30 +163,15 @@
 	((((unsigned long)(_nbits)) << SNOR_PROTO_DATA_SHIFT) & \
 	 SNOR_PROTO_DATA_MASK)
 
-/* Double Transfer Rate */
-#define SNOR_PROTO_INST_IS_DTR	BIT(26)
-#define SNOR_PROTO_ADDR_IS_DTR	BIT(25)
-#define SNOR_PROTO_DATA_IS_DTR	BIT(24)
+#define SNOR_PROTO_IS_DTR	BIT(24)	/* Double Transfer Rate */
 
 #define SNOR_PROTO_STR(_inst_nbits, _addr_nbits, _data_nbits)	\
 	(SNOR_PROTO_INST(_inst_nbits) |				\
 	 SNOR_PROTO_ADDR(_addr_nbits) |				\
 	 SNOR_PROTO_DATA(_data_nbits))
-#define SNOR_PROTO_DTR(_inst_nbits, _inst_dtr, _addr_nbits,	\
-		       _addr_dtr, _data_nbits, _data_dtr)	\
-	(((_inst_dtr) ? SNOR_PROTO_INST_IS_DTR : 0) |		\
-	 ((_addr_dtr) ? SNOR_PROTO_ADDR_IS_DTR : 0) |		\
-	 ((_data_dtr) ? SNOR_PROTO_DATA_IS_DTR : 0) |		\
+#define SNOR_PROTO_DTR(_inst_nbits, _addr_nbits, _data_nbits)	\
+	(SNOR_PROTO_IS_DTR |					\
 	 SNOR_PROTO_STR(_inst_nbits, _addr_nbits, _data_nbits))
-
-/* Status and Configuration Register Address in Octo mode */
-#define RDSR_ADDR			0x00
-#define RDCR_ADDR			0x01
-
-/* 2nd Configuration Register bits */
-#define CR2_ADDR_MODE_EN		0x00
-#define CR2_SOPI_EN			0x01
-#define CR2_DOPI_EN			0x02
 
 enum spi_nor_protocol {
 	SNOR_PROTO_1_1_1 = SNOR_PROTO_STR(1, 1, 1),
@@ -204,11 +185,10 @@ enum spi_nor_protocol {
 	SNOR_PROTO_4_4_4 = SNOR_PROTO_STR(4, 4, 4),
 	SNOR_PROTO_8_8_8 = SNOR_PROTO_STR(8, 8, 8),
 
-	SNOR_PROTO_1_1_1_DTR = SNOR_PROTO_DTR(1, false, 1, true, 1, true),
-	SNOR_PROTO_1_2_2_DTR = SNOR_PROTO_DTR(1, false, 2, true, 2, true),
-	SNOR_PROTO_1_4_4_DTR = SNOR_PROTO_DTR(1, false, 4, true, 4, true),
-	SNOR_PROTO_1_8_8_DTR = SNOR_PROTO_DTR(1, false, 8, true, 8, true),
-	SNOR_PROTO_8_8_8_DTR = SNOR_PROTO_DTR(8, true, 8, true, 8, true),
+	SNOR_PROTO_1_1_1_DTR = SNOR_PROTO_DTR(1, 1, 1),
+	SNOR_PROTO_1_2_2_DTR = SNOR_PROTO_DTR(1, 2, 2),
+	SNOR_PROTO_1_4_4_DTR = SNOR_PROTO_DTR(1, 4, 4),
+	SNOR_PROTO_1_8_8_DTR = SNOR_PROTO_DTR(1, 8, 8),
 };
 
 static inline bool spi_nor_protocol_is_dtr(enum spi_nor_protocol proto)
@@ -322,10 +302,6 @@ struct spi_nor {
 	void (*unprepare)(struct spi_nor *nor, enum spi_nor_ops ops);
 	int (*read_reg)(struct spi_nor *nor, u8 opcode, u8 *buf, int len);
 	int (*write_reg)(struct spi_nor *nor, u8 opcode, u8 *buf, int len);
-	int (*read_reg2)(struct spi_nor *nor, u8 opcode, loff_t from,
-			 int addrlen, u8 *buf, int len);
-	int (*write_reg2)(struct spi_nor *nor, u8 opcode, loff_t to,
-			  int addrlen, u8 *buf, int len);
 
 	ssize_t (*read)(struct spi_nor *nor, loff_t from,
 			size_t len, u_char *read_buf);
@@ -337,9 +313,6 @@ struct spi_nor {
 	int (*flash_unlock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
 	int (*flash_is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
 	int (*quad_enable)(struct spi_nor *nor);
-	int (*octo_enable)(struct spi_nor *nor);
-	bool dual_cmd_enable;
-	bool dtr_enable;
 
 	void *priv;
 };
@@ -371,7 +344,7 @@ struct spi_nor_hwcaps {
  * then Quad SPI protocols before Dual SPI protocols, Fast Read and lastly
  * (Slow) Read.
  */
-#define SNOR_HWCAPS_READ_MASK		GENMASK(15, 0)
+#define SNOR_HWCAPS_READ_MASK		GENMASK(14, 0)
 #define SNOR_HWCAPS_READ		BIT(0)
 #define SNOR_HWCAPS_READ_FAST		BIT(1)
 #define SNOR_HWCAPS_READ_1_1_1_DTR	BIT(2)
@@ -388,12 +361,11 @@ struct spi_nor_hwcaps {
 #define SNOR_HWCAPS_READ_4_4_4		BIT(9)
 #define SNOR_HWCAPS_READ_1_4_4_DTR	BIT(10)
 
-#define SNOR_HWCPAS_READ_OCTO		GENMASK(15, 11)
+#define SNOR_HWCPAS_READ_OCTO		GENMASK(14, 11)
 #define SNOR_HWCAPS_READ_1_1_8		BIT(11)
 #define SNOR_HWCAPS_READ_1_8_8		BIT(12)
 #define SNOR_HWCAPS_READ_8_8_8		BIT(13)
 #define SNOR_HWCAPS_READ_1_8_8_DTR	BIT(14)
-#define SNOR_HWCAPS_READ_8_8_8_DTR	BIT(15)
 
 /*
  * Page Program capabilities.
@@ -404,7 +376,7 @@ struct spi_nor_hwcaps {
  * JEDEC/SFDP standard to define them. Also at this moment no SPI flash memory
  * implements such commands.
  */
-#define SNOR_HWCAPS_PP_MASK	GENMASK(23, 16)
+#define SNOR_HWCAPS_PP_MASK	GENMASK(22, 16)
 #define SNOR_HWCAPS_PP		BIT(16)
 
 #define SNOR_HWCAPS_PP_QUAD	GENMASK(19, 17)
@@ -412,11 +384,10 @@ struct spi_nor_hwcaps {
 #define SNOR_HWCAPS_PP_1_4_4	BIT(18)
 #define SNOR_HWCAPS_PP_4_4_4	BIT(19)
 
-#define SNOR_HWCAPS_PP_OCTO	GENMASK(23, 20)
+#define SNOR_HWCAPS_PP_OCTO	GENMASK(22, 20)
 #define SNOR_HWCAPS_PP_1_1_8	BIT(20)
 #define SNOR_HWCAPS_PP_1_8_8	BIT(21)
 #define SNOR_HWCAPS_PP_8_8_8	BIT(22)
-#define SNOR_HWCAPS_PP_8_8_8_DTR	BIT(23)
 
 /**
  * spi_nor_scan() - scan the SPI NOR

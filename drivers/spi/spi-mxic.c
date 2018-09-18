@@ -205,6 +205,7 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 		if (ret)
 			return ret;
 
+
 		writel(data, mxic->regs + TXD(nbytes % 4));
 
 		if (rxbuf) {
@@ -239,11 +240,12 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 static bool mxic_spi_mem_supports_op(struct spi_mem *mem,
 				     const struct spi_mem_op *op)
 {
-	if (op->data.nbytes && op->dummy.nbytes &&
-	    op->data.buswidth != op->dummy.buswidth)
+	if (op->data.buswidth > 4 || op->addr.buswidth > 4 ||
+	    op->dummy.buswidth > 4 || op->cmd.buswidth > 4)
 		return false;
 
-	if (op->cmd.buswidth == 8 && op->cmd.nbytes != 2)
+	if (op->data.nbytes && op->dummy.nbytes &&
+	    op->data.buswidth != op->dummy.buswidth)
 		return false;
 
 	if (op->addr.nbytes > 7)
@@ -258,12 +260,9 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 	struct mxic_spi *mxic = spi_master_get_devdata(mem->spi->master);
 	int nio = 1, i, ret;
 	u32 ss_ctrl;
-	u8 cmd[2];
 	u8 addr[8];
 
-	if (mem->spi->mode & (SPI_TX_OCTO | SPI_RX_OCTO))
-		nio = 8;
-	else if (mem->spi->mode & (SPI_TX_QUAD | SPI_RX_QUAD))
+	if (mem->spi->mode & (SPI_TX_QUAD | SPI_RX_QUAD))
 		nio = 4;
 	else if (mem->spi->mode & (SPI_TX_DUAL | SPI_RX_DUAL))
 		nio = 2;
@@ -275,15 +274,14 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 	       mxic->regs + HC_CFG);
 	writel(HC_EN_BIT, mxic->regs + HC_EN);
 
-	ss_ctrl = OP_CMD_BYTES(op->cmd.nbytes) |
-		  OP_CMD_BUSW(fls(op->cmd.buswidth) - 1);
+	ss_ctrl = OP_CMD_BYTES(1) | OP_CMD_BUSW(fls(op->cmd.buswidth) - 1);
 
 	if (op->addr.nbytes)
 		ss_ctrl |= OP_ADDR_BYTES(op->addr.nbytes) |
 			   OP_ADDR_BUSW(fls(op->addr.buswidth) - 1);
 
 	if (op->dummy.nbytes)
-		ss_ctrl |= OP_DUMMY_CYC(op->dummy.nbytes);
+		ss_ctrl |= OP_DUMMY_CYC(op->addr.nbytes);
 
 	if (op->data.nbytes) {
 		ss_ctrl |= OP_DATA_BUSW(fls(op->data.buswidth) - 1);
@@ -291,17 +289,12 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 			ss_ctrl |= OP_READ;
 	}
 
-	if (op->cmd.dtr)
-		ss_ctrl |= OP_CMD_DDR | OP_ADDR_DDR | OP_DATA_DDR | OP_DQS_EN;
-
 	writel(ss_ctrl, mxic->regs + SS_CTRL(mem->spi->chip_select));
 
 	writel(readl(mxic->regs + HC_CFG) | HC_CFG_MAN_CS_ASSERT,
 	       mxic->regs + HC_CFG);
 
-	cmd[0] = op->cmd.opcode;
-	cmd[1] = op->cmd.opcode >> 8;
-	ret = mxic_spi_data_xfer(mxic, cmd, NULL, op->cmd.nbytes);
+	ret = mxic_spi_data_xfer(mxic, &op->cmd.opcode, NULL, 1);
 	if (ret)
 		goto out;
 
@@ -482,9 +475,7 @@ static int mxic_spi_probe(struct platform_device *pdev)
 	master->bits_per_word_mask = SPI_BPW_MASK(8);
 	master->mode_bits = SPI_CPOL | SPI_CPHA |
 			SPI_RX_DUAL | SPI_TX_DUAL |
-			SPI_RX_QUAD | SPI_TX_QUAD |
-			SPI_RX_OCTO | SPI_TX_OCTO |
-			SPI_DTR;
+			SPI_RX_QUAD | SPI_TX_QUAD;
 
 	/* Host controller initializations */
 	mxic_spi_hw_init(mxic);
