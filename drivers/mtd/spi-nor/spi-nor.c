@@ -244,18 +244,6 @@ static u8 spi_nor_convert_3to4_erase(u8 opcode)
 static void spi_nor_set_4byte_opcodes(struct spi_nor *nor,
 				      const struct flash_info *info)
 {
-	/* Do some manufacturer fixups first */
-	switch (JEDEC_MFR(info)) {
-	case SNOR_MFR_SPANSION:
-		/* No small sector erase for 4-byte command set */
-		nor->erase_opcode = SPINOR_OP_SE;
-		nor->mtd.erasesize = info->sector_size;
-		break;
-
-	default:
-		break;
-	}
-
 	nor->read_opcode = spi_nor_convert_3to4_read(nor->read_opcode);
 	nor->program_opcode = spi_nor_convert_3to4_program(nor->program_opcode);
 	nor->erase_opcode = spi_nor_convert_3to4_erase(nor->erase_opcode);
@@ -3608,6 +3596,15 @@ static void winbond_fixups(struct spi_nor *nor)
 	nor->set_4byte = winbond_set_4byte;
 }
 
+static void spansion_fixups(struct spi_nor *nor)
+{
+	if (nor->flags & SPI_NOR_4B_OPCODES) {
+		/* No small sector erase for 4-byte command set */
+		nor->erase_opcode = SPINOR_OP_SE_4B;
+		nor->mtd.erasesize = nor->info->sector_size;
+	}
+}
+
 static void spi_nor_manufacturer_fixups(struct spi_nor *nor)
 {
 	switch (JEDEC_MFR(nor->info)) {
@@ -3621,6 +3618,10 @@ static void spi_nor_manufacturer_fixups(struct spi_nor *nor)
 
 	case SNOR_MFR_WINBOND:
 		winbond_fixups(nor);
+		break;
+
+	case SNOR_MFR_SPANSION:
+		spansion_fixups(nor);
 		break;
 
 	default:
