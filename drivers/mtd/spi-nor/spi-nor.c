@@ -276,44 +276,15 @@ static void spi_nor_set_4byte_opcodes(struct spi_nor *nor,
 /* Enable/disable 4-byte addressing mode. */
 static int set_4byte(struct spi_nor *nor, bool enable)
 {
-	int status;
-	bool need_wren = false;
-	u8 cmd;
+	if (nor->set_4byte)
+		return nor->set_4byte(nor, enable);
 
-	switch (JEDEC_MFR(nor->info)) {
-	case SNOR_MFR_MICRON:
-		/* Some Micron need WREN command; all will accept it */
-		need_wren = true;
-	case SNOR_MFR_MACRONIX:
-	case SNOR_MFR_WINBOND:
-		if (need_wren)
-			write_enable(nor);
-
-		cmd = enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B;
-		status = nor->write_reg(nor, cmd, NULL, 0);
-		if (need_wren)
-			write_disable(nor);
-
-		if (!status && !enable &&
-		    JEDEC_MFR(nor->info) == SNOR_MFR_WINBOND) {
-			/*
-			 * On Winbond W25Q256FV, leaving 4byte mode causes
-			 * the Extended Address Register to be set to 1, so all
-			 * 3-byte-address reads come from the second 16M.
-			 * We must clear the register to enable normal behavior.
-			 */
-			write_enable(nor);
-			nor->cmd_buf[0] = 0;
-			nor->write_reg(nor, SPINOR_OP_WREAR, nor->cmd_buf, 1);
-			write_disable(nor);
-		}
-
-		return status;
-	default:
-		/* Spansion style */
-		nor->cmd_buf[0] = enable << 7;
-		return nor->write_reg(nor, SPINOR_OP_BRWR, nor->cmd_buf, 1);
-	}
+	/*
+	 * Spansion style. Should work for all NORs that do not have their own
+	 * ->set_4byte() implementation.
+	 */
+	nor->cmd_buf[0] = enable << 7;
+	return nor->write_reg(nor, SPINOR_OP_BRWR, nor->cmd_buf, 1);
 }
 
 static int s3an_sr_ready(struct spi_nor *nor)
@@ -3583,6 +3554,80 @@ void spi_nor_restore(struct spi_nor *nor)
 }
 EXPORT_SYMBOL_GPL(spi_nor_restore);
 
+static int macronix_set_4byte(struct spi_nor *nor, bool enable)
+{
+	return nor->write_reg(nor, enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B,
+			      NULL, 0);
+}
+
+static int micron_set_4byte(struct spi_nor *nor, bool enable)
+{
+	int ret;
+
+	write_enable(nor);
+	ret = macronix_set_4byte(nor, enable);
+	write_disable(nor);
+
+	return ret;
+}
+
+static int winbond_set_4byte(struct spi_nor *nor, bool enable)
+{
+	int ret;
+
+	ret = macronix_set_4byte(nor, enable);
+	if (ret || enable)
+		return ret;
+
+	/*
+	 * On Winbond W25Q256FV, leaving 4byte mode causes the Extended Address
+	 * Register to be set to 1, so all 3-byte-address reads come from the
+	 * second 16M.
+	 * We must clear the register to enable normal behavior.
+	 */
+	write_enable(nor);
+	nor->cmd_buf[0] = 0;
+	nor->write_reg(nor, SPINOR_OP_WREAR, nor->cmd_buf, 1);
+	write_disable(nor);
+
+	return ret;
+}
+
+static void micron_fixups(struct spi_nor *nor)
+{
+	nor->set_4byte = micron_set_4byte;
+}
+
+static void macronix_fixups(struct spi_nor *nor)
+{
+	nor->set_4byte = macronix_set_4byte;
+}
+
+static void winbond_fixups(struct spi_nor *nor)
+{
+	nor->set_4byte = winbond_set_4byte;
+}
+
+static void spi_nor_manufacturer_fixups(struct spi_nor *nor)
+{
+	switch (JEDEC_MFR(nor->info)) {
+	case SNOR_MFR_MICRON:
+		micron_fixups(nor);
+		break;
+
+	case SNOR_MFR_MACRONIX:
+		macronix_fixups(nor);
+		break;
+
+	case SNOR_MFR_WINBOND:
+		winbond_fixups(nor);
+		break;
+
+	default:
+		break;
+	}
+}
+
 static const struct flash_info *spi_nor_match_id(const char *name)
 {
 	const struct flash_info *id = spi_nor_ids;
@@ -3763,8 +3808,12 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 			return ret;
 	}
 
-	/* Send all the required SPI flash commands to initialize device */
 	nor->info = info;
+
+	/* Apply manufacturer fixups before we start using the NOR. */
+	spi_nor_manufacturer_fixups(nor);
+
+	/* Send all the required SPI flash commands to initialize device */
 	ret = spi_nor_init(nor);
 	if (ret)
 		return ret;
