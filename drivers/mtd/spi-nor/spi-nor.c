@@ -97,50 +97,75 @@ struct flash_info {
 
 static const struct flash_info *spi_nor_match_id(const char *name);
 
-static int spi_nor_read_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
+static int spi_nor_exec_op(struct spi_nor *nor, const struct spi_mem_op *tmpl,
+			   u64 *addr, void *buf, unsigned int len)
 {
-	if (nor->spimem) {
-		struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(opcode, 1),
-						  SPI_MEM_OP_NO_ADDR,
-						  SPI_MEM_OP_NO_DUMMY,
-						  SPI_MEM_OP_DATA_IN(len,
-								nor->bouncebuf,
-								1));
-		int ret;
+	struct spi_mem_op op;
+	int ret;
 
+	if (!tmpl || (len && !buf))
+		return -EINVAL;
+
+	op = *tmpl;
+
+	if (op.addr.nbytes && addr)
+		op.addr.val = *addr;
+
+	op.data.nbytes = len;
+
+	if (len && !virt_addr_valid(buf)) {
 		if (len > nor->bouncebuf_size)
 			return -ENOTSUPP;
 
-		ret = spi_mem_exec_op(nor->spimem, &op);
-		if (ret < 0)
-			dev_err(nor->dev, "error %d reading %x\n", ret,
-				opcode);
-		else
-			memcpy(val, nor->bouncebuf, len);
-
-		return ret;
+		if (op.data.dir == SPI_MEM_DATA_IN) {
+			op.data.buf.in = nor->bouncebuf;
+		} else {
+			op.data.buf.out = nor->bouncebuf;
+			memcpy(nor->bouncebuf, buf, len);
+		}
+	} else {
+		op.data.buf.out = buf;
 	}
+
+	ret = spi_mem_exec_op(nor->spimem, &op);
+	if (ret)
+		return ret;
+
+	if (!virt_addr_valid(buf) && len && op.data.dir == SPI_MEM_DATA_OUT)
+		memcpy(buf, nor->bouncebuf, len);
+
+	return 0;
+}
+
+static int spi_nor_addr_data_op(struct spi_nor *nor, const struct spi_mem_op *tmpl,
+				u64 addr, void *buf, unsigned int len)
+{
+	return spi_nor_exec_op(nor, tmpl, &addr, buf, len);
+}
+
+static int spi_nor_data_op(struct spi_nor *nor, const struct spi_mem_op *tmpl,
+			   void *buf, unsigned int len)
+{
+	return spi_nor_exec_op(nor, tmpl, NULL, buf, len);
+}
+
+static int spi_nor_nodata_op(struct spi_nor *nor, const struct spi_mem_op *tmpl)
+{
+	return spi_nor_exec_op(nor, tmpl, NULL, NULL, 0);
+}
+
+static int spi_nor_read_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
+{
+	if (nor->mode != SPI_NOR_SINGLE_MODE)
+		return -ENOTSUPP;
 
 	return nor->read_reg(nor, opcode, val, len);
 }
 
 static int spi_nor_write_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
 {
-	if (nor->spimem) {
-		struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(opcode, 1),
-						  SPI_MEM_OP_NO_ADDR,
-						  SPI_MEM_OP_NO_DUMMY,
-						  SPI_MEM_OP_DATA_OUT(len,
-								nor->bouncebuf,
-								1));
-
-		if (len > nor->bouncebuf_size)
-			return -ENOTSUPP;
-
-		memcpy(nor->bouncebuf, val, len);
-
-		return spi_mem_exec_op(nor->spimem, &op);
-	}
+	if (nor->mode != SPI_NOR_SINGLE_MODE)
+		return -ENOTSUPP;
 
 	return nor->write_reg(nor, opcode, val, len);
 }
@@ -279,7 +304,12 @@ static int read_sr(struct spi_nor *nor)
 	int ret;
 	u8 val;
 
-	ret = spi_nor_read_reg(nor, SPINOR_OP_RDSR, &val, 1);
+	if (nor->spimem)
+		ret = spi_nor_data_op(nor, nor->op_tmpls[nor->mode].rdsr,
+				      &val, 1);
+	else
+		ret = spi_nor_read_reg(nor, SPINOR_OP_RDSR, &val, 1);
+
 	if (ret < 0) {
 		pr_err("error %d reading SR\n", (int) ret);
 		return ret;
@@ -298,7 +328,12 @@ static int read_fsr(struct spi_nor *nor)
 	int ret;
 	u8 val;
 
-	ret = spi_nor_read_reg(nor, SPINOR_OP_RDFSR, &val, 1);
+	if (nor->spimem)
+		ret = spi_nor_data_op(nor, nor->op_tmpls[nor->mode].rdfsr,
+				      &val, 1);
+	else
+		ret = spi_nor_read_reg(nor, SPINOR_OP_RDFSR, &val, 1);
+
 	if (ret < 0) {
 		pr_err("error %d reading FSR\n", ret);
 		return ret;
@@ -317,7 +352,12 @@ static int read_cr(struct spi_nor *nor)
 	int ret;
 	u8 val;
 
-	ret = spi_nor_read_reg(nor, SPINOR_OP_RDCR, &val, 1);
+	if (nor->spimem)
+		ret = spi_nor_data_op(nor, nor->op_tmpls[nor->mode].rdcr,
+				      &val, 1);
+	else
+		ret = spi_nor_read_reg(nor, SPINOR_OP_RDCR, &val, 1);
+
 	if (ret < 0) {
 		dev_err(nor->dev, "error %d reading CR\n", ret);
 		return ret;
@@ -332,6 +372,10 @@ static int read_cr(struct spi_nor *nor)
  */
 static inline int write_sr(struct spi_nor *nor, u8 val)
 {
+	if (nor->spimem)
+		return spi_nor_data_op(nor, nor->op_tmpls[nor->mode].wrsr,
+				       &val, 1);
+
 	nor->cmd_buf[0] = val;
 	return spi_nor_write_reg(nor, SPINOR_OP_WRSR, nor->cmd_buf, 1);
 }
@@ -342,6 +386,9 @@ static inline int write_sr(struct spi_nor *nor, u8 val)
  */
 static inline int write_enable(struct spi_nor *nor)
 {
+	if (nor->spimem)
+		return spi_nor_nodata_op(nor, nor->op_tmpls[nor->mode].wren);
+
 	return spi_nor_write_reg(nor, SPINOR_OP_WREN, NULL, 0);
 }
 
@@ -350,6 +397,9 @@ static inline int write_enable(struct spi_nor *nor)
  */
 static inline int write_disable(struct spi_nor *nor)
 {
+	if (nor->spimem)
+		return spi_nor_nodata_op(nor, nor->op_tmpls[nor->mode].wrdi);
+
 	return spi_nor_write_reg(nor, SPINOR_OP_WRDI, NULL, 0);
 }
 
@@ -434,48 +484,108 @@ static void spi_nor_set_4byte_opcodes(struct spi_nor *nor,
 	nor->erase_opcode = spi_nor_convert_3to4_erase(nor->erase_opcode);
 }
 
-/* Enable/disable 4-byte addressing mode. */
-static inline int set_4byte(struct spi_nor *nor, const struct flash_info *info,
-			    int enable)
+static int macronix_set_4byte(struct spi_nor *nor, bool enable)
 {
-	int status;
-	bool need_wren = false;
-	u8 cmd;
+	if (nor->mode != SPI_NOR_SINGLE_MODE)
+		return -EINVAL;
 
-	switch (JEDEC_MFR(info)) {
+	if (nor->spimem) {
+		struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(0, 1),
+						  SPI_MEM_OP_NO_ADDR,
+						  SPI_MEM_OP_NO_DUMMY,
+						  SPI_MEM_OP_NO_DATA);
+
+		op.cmd.opcode = enable ? SPINOR_OP_EN4B: SPINOR_OP_EX4B;
+		return spi_mem_exec_op(nor->spimem, &op);
+	}
+
+	return spi_nor_write_reg(nor, enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B,
+				 NULL, 0);
+}
+
+static int micron_set_4byte(struct spi_nor *nor, bool enable)
+{
+	int ret;
+
+	write_enable(nor);
+	ret = macronix_set_4byte(nor, enable);
+	write_disable(nor);
+
+	return ret;
+}
+
+static int winbond_set_4byte(struct spi_nor *nor, bool enable)
+{
+	int ret;
+
+	ret = macronix_set_4byte(nor, enable);
+
+	if (enable)
+		return ret;
+
+	/*
+	 * On Winbond W25Q256FV, leaving 4byte mode causes the Extended
+	 * Address Register to be set to 1, so all 3-byte-address reads
+	 * come from the second 16M.
+	 * We must clear the register to enable normal behavior.
+	 */
+	write_enable(nor);
+	if (nor->spimem) {
+		u8 *scratchbuf = nor->bouncebuf;
+		struct spi_mem_op op = SPI_MEM_OP(
+					SPI_MEM_OP_CMD(SPINOR_OP_WREAR, 1),
+					SPI_MEM_OP_NO_ADDR,
+					SPI_MEM_OP_NO_DUMMY,
+					SPI_MEM_OP_DATA_OUT(1, scratchbuf, 1));
+
+		scratchbuf[0] = 0;
+		spi_mem_exec_op(nor->spimem, &op);
+	} else {
+		nor->cmd_buf[0] = 0;
+		spi_nor_write_reg(nor, SPINOR_OP_WREAR,
+				  nor->cmd_buf, 1);
+	}
+	write_disable(nor);
+
+	return ret;
+}
+
+static int spansion_set_4byte(struct spi_nor *nor, bool enable)
+{
+	if (nor->mode != SPI_NOR_SINGLE_MODE)
+		return -EINVAL;
+
+	if (nor->spimem) {
+		u8 *scratchbuf = nor->bouncebuf;
+		struct spi_mem_op op = SPI_MEM_OP(
+					SPI_MEM_OP_CMD(SPINOR_OP_BRWR, 1),
+					SPI_MEM_OP_NO_ADDR,
+					SPI_MEM_OP_NO_DUMMY,
+					SPI_MEM_OP_DATA_OUT(1, scratchbuf, 1));
+
+		scratchbuf[0] = enable ? BIT(7) : 0;
+		return spi_mem_exec_op(nor->spimem, &op);
+	}
+
+	nor->cmd_buf[0] = enable << 7;
+	return spi_nor_write_reg(nor, SPINOR_OP_BRWR, nor->cmd_buf, 1);
+}
+
+/* Enable/disable 4-byte addressing mode. */
+static int set_4byte(struct spi_nor *nor, int enable)
+{
+	switch (JEDEC_MFR(nor->info)) {
 	case SNOR_MFR_MICRON:
-		/* Some Micron need WREN command; all will accept it */
-		need_wren = true;
+		return micron_set_4byte(nor, enable);
+
 	case SNOR_MFR_MACRONIX:
+		return macronix_set_4byte(nor, enable);
+
 	case SNOR_MFR_WINBOND:
-		if (need_wren)
-			write_enable(nor);
+		return winbond_set_4byte(nor, enable);
 
-		cmd = enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B;
-		status = spi_nor_write_reg(nor, cmd, NULL, 0);
-		if (need_wren)
-			write_disable(nor);
-
-		if (!status && !enable &&
-		    JEDEC_MFR(info) == SNOR_MFR_WINBOND) {
-			/*
-			 * On Winbond W25Q256FV, leaving 4byte mode causes
-			 * the Extended Address Register to be set to 1, so all
-			 * 3-byte-address reads come from the second 16M.
-			 * We must clear the register to enable normal behavior.
-			 */
-			write_enable(nor);
-			nor->cmd_buf[0] = 0;
-			spi_nor_write_reg(nor, SPINOR_OP_WREAR, nor->cmd_buf,
-					  1);
-			write_disable(nor);
-		}
-
-		return status;
 	default:
-		/* Spansion style */
-		nor->cmd_buf[0] = enable << 7;
-		return spi_nor_write_reg(nor, SPINOR_OP_BRWR, nor->cmd_buf, 1);
+		return spansion_set_4byte(nor, enable);
 	}
 }
 
@@ -2942,7 +3052,7 @@ static int spi_nor_init(struct spi_nor *nor)
 		 */
 		WARN_ONCE(nor->flags & SNOR_F_BROKEN_RESET,
 			  "enabling reset hack; may not recover from unexpected reboots\n");
-		set_4byte(nor, nor->info, 1);
+		set_4byte(nor, 1);
 	}
 
 	return 0;
@@ -2968,7 +3078,7 @@ void spi_nor_restore(struct spi_nor *nor)
 	    (JEDEC_MFR(nor->info) != SNOR_MFR_SPANSION) &&
 	    !(nor->info->flags & SPI_NOR_4B_OPCODES) &&
 	    (nor->flags & SNOR_F_BROKEN_RESET))
-		set_4byte(nor, nor->info, 0);
+		set_4byte(nor, 0);
 }
 EXPORT_SYMBOL_GPL(spi_nor_restore);
 

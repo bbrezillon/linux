@@ -245,6 +245,54 @@ enum spi_nor_option_flags {
  */
 struct flash_info;
 
+/*
+enum spi_nor_op_idx {
+	SPI_NOR_RDID,
+	SPI_NOR_RDSR,
+	SPI_NOR_XRDSR,
+	SPI_NOR_CLSR,
+	SPI_NOR_RDSR2,
+	SPI_NOR_RDFSR,
+	SPI_NOR_RDCR,
+	SPI_NOR_WRSR,
+	SPI_NOR_WREN,
+	SPI_NOR_WRDI,
+	SPI_NOR_NUM_OPS,
+};
+*/
+
+/**
+ * enum spi_nor_mode - Describe SPI NOR modes
+ *
+ * Some SPI NORs support full dual/quad/octo modes, and when switched to these
+ * modes they transmit everything on 2, 4 or 8 I/O lines, even the opcode which
+ * is normally transmitted on a single I/O line to let the NOR know about the
+ * bus-width for the address, dummy and data cycles that are following.
+ * This forces us to keep track of this mode and adjust the operation we send
+ * depending on the mode the flash is operating in. Not such a nice solution
+ * since sending opcodes on 2, 4 or 8 I/Os is not bringing considerable perf
+ * gains. The only reason we do that is because some NORs only support X-X-X
+ * modes and not 1-X-X.
+ */
+enum spi_nor_mode {
+	SPI_NOR_SPI_MODE,
+	SPI_NOR_DPI_MODE,
+	SPI_NOR_QPI_MODE,
+	SPI_NOR_NUM_MODES,
+};
+
+struct spi_nor_op_tmpls {
+	const struct spi_mem_op *rdsr;
+	const struct spi_mem_op *rdfsr;
+	const struct spi_mem_op *rdcr;
+	const struct spi_mem_op *wrsr;
+	const struct spi_mem_op *wren;
+	const struct spi_mem_op *wrdi;
+	const struct spi_mem_op *en4b;
+	const struct spi_mem_op *ex4b;
+	const struct spi_mem_op *brwr;
+};
+
 /**
  * struct spi_nor - Structure for defining a the SPI NOR layer
  * @mtd:		point to a mtd_info structure
@@ -292,6 +340,8 @@ struct spi_nor {
 	struct spi_mem		*spimem;
 	void			*bouncebuf;
 	unsigned int		bouncebuf_size;
+	enum spi_nor_mode	mode;
+	struct spi_nor_op_tmpls	op_tmpls[SPI_NOR_NUM_MODES];
 	const struct flash_info	*info;
 	u32			page_size;
 	u8			addr_width;
