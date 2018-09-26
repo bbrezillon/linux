@@ -609,14 +609,13 @@ static int atmel_qspi_probe(struct platform_device *pdev)
 			SNOR_HWCAPS_READ_FAST |
 			SNOR_HWCAPS_READ_1_1_2 |
 			SNOR_HWCAPS_READ_1_2_2 |
-			SNOR_HWCAPS_READ_2_2_2 |
 			SNOR_HWCAPS_READ_1_1_4 |
 			SNOR_HWCAPS_READ_1_4_4 |
-			SNOR_HWCAPS_READ_4_4_4 |
 			SNOR_HWCAPS_PP |
 			SNOR_HWCAPS_PP_1_1_4 |
 			SNOR_HWCAPS_PP_1_4_4 |
-			SNOR_HWCAPS_PP_4_4_4,
+			SNOR_HWCAPS_DPI |
+			SNOR_HWCAPS_QPI,
 	};
 	struct device_node *child, *np = pdev->dev.of_node;
 	struct atmel_qspi *aq;

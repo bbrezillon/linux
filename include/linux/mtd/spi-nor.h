@@ -472,28 +472,25 @@ struct spi_nor_hwcaps {
  * then Quad SPI protocols before Dual SPI protocols, Fast Read and lastly
  * (Slow) Read.
  */
-#define SNOR_HWCAPS_READ_MASK		GENMASK(14, 0)
+#define SNOR_HWCAPS_READ_MASK		GENMASK(11, 0)
 #define SNOR_HWCAPS_READ		BIT(0)
 #define SNOR_HWCAPS_READ_FAST		BIT(1)
 #define SNOR_HWCAPS_READ_1_1_1_DTR	BIT(2)
 
-#define SNOR_HWCAPS_READ_DUAL		GENMASK(6, 3)
+#define SNOR_HWCAPS_READ_DUAL		GENMASK(5, 3)
 #define SNOR_HWCAPS_READ_1_1_2		BIT(3)
 #define SNOR_HWCAPS_READ_1_2_2		BIT(4)
-#define SNOR_HWCAPS_READ_2_2_2		BIT(5)
-#define SNOR_HWCAPS_READ_1_2_2_DTR	BIT(6)
+#define SNOR_HWCAPS_READ_1_2_2_DTR	BIT(5)
 
-#define SNOR_HWCAPS_READ_QUAD		GENMASK(10, 7)
-#define SNOR_HWCAPS_READ_1_1_4		BIT(7)
-#define SNOR_HWCAPS_READ_1_4_4		BIT(8)
-#define SNOR_HWCAPS_READ_4_4_4		BIT(9)
-#define SNOR_HWCAPS_READ_1_4_4_DTR	BIT(10)
+#define SNOR_HWCAPS_READ_QUAD		GENMASK(8, 6)
+#define SNOR_HWCAPS_READ_1_1_4		BIT(6)
+#define SNOR_HWCAPS_READ_1_4_4		BIT(7)
+#define SNOR_HWCAPS_READ_1_4_4_DTR	BIT(8)
 
-#define SNOR_HWCPAS_READ_OCTO		GENMASK(14, 11)
-#define SNOR_HWCAPS_READ_1_1_8		BIT(11)
-#define SNOR_HWCAPS_READ_1_8_8		BIT(12)
-#define SNOR_HWCAPS_READ_8_8_8		BIT(13)
-#define SNOR_HWCAPS_READ_1_8_8_DTR	BIT(14)
+#define SNOR_HWCPAS_READ_OCTO		GENMASK(11, 9)
+#define SNOR_HWCAPS_READ_1_1_8		BIT(9)
+#define SNOR_HWCAPS_READ_1_8_8		BIT(10)
+#define SNOR_HWCAPS_READ_1_8_8_DTR	BIT(11)
 
 /*
  * Page Program capabilities.
@@ -504,24 +501,33 @@ struct spi_nor_hwcaps {
  * JEDEC/SFDP standard to define them. Also at this moment no SPI flash memory
  * implements such commands.
  */
-#define SNOR_HWCAPS_PP_MASK	GENMASK(22, 16)
+#define SNOR_HWCAPS_PP_MASK	GENMASK(20, 16)
 #define SNOR_HWCAPS_PP		BIT(16)
 
-#define SNOR_HWCAPS_PP_QUAD	GENMASK(19, 17)
+#define SNOR_HWCAPS_PP_QUAD	GENMASK(18, 17)
 #define SNOR_HWCAPS_PP_1_1_4	BIT(17)
 #define SNOR_HWCAPS_PP_1_4_4	BIT(18)
-#define SNOR_HWCAPS_PP_4_4_4	BIT(19)
 
-#define SNOR_HWCAPS_PP_OCTO	GENMASK(22, 20)
-#define SNOR_HWCAPS_PP_1_1_8	BIT(20)
-#define SNOR_HWCAPS_PP_1_8_8	BIT(21)
-#define SNOR_HWCAPS_PP_8_8_8	BIT(22)
+#define SNOR_HWCAPS_PP_OCTO	GENMASK(20, 19)
+#define SNOR_HWCAPS_PP_1_1_8	BIT(19)
+#define SNOR_HWCAPS_PP_1_8_8	BIT(20)
 
-#define SNOR_HWCAPS_X_X_X	(SNOR_HWCAPS_READ_2_2_2 |	\
-				 SNOR_HWCAPS_READ_4_4_4 |	\
-				 SNOR_HWCAPS_READ_8_8_8 |	\
-				 SNOR_HWCAPS_PP_4_4_4 |		\
-				 SNOR_HWCAPS_PP_8_8_8)
+/*
+ * DPI, QPI and OPI stand for Dual/Quad/Octo Peripheral Interface. Those modes
+ * force everything to be sent on 2, 4 or 8 I/O lines, including the opcode
+ * which is normally sent in SPI mode.
+ * They should only be used if
+ * 1/ their SPI equivalent is not supported by the chip and/or controller
+ * 2/ the chip does not have the SNOR_F_BROKEN_RESET set
+ * The same stands for the DTR variant of those modes.
+ */
+#define SNOR_HWCAPS_DPI			BIT(24)
+#define SNOR_HWCAPS_QPI			BIT(25)
+#define SNOR_HWCAPS_OPI			BIT(26)
+
+#define SNOR_HWCAPS_X_X_X	(SNOR_HWCAPS_DPI |		\
+				 SNOR_HWCAPS_QPI |		\
+				 SNOR_HWCAPS_OPI)
 
 #define SNOR_HWCAPS_DTR		(SNOR_HWCAPS_READ_1_1_1_DTR |	\
 				 SNOR_HWCAPS_READ_1_2_2_DTR |	\
@@ -529,7 +535,8 @@ struct spi_nor_hwcaps {
 				 SNOR_HWCAPS_READ_1_8_8_DTR)
 
 #define SNOR_HWCAPS_ALL		(SNOR_HWCAPS_READ_MASK |	\
-				 SNOR_HWCAPS_PP_MASK)
+				 SNOR_HWCAPS_PP_MASK |		\
+				 SNOR_HWCAPS_X_X_X)
 
 /**
  * spi_nor_scan() - scan the SPI NOR
