@@ -4124,6 +4124,11 @@ static void spi_nor_select_preferred_mode(struct spi_nor *nor, u32 hwcaps)
 	if (hwcaps & SNOR_HWCPAS_READ_OCTO && hwcaps & SNOR_HWCAPS_PP_OCTO)
 		return;
 
+	if (hwcaps & SNOR_HWCAPS_OPI_FULL_DTR) {
+		nor->preferred_mode = SPI_NOR_MODE_OPI_FULL_DTR;
+		return;
+	}
+
 	if (hwcaps & SNOR_HWCAPS_OPI) {
 		nor->preferred_mode = SPI_NOR_MODE_OPI;
 		return;
@@ -4132,6 +4137,11 @@ static void spi_nor_select_preferred_mode(struct spi_nor *nor, u32 hwcaps)
 	if (hwcaps & SNOR_HWCAPS_READ_QUAD && hwcaps & SNOR_HWCAPS_PP_QUAD)
 		return;
 
+	if (hwcaps & SNOR_HWCAPS_QPI_FULL_DTR) {
+		nor->preferred_mode = SPI_NOR_MODE_QPI_FULL_DTR;
+		return;
+	}
+
 	if (hwcaps & SNOR_HWCAPS_QPI) {
 		nor->preferred_mode = SPI_NOR_MODE_QPI;
 		return;
@@ -4139,6 +4149,11 @@ static void spi_nor_select_preferred_mode(struct spi_nor *nor, u32 hwcaps)
 
 	if (hwcaps & SNOR_HWCAPS_READ_DUAL)
 		return;
+
+	if (hwcaps & SNOR_HWCAPS_DPI_FULL_DTR) {
+		nor->preferred_mode = SPI_NOR_MODE_DPI_FULL_DTR;
+		return;
+	}
 
 	if (hwcaps & SNOR_HWCAPS_DPI) {
 		nor->preferred_mode = SPI_NOR_MODE_DPI;
@@ -4177,7 +4192,7 @@ static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 		 * controller directly implements the spi_nor interface.
 		 * Yet another reason to switch to spi-mem.
 		 */
-		ignored_mask = SNOR_HWCAPS_X_X_X;
+		ignored_mask = SNOR_HWCAPS_X_X_X | SNOR_HWCAPS_XD_XD_XD;
 		if (shared_mask & ignored_mask) {
 			dev_dbg(nor->dev,
 				"SPI n-n-n protocols are not supported.\n");
