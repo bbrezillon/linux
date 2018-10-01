@@ -333,6 +333,14 @@ struct spi_nor_erase_map {
  */
 struct flash_info;
 
+enum spi_nor_mode {
+	SPI_NOR_MODE_SPI,
+	SPI_NOR_MODE_DPI,
+	SPI_NOR_MODE_QPI,
+	SPI_NOR_MODE_OPI,
+	SPI_NOR_NUM_MODES,
+};
+
 /**
  * struct spi_nor - Structure for defining a the SPI NOR layer
  * @mtd:		point to a mtd_info structure
@@ -381,6 +389,8 @@ struct spi_nor {
 	struct spi_mem		*spimem;
 	void			*bouncebuf;
 	unsigned int		bouncebuf_size;
+	enum spi_nor_mode	preferred_mode;
+	enum spi_nor_mode	mode;
 	const struct flash_info	*info;
 	u32			page_size;
 	u8			addr_width;
@@ -412,6 +422,8 @@ struct spi_nor {
 	int (*flash_is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
 	int (*quad_enable)(struct spi_nor *nor);
 	int (*set_4byte)(struct spi_nor *nor, bool enable);
+	int (*change_mode)(struct spi_nor *nor, enum spi_nor_mode newmode);
+	void (*adjust_op)(struct spi_nor *nor, struct spi_mem_op *op);
 
 	void *priv;
 };

@@ -93,9 +93,17 @@ struct flash_info {
 #define USE_CLSR		BIT(14)	/* use CLSR command */
 
 	int	(*quad_enable)(struct spi_nor *nor);
+	int	(*change_mode)(struct spi_nor *nor, u32 newmode);
+	void	(*adjust_op)(struct spi_nor *nor, struct spi_mem_op *op);
 };
 
 #define JEDEC_MFR(info)	((info)->id[0])
+
+static void spi_nor_adjust_op(struct spi_nor *nor, struct spi_mem_op *op)
+{
+	if (nor->adjust_op)
+		nor->adjust_op(nor, op);
+}
 
 static int spi_nor_exec_op(struct spi_nor *nor, struct spi_mem_op *op,
 			   u64 *addr, void *buf, unsigned int len)
@@ -105,6 +113,8 @@ static int spi_nor_exec_op(struct spi_nor *nor, struct spi_mem_op *op,
 
 	if (!op || (len && !buf))
 		return -EINVAL;
+
+	spi_nor_adjust_op(nor, op);
 
 	if (op->addr.nbytes && addr)
 		op->addr.val = *addr;
@@ -150,11 +160,17 @@ static int spi_nor_nodata_op(struct spi_nor *nor, struct spi_mem_op *op)
 
 static int spi_nor_read_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
 {
+	if (WARN_ON_ONCE(nor->mode != SPI_NOR_MODE_SPI))
+		return -ENOTSUPP;
+
 	return nor->read_reg(nor, opcode, val, len);
 }
 
 static int spi_nor_write_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
 {
+	if (WARN_ON_ONCE(nor->mode != SPI_NOR_MODE_SPI))
+		return -ENOTSUPP;
+
 	return nor->write_reg(nor, opcode, val, len);
 }
 
@@ -183,6 +199,8 @@ static ssize_t spi_nor_spimem_read_data(struct spi_nor *nor, loff_t ofs,
 
 	/* convert the dummy cycles to the number of bytes */
 	op.dummy.nbytes = (nor->read_dummy * op.dummy.buswidth) / 8;
+
+	spi_nor_adjust_op(nor, &op);
 
 	while (remaining) {
 		op.data.nbytes = remaining < UINT_MAX ? remaining : UINT_MAX;
@@ -242,6 +260,8 @@ static ssize_t spi_nor_spimem_write_data(struct spi_nor *nor, loff_t ofs,
 
 	if (nor->program_opcode == SPINOR_OP_AAI_WP && nor->sst_write_second)
 		op.addr.nbytes = 0;
+
+	spi_nor_adjust_op(nor, &op);
 
 	op.data.nbytes = len < UINT_MAX ? len : UINT_MAX;
 
@@ -420,6 +440,25 @@ static int write_disable(struct spi_nor *nor)
 	}
 
 	return spi_nor_write_reg(nor, SPINOR_OP_WRDI, NULL, 0);
+}
+
+static int spi_nor_change_mode(struct spi_nor *nor, u32 newmode)
+{
+	int ret;
+
+	if (newmode == nor->mode)
+		return 0;
+
+	if (!nor->change_mode)
+		return -ENOTSUPP;
+
+	ret = nor->change_mode(nor, newmode);
+	if (ret)
+		return ret;
+
+	nor->mode = newmode;
+
+	return 0;
 }
 
 static struct spi_nor *mtd_to_spi_nor(struct mtd_info *mtd)
@@ -2902,9 +2941,6 @@ spi_nor_spimem_adjust_hwcaps(struct spi_nor *nor,
 	/* DTR modes are not supported yet, mask them all. */
 	*hwcaps &= ~SNOR_HWCAPS_DTR;
 
-	/* X-X-X modes are not supported yet, mask them all. */
-	*hwcaps &= ~SNOR_HWCAPS_X_X_X;
-
 	/* Start with read commands. */
 	for (cap = 0; cap < 32; cap++) {
 		int idx;
@@ -3884,6 +3920,46 @@ static int spi_nor_select_erase(struct spi_nor *nor, u32 wanted_size)
 	return 0;
 }
 
+static void spi_nor_select_preferred_mode(struct spi_nor *nor, u32 hwcaps)
+{
+	nor->preferred_mode = SPI_NOR_MODE_SPI;
+
+	/*
+	 * Let's just avoid using stateful modes when SNOR_F_BROKEN_RESET is
+	 * set.
+	 */
+	if (nor->flags & SNOR_F_BROKEN_RESET)
+		return;
+
+	/*
+	 * Stateless (1-n-n or 1-1-n) opcodes should always be preferred to
+	 * stateful (n-n-n) ones if supported.
+	 */
+	if (hwcaps & SNOR_HWCPAS_READ_OCTO && hwcaps & SNOR_HWCAPS_PP_OCTO)
+		return;
+
+	if (hwcaps & SNOR_HWCAPS_OPI) {
+		nor->preferred_mode = SPI_NOR_MODE_OPI;
+		return;
+	}
+
+	if (hwcaps & SNOR_HWCAPS_READ_QUAD && hwcaps & SNOR_HWCAPS_PP_QUAD)
+		return;
+
+	if (hwcaps & SNOR_HWCAPS_QPI) {
+		nor->preferred_mode = SPI_NOR_MODE_QPI;
+		return;
+	}
+
+	if (hwcaps & SNOR_HWCAPS_READ_DUAL)
+		return;
+
+	if (hwcaps & SNOR_HWCAPS_DPI) {
+		nor->preferred_mode = SPI_NOR_MODE_DPI;
+		return;
+	}
+}
+
 static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 			 const struct spi_nor_flash_parameter *params,
 			 const struct spi_nor_hwcaps *hwcaps)
@@ -3891,6 +3967,10 @@ static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 	u32 ignored_mask, shared_mask;
 	bool enable_quad_io;
 	int err;
+
+	/* Set ->adjust_op() and ->change_mode(). */
+	nor->adjust_op = info->adjust_op;
+	nor->change_mode = info->change_mode;
 
 	/*
 	 * Keep only the hardware capabilities supported by both the SPI
@@ -3951,6 +4031,8 @@ static int spi_nor_setup(struct spi_nor *nor, const struct flash_info *info,
 	else
 		nor->quad_enable = NULL;
 
+	spi_nor_select_preferred_mode(nor, shared_mask);
+
 	return 0;
 }
 
@@ -3970,6 +4052,11 @@ static int spi_nor_init(struct spi_nor *nor)
 		write_sr(nor, 0);
 		spi_nor_wait_till_ready(nor);
 	}
+
+	err = spi_nor_change_mode(nor, nor->preferred_mode);
+	if (err)
+		dev_err(nor->dev, "failed to switch to mode %x",
+			nor->preferred_mode);
 
 	if (nor->quad_enable) {
 		err = nor->quad_enable(nor);
@@ -4011,6 +4098,9 @@ static void spi_nor_resume(struct mtd_info *mtd)
 
 void spi_nor_restore(struct spi_nor *nor)
 {
+	/* Restore the NOR to SPI mode. */
+	spi_nor_change_mode(nor, SPI_NOR_MODE_SPI);
+
 	/* restore the addressing mode */
 	if ((nor->addr_width == 4) &&
 	    !(nor->info->flags & SPI_NOR_4B_OPCODES) &&
