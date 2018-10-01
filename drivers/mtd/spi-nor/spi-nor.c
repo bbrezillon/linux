@@ -148,6 +148,16 @@ static int spi_nor_nodata_op(struct spi_nor *nor, struct spi_mem_op *op)
 	return spi_nor_exec_op(nor, op, NULL, NULL, 0);
 }
 
+static int spi_nor_read_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
+{
+	return nor->read_reg(nor, opcode, val, len);
+}
+
+static int spi_nor_write_reg(struct spi_nor *nor, u8 opcode, u8 *val, int len)
+{
+	return nor->write_reg(nor, opcode, val, len);
+}
+
 static ssize_t spi_nor_spimem_read_data(struct spi_nor *nor, loff_t ofs,
 					size_t len, u8 *buf)
 {
@@ -283,7 +293,7 @@ static int read_sr(struct spi_nor *nor)
 
 		ret = spi_nor_data_op(nor, &op, &val, 1);
 	} else {
-		ret = nor->read_reg(nor, SPINOR_OP_RDSR, &val, 1);
+		ret = spi_nor_read_reg(nor, SPINOR_OP_RDSR, &val, 1);
 	}
 
 	if (ret < 0) {
@@ -313,7 +323,7 @@ static int read_fsr(struct spi_nor *nor)
 
 		ret = spi_nor_data_op(nor, &op, &val, 1);
 	} else {
-		ret = nor->read_reg(nor, SPINOR_OP_RDFSR, &val, 1);
+		ret = spi_nor_read_reg(nor, SPINOR_OP_RDFSR, &val, 1);
 	}
 
 	if (ret < 0) {
@@ -343,7 +353,7 @@ static int read_cr(struct spi_nor *nor)
 
 		ret = spi_nor_data_op(nor, &op, &val, 1);
 	} else {
-		ret = nor->read_reg(nor, SPINOR_OP_RDCR, &val, 1);
+		ret = spi_nor_read_reg(nor, SPINOR_OP_RDCR, &val, 1);
 	}
 
 	if (ret < 0) {
@@ -371,7 +381,7 @@ static int write_sr(struct spi_nor *nor, u8 val)
 	}
 
 	nor->cmd_buf[0] = val;
-	return nor->write_reg(nor, SPINOR_OP_WRSR, nor->cmd_buf, 1);
+	return spi_nor_write_reg(nor, SPINOR_OP_WRSR, nor->cmd_buf, 1);
 }
 
 
@@ -391,7 +401,7 @@ static int write_enable(struct spi_nor *nor)
 		return spi_nor_nodata_op(nor, &op);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_WREN, NULL, 0);
+	return spi_nor_write_reg(nor, SPINOR_OP_WREN, NULL, 0);
 }
 
 /*
@@ -409,7 +419,7 @@ static int write_disable(struct spi_nor *nor)
 		return spi_nor_nodata_op(nor, &op);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_WRDI, NULL, 0);
+	return spi_nor_write_reg(nor, SPINOR_OP_WRDI, NULL, 0);
 }
 
 static struct spi_nor *mtd_to_spi_nor(struct mtd_info *mtd)
@@ -515,7 +525,7 @@ static int set_4byte(struct spi_nor *nor, bool enable)
 		return spi_nor_data_op(nor, &op, nor->cmd_buf, 1);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_BRWR, nor->cmd_buf, 1);
+	return spi_nor_write_reg(nor, SPINOR_OP_BRWR, nor->cmd_buf, 1);
 }
 
 static int xread_sr(struct spi_nor *nor, u8 *sr)
@@ -530,7 +540,7 @@ static int xread_sr(struct spi_nor *nor, u8 *sr)
 		return spi_nor_data_op(nor, &op, sr, 1);
 	}
 
-	return nor->read_reg(nor, SPINOR_OP_XRDSR, sr, 1);
+	return spi_nor_read_reg(nor, SPINOR_OP_XRDSR, sr, 1);
 }
 
 static int s3an_sr_ready(struct spi_nor *nor)
@@ -560,7 +570,7 @@ static int clear_sr(struct spi_nor *nor)
 		return spi_nor_nodata_op(nor, &op);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_CLSR, NULL, 0);
+	return spi_nor_write_reg(nor, SPINOR_OP_CLSR, NULL, 0);
 }
 
 static int spi_nor_sr_ready(struct spi_nor *nor)
@@ -594,7 +604,7 @@ static int clear_fsr(struct spi_nor *nor)
 		return spi_nor_nodata_op(nor, &op);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_CLFSR, NULL, 0);
+	return spi_nor_write_reg(nor, SPINOR_OP_CLFSR, NULL, 0);
 }
 
 static int spi_nor_fsr_ready(struct spi_nor *nor)
@@ -692,7 +702,7 @@ static int erase_chip(struct spi_nor *nor)
 		return spi_nor_nodata_op(nor, &op);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_CHIP_ERASE, NULL, 0);
+	return spi_nor_write_reg(nor, SPINOR_OP_CHIP_ERASE, NULL, 0);
 }
 
 static int spi_nor_lock_and_prep(struct spi_nor *nor, enum spi_nor_ops ops)
@@ -774,7 +784,7 @@ static int spi_nor_erase_sector(struct spi_nor *nor, u32 addr)
 		addr >>= 8;
 	}
 
-	return nor->write_reg(nor, nor->erase_opcode, buf, nor->addr_width);
+	return spi_nor_write_reg(nor, nor->erase_opcode, buf, nor->addr_width);
 }
 
 /**
@@ -1873,7 +1883,7 @@ static int read_id(struct spi_nor *nor, u8 *id)
 		return spi_nor_data_op(nor, &op, id, SPI_NOR_MAX_ID_LEN);
 	}
 
-	return nor->read_reg(nor, SPINOR_OP_RDID, id, SPI_NOR_MAX_ID_LEN);
+	return spi_nor_read_reg(nor, SPINOR_OP_RDID, id, SPI_NOR_MAX_ID_LEN);
 }
 
 static const struct flash_info *spi_nor_read_id(struct spi_nor *nor)
@@ -2102,7 +2112,7 @@ static int write_sr_cr(struct spi_nor *nor, u8 *sr_cr)
 
 		ret = spi_nor_data_op(nor, &op, sr_cr, 2);
 	} else {
-		ret = nor->write_reg(nor, SPINOR_OP_WRSR, sr_cr, 2);
+		ret = spi_nor_write_reg(nor, SPINOR_OP_WRSR, sr_cr, 2);
 	}
 
 	if (ret < 0) {
@@ -2258,7 +2268,7 @@ static int write_sr2(struct spi_nor *nor, u8 sr2)
 		return spi_nor_data_op(nor, &op, &sr2, 1);
 	}
 
-	return nor->write_reg(nor, SPINOR_OP_WRSR2, &sr2, 1);
+	return spi_nor_write_reg(nor, SPINOR_OP_WRSR2, &sr2, 1);
 }
 
 static int read_sr2(struct spi_nor *nor, u8 *sr2)
@@ -2273,7 +2283,7 @@ static int read_sr2(struct spi_nor *nor, u8 *sr2)
 		return spi_nor_data_op(nor, &op, sr2, 1);
 	}
 
-	return nor->read_reg(nor, SPINOR_OP_RDSR2, sr2, 1);
+	return spi_nor_read_reg(nor, SPINOR_OP_RDSR2, sr2, 1);
 }
 
 /**
@@ -4024,8 +4034,8 @@ static int macronix_set_4byte(struct spi_nor *nor, bool enable)
 		return spi_nor_nodata_op(nor, &op);
 	}
 
-	return nor->write_reg(nor, enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B,
-			      NULL, 0);
+	return spi_nor_write_reg(nor, enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B,
+				 NULL, 0);
 }
 
 static int micron_set_4byte(struct spi_nor *nor, bool enable)
@@ -4052,7 +4062,7 @@ static int write_ear(struct spi_nor *nor, u8 ear)
 	}
 
 	nor->cmd_buf[0] = ear;
-	return nor->write_reg(nor, SPINOR_OP_WREAR, nor->cmd_buf, 1);
+	return spi_nor_write_reg(nor, SPINOR_OP_WREAR, nor->cmd_buf, 1);
 }
 
 static int winbond_set_4byte(struct spi_nor *nor, bool enable)
