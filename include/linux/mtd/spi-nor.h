@@ -209,6 +209,7 @@ enum spi_nor_protocol {
 	SNOR_PROTO_1_2D_2D = SNOR_PROTO_1_XD_XD(2),
 	SNOR_PROTO_1_4D_4D = SNOR_PROTO_1_XD_XD(4),
 	SNOR_PROTO_1_8D_8D = SNOR_PROTO_1_XD_XD(8),
+	SNOR_PROTO_8D_8D_8D = SNOR_PROTO_XD_XD_XD(8),
 };
 
 static inline bool spi_nor_protocol_inst_is_dtr(enum spi_nor_protocol proto)
