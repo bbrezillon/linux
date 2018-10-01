@@ -166,6 +166,8 @@
 
 #define SNOR_PROTO_IS_DTR	BIT(24)	/* Double Transfer Rate */
 
+#define SNOR_PROTO_INST_2BYTE	BIT(31)
+
 #define SNOR_PROTO_STR(_inst_nbits, _addr_nbits, _data_nbits)	\
 	(SNOR_PROTO_INST(_inst_nbits) |				\
 	 SNOR_PROTO_ADDR(_addr_nbits) |				\
