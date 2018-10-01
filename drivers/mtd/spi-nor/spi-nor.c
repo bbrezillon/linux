@@ -280,12 +280,18 @@ static ssize_t spi_nor_spimem_read_data(struct spi_nor *nor, loff_t ofs,
 
 	/* get transfer protocols. */
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->read_proto);
+	op.cmd.dtr = spi_nor_protocol_inst_is_dtr(nor->read_proto);
 	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->read_proto);
+	op.addr.dtr = spi_nor_protocol_addr_is_dtr(nor->read_proto);
 	op.dummy.buswidth = op.addr.buswidth;
+	op.dummy.dtr = op.addr.dtr;
 	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->read_proto);
+	op.data.dtr = spi_nor_protocol_data_is_dtr(nor->read_proto);
 
 	/* convert the dummy cycles to the number of bytes */
 	op.dummy.nbytes = (nor->read_dummy * op.dummy.buswidth) / 8;
+	if (op.dummy.dtr)
+		op.dummy.nbytes *= 2;
 
 	if (nor->read_proto & SNOR_PROTO_INST_2BYTE)
 		op.cmd.nbytes = 2;
@@ -345,8 +351,11 @@ static ssize_t spi_nor_spimem_write_data(struct spi_nor *nor, loff_t ofs,
 
 	/* get transfer protocols. */
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->write_proto);
+	op.cmd.dtr = spi_nor_protocol_inst_is_dtr(nor->write_proto);
 	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(nor->write_proto);
+	op.addr.dtr = spi_nor_protocol_addr_is_dtr(nor->write_proto);
 	op.data.buswidth = spi_nor_get_protocol_data_nbits(nor->write_proto);
+	op.data.dtr = spi_nor_protocol_data_is_dtr(nor->write_proto);
 
 	if (nor->write_proto & SNOR_PROTO_INST_2BYTE)
 		op.cmd.nbytes = 2;
@@ -3043,11 +3052,17 @@ static int spi_nor_spimem_check_readop(struct spi_nor *nor,
 					  SPI_MEM_OP_DATA_IN(0, NULL, 1));
 
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(read->proto);
+	op.cmd.dtr = spi_nor_protocol_inst_is_dtr(read->proto);
 	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(read->proto);
+	op.addr.dtr = spi_nor_protocol_addr_is_dtr(read->proto);
 	op.data.buswidth = spi_nor_get_protocol_data_nbits(read->proto);
+	op.data.dtr = spi_nor_protocol_addr_is_dtr(read->proto);
 	op.dummy.buswidth = op.addr.buswidth;
+	op.dummy.dtr = op.addr.dtr;
 	op.dummy.nbytes = (read->num_mode_clocks + read->num_wait_states) *
 			  op.dummy.buswidth / 8;
+	if (op.dummy.dtr)
+		op.dummy.nbytes *= 2;
 
 	if (read->proto & SNOR_PROTO_INST_2BYTE)
 		op.cmd.nbytes = 2;
@@ -3077,8 +3092,11 @@ static int spi_nor_spimem_check_progop(struct spi_nor *nor,
 					  SPI_MEM_OP_DATA_OUT(0, NULL, 1));
 
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(pp->proto);
+	op.cmd.dtr = spi_nor_protocol_inst_is_dtr(pp->proto);
 	op.addr.buswidth = spi_nor_get_protocol_addr_nbits(pp->proto);
+	op.addr.dtr = spi_nor_protocol_addr_is_dtr(pp->proto);
 	op.data.buswidth = spi_nor_get_protocol_data_nbits(pp->proto);
+	op.data.dtr = spi_nor_protocol_addr_is_dtr(pp->proto);
 
 	if (pp->proto & SNOR_PROTO_INST_2BYTE)
 		op.cmd.nbytes = 2;
@@ -3105,9 +3123,6 @@ spi_nor_spimem_adjust_hwcaps(struct spi_nor *nor,
 			     u32 *hwcaps)
 {
 	unsigned int cap;
-
-	/* DTR modes are not supported yet, mask them all. */
-	*hwcaps &= ~SNOR_HWCAPS_DTR;
 
 	/* Start with read commands. */
 	for (cap = 0; cap < 32; cap++) {
