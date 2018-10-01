@@ -102,6 +102,9 @@
 #define XSR_PAGESIZE		BIT(0)	/* Page size in Po2 or Linear */
 #define XSR_RDY			BIT(7)	/* Ready */
 
+/* Used for Macronix flashes only. */
+#define SPINOR_OP_RDCR2		0x71	/* Read configuration register 2 */
+#define SPINOR_OP_WRCR2		0x72	/* Write configuration register 2 */
 
 /* Used for Macronix and Winbond flashes. */
 #define SPINOR_OP_EN4B		0xb7	/* Enter 4-byte mode */
@@ -144,6 +147,13 @@
 
 /* Status Register 2 bits. */
 #define SR2_QUAD_EN_BIT7	BIT(7)
+
+/* Configuration register 2, offset 0 */
+#define CR2_REG0			0x0
+#define CR2_REG0_MODE_MASK	GENMASK(1, 0)
+#define CR2_REG0_MODE_SPI	0
+#define CR2_REG0_MODE_OPI_STR	1
+#define CR2_REG0_MODE_OPI_DTR	2
 
 /* Supported SPI protocols */
 #define SNOR_PROTO_INST_MASK	GENMASK(23, 16)
