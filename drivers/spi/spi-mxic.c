@@ -227,7 +227,7 @@ static void mxic_spi_hw_init(struct mxic_spi *mxic)
 }
 
 static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
-			      void *rxbuf, unsigned int len, bool dtr)
+			      void *rxbuf, unsigned int len)
 {
 	unsigned int pos = 0;
 
@@ -249,24 +249,20 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 			pr_info("%s:%i data %08x pos %08x\n", __func__, __LINE__, data, pos);
 		}
 
-		pr_info("%s:%i\n", __func__, __LINE__);
 		ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
 					 sts & INT_TX_EMPTY, 0, USEC_PER_SEC);
 		if (ret)
 			return ret;
 
-		pr_info("%s:%i len = %d\n", __func__, __LINE__, ALIGN(nbytes, dtr ? 2 : 1));
-		writel(data, mxic->regs + TXD(ALIGN(nbytes, dtr ? 4 : 1) % 4));
+		writel(data, mxic->regs + TXD(nbytes % 4));
 
 		if (rxbuf) {
-			pr_info("%s:%i\n", __func__, __LINE__);
 			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
 						 sts & INT_TX_EMPTY, 0,
 						 USEC_PER_SEC);
 			if (ret)
 				return ret;
 
-			pr_info("%s:%i\n", __func__, __LINE__);
 			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
 						 sts & INT_RX_NOT_EMPTY, 0,
 						 USEC_PER_SEC);
@@ -281,19 +277,17 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 				((u8 *)rxbuf)[i + pos] = data >> (8 * i);
 			*/
 
-			data >>= (8 * (4 - ALIGN(nbytes, dtr ? 4 : 1)));
+			data >>= (8 * (4 - nbytes));
 			memcpy(rxbuf + pos, &data, nbytes);
 			WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
 		} else {
-			data = readl(mxic->regs + RXD);
-			pr_info("%s:%i data = %08x\n", __func__, __LINE__, data);
+			readl(mxic->regs + RXD);
 		}
 		WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
 
 		pos += nbytes;
 	}
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	return 0;
 }
 
@@ -350,13 +344,13 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 	pr_info("%s:%i op->cmd.buswidth %d OP_CMD_BUSW(fls(op->cmd.buswidth) - 1) %08x\n", __func__, __LINE__, op->cmd.buswidth, OP_CMD_BUSW(fls(op->cmd.buswidth) - 1));
 	ss_ctrl = OP_CMD_BYTES(op->cmd.nbytes) |
 		  OP_CMD_BUSW(fls(op->cmd.buswidth) - 1) |
-		  (op->cmd.dtr ? (OP_CMD_DDR | OP_DQS_EN) : 0);
+		  (op->cmd.dtr ? OP_CMD_DDR : 0);
 	pr_info("%s:%i SS_CTRL %08x\n", __func__, __LINE__, ss_ctrl);
 
 	if (op->addr.nbytes)
 		ss_ctrl |= OP_ADDR_BYTES(op->addr.nbytes) |
 			   OP_ADDR_BUSW(fls(op->addr.buswidth) - 1) |
-			   (op->addr.dtr ? (OP_ADDR_DDR | OP_DQS_EN) : 0);
+			   (op->addr.dtr ? OP_ADDR_DDR : 0);
 	pr_info("%s:%i SS_CTRL %08x\n", __func__, __LINE__, ss_ctrl);
 
 	if (op->dummy.nbytes)
@@ -365,7 +359,7 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 
 	if (op->data.nbytes) {
 		ss_ctrl |= OP_DATA_BUSW(fls(op->data.buswidth) - 1) |
-			   (op->data.dtr ? (OP_DATA_DDR | OP_DQS_EN) : 0);
+			   (op->data.dtr ? OP_DATA_DDR : 0);
 		if (op->data.dir == SPI_MEM_DATA_IN)
 			ss_ctrl |= OP_READ;
 	}
@@ -384,7 +378,7 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 		cmd[0] = op->cmd.opcode;
 	}
 
-	ret = mxic_spi_data_xfer(mxic, cmd, NULL, op->cmd.nbytes, op->cmd.dtr);
+	ret = mxic_spi_data_xfer(mxic, cmd, NULL, op->cmd.nbytes);
 	if (ret)
 		goto out;
 
@@ -393,22 +387,20 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 		pr_info("%s:%i addr[%d] = %02x\n", __func__, __LINE__, i, addr[i]);
 	}
 
-	ret = mxic_spi_data_xfer(mxic, addr, NULL, op->addr.nbytes, op->addr.dtr);
+	ret = mxic_spi_data_xfer(mxic, addr, NULL, op->addr.nbytes);
 	if (ret)
 		goto out;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
-	ret = mxic_spi_data_xfer(mxic, NULL, NULL, op->dummy.nbytes, op->dummy.dtr);
+	ret = mxic_spi_data_xfer(mxic, NULL, NULL, op->dummy.nbytes);
 	if (ret)
 		goto out;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = mxic_spi_data_xfer(mxic,
 				 op->data.dir == SPI_MEM_DATA_OUT ?
 				 op->data.buf.out : NULL,
 				 op->data.dir == SPI_MEM_DATA_IN ?
 				 op->data.buf.in : NULL,
-				 op->data.nbytes, op->data.dtr);
+				 op->data.nbytes);
 
 out:
 	writel(readl(mxic->regs + HC_CFG) & ~HC_CFG_MAN_CS_ASSERT,
@@ -417,7 +409,6 @@ out:
 
 	mxic_spi_clk_disable(mxic);
 
-	pr_info("%s:%i ret = %d\n", __func__, __LINE__, ret);
 	return ret;
 }
 
@@ -480,7 +471,7 @@ static int mxic_spi_transfer_one(struct spi_master *master,
 	       OP_DATA_BUSW(busw) | (t->rx_buf ? OP_READ : 0),
 	       mxic->regs + SS_CTRL(0));
 
-	ret = mxic_spi_data_xfer(mxic, t->tx_buf, t->rx_buf, t->len, false);
+	ret = mxic_spi_data_xfer(mxic, t->tx_buf, t->rx_buf, t->len);
 	if (ret)
 		return ret;
 

@@ -1769,7 +1769,6 @@ static int macronix_opi_change_mode(struct spi_nor *nor,
 	pr_info("%s:%i\n", __func__, __LINE__);
 
 	ret = read_cr2(nor, CR2_REG0, &val2);
-	pr_info("%s:%i ret = %d\n", __func__, __LINE__, ret);
 	if (ret)
 		return ret;
 
@@ -1840,28 +1839,18 @@ static void macronix_opi_adjust_op(struct spi_nor *nor, struct spi_mem_op *op)
 
 	/* Force buswidth to 8. */
 	op->cmd.buswidth = 8;
-	if (nor->mode == SPI_NOR_MODE_OPI_FULL_DTR)
-		op->cmd.dtr = true;
 
-	if (op->addr.nbytes) {
+	if (op->addr.nbytes)
 		op->addr.buswidth = 8;
-		if (nor->mode == SPI_NOR_MODE_OPI_FULL_DTR)
-			op->addr.dtr = true;
-	}
 
 	if (op->dummy.nbytes) {
 		op->dummy.buswidth = 8;
-		if (nor->mode == SPI_NOR_MODE_OPI_FULL_DTR) {
-			op->dummy.dtr = true;
+		if (op->dummy.dtr)
 			op->dummy.nbytes *= 2;
-		}
 	}
 
-	if (op->data.buswidth) {
+	if (op->data.buswidth)
 		op->data.buswidth = 8;
-		if (nor->mode == SPI_NOR_MODE_OPI_FULL_DTR)
-			op->data.dtr = true;
-	}
 
 	/*
 	 * OPI mode implies 2 bytes opcodes, the first byte (MSB) being the
@@ -1886,6 +1875,7 @@ static void macronix_opi_tweak_params(struct spi_nor *nor,
 				0x12ed,
 				SNOR_PROTO_8_8_8 | SNOR_PROTO_INST_2BYTE);
 
+	/*
 	params->hwcaps.mask |= SNOR_HWCAPS_OPI_FULL_DTR;
 	spi_nor_set_read_settings(&params->reads[SNOR_CMD_READ_8D_8D_8D],
 				  0, 20, 0xee11,
@@ -1893,6 +1883,7 @@ static void macronix_opi_tweak_params(struct spi_nor *nor,
 	spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP_8D_8D_8D],
 				0x12ed,
 				SNOR_PROTO_8D_8D_8D | SNOR_PROTO_INST_2BYTE);
+	*/
 }
 
 /* Used when the "_ext_id" is two bytes at most */
