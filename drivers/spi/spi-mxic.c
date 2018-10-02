@@ -235,13 +235,19 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 		unsigned int nbytes = len - pos;
 		u32 data = 0xffffffff;
 		u32 sts;
-		int ret;
+		int ret, i;
 
 		if (nbytes > 4)
 			nbytes = 4;
 
-		if (txbuf)
+		if (txbuf) {
+			/*
+			for (i = 0; i < nbytes; i++)
+				data = (data << 8) | ((u8 *)txbuf)[i + pos];
+			*/
 			memcpy(&data, txbuf + pos, nbytes);
+			pr_info("%s:%i data %08x pos %08x\n", __func__, __LINE__, data, pos);
+		}
 
 		ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
 					 sts & INT_TX_EMPTY, 0, USEC_PER_SEC);
@@ -264,6 +270,13 @@ static int mxic_spi_data_xfer(struct mxic_spi *mxic, const void *txbuf,
 				return ret;
 
 			data = readl(mxic->regs + RXD);
+			pr_info("%s:%i data %08x pos %08x\n", __func__, __LINE__, data, pos);
+			/*
+			data >>= (8 * (4 - nbytes));
+			for (i = 0; i < nbytes; i++)
+				((u8 *)rxbuf)[i + pos] = data >> (8 * i);
+			*/
+
 			data >>= (8 * (4 - nbytes));
 			memcpy(rxbuf + pos, &data, nbytes);
 			WARN_ON(readl(mxic->regs + INT_STS) & INT_RX_NOT_EMPTY);
@@ -325,19 +338,24 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 	       HC_CFG_SLV_ACT(mem->spi->chip_select) | HC_CFG_IDLE_SIO_LVL(1) |
 	       HC_CFG_MAN_CS_EN,
 	       mxic->regs + HC_CFG);
+	pr_info("%s:%i CFG %08x\n", __func__, __LINE__, readl(mxic->regs + HC_CFG));
 	writel(HC_EN_BIT, mxic->regs + HC_EN);
 
+	pr_info("%s:%i op->cmd.buswidth %d OP_CMD_BUSW(fls(op->cmd.buswidth) - 1) %08x\n", __func__, __LINE__, op->cmd.buswidth, OP_CMD_BUSW(fls(op->cmd.buswidth) - 1));
 	ss_ctrl = OP_CMD_BYTES(op->cmd.nbytes) |
 		  OP_CMD_BUSW(fls(op->cmd.buswidth) - 1) |
 		  (op->cmd.dtr ? OP_CMD_DDR : 0);
+	pr_info("%s:%i SS_CTRL %08x\n", __func__, __LINE__, ss_ctrl);
 
 	if (op->addr.nbytes)
 		ss_ctrl |= OP_ADDR_BYTES(op->addr.nbytes) |
 			   OP_ADDR_BUSW(fls(op->addr.buswidth) - 1) |
 			   (op->addr.dtr ? OP_ADDR_DDR : 0);
+	pr_info("%s:%i SS_CTRL %08x\n", __func__, __LINE__, ss_ctrl);
 
 	if (op->dummy.nbytes)
 		ss_ctrl |= OP_DUMMY_CYC(op->dummy.nbytes);
+	pr_info("%s:%i SS_CTRL %08x\n", __func__, __LINE__, ss_ctrl);
 
 	if (op->data.nbytes) {
 		ss_ctrl |= OP_DATA_BUSW(fls(op->data.buswidth) - 1) |
@@ -345,8 +363,10 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 		if (op->data.dir == SPI_MEM_DATA_IN)
 			ss_ctrl |= OP_READ;
 	}
+	pr_info("%s:%i SS_CTRL %08x\n", __func__, __LINE__, ss_ctrl);
 
 	writel(ss_ctrl, mxic->regs + SS_CTRL(mem->spi->chip_select));
+	pr_info("%s:%i SS_CTRL %08x %08x\n", __func__, __LINE__, ss_ctrl, readl(mxic->regs + SS_CTRL(mem->spi->chip_select)));
 
 	writel(readl(mxic->regs + HC_CFG) | HC_CFG_MAN_CS_ASSERT,
 	       mxic->regs + HC_CFG);
@@ -362,8 +382,10 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 	if (ret)
 		goto out;
 
-	for (i = 0; i < op->addr.nbytes; i++)
+	for (i = 0; i < op->addr.nbytes; i++) {
 		addr[i] = op->addr.val >> (8 * (op->addr.nbytes - i - 1));
+		pr_info("%s:%i addr[%d] = %02x\n", __func__, __LINE__, i, addr[i]);
+	}
 
 	ret = mxic_spi_data_xfer(mxic, addr, NULL, op->addr.nbytes);
 	if (ret)

@@ -212,7 +212,11 @@ static int spi_nor_exec_op(struct spi_nor *nor, struct spi_mem_op *op,
 
 	if (object_is_on_stack(buf) || !virt_addr_valid(buf))
 		usebouncebuf = true;
+
+	pr_info("%s:%i usebouncebuf = %d\n",
+		__func__, __LINE__, usebouncebuf);
 	if (len && usebouncebuf) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		if (len > nor->bouncebuf_size)
 			return -ENOTSUPP;
 
@@ -221,17 +225,25 @@ static int spi_nor_exec_op(struct spi_nor *nor, struct spi_mem_op *op,
 		} else {
 			op->data.buf.out = nor->bouncebuf;
 			memcpy(nor->bouncebuf, buf, len);
+			pr_info("%s:%i buf[0] %02x\n", __func__, __LINE__, ((u8 *)nor->bouncebuf)[0]);
 		}
 	} else {
 		op->data.buf.out = buf;
 	}
 
+	pr_info("%s:%i opcode = %04x nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->cmd.opcode, op->cmd.nbytes, op->cmd.buswidth, op->cmd.dtr);
+	pr_info("%s:%i addr = %llx nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->addr.val, op->addr.nbytes, op->addr.buswidth, op->addr.dtr);
+	pr_info("%s:%i dummy nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->dummy.nbytes, op->dummy.buswidth, op->dummy.dtr);
+	pr_info("%s:%i data buf %px dir %d nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->data.buf.in, op->data.dir, op->data.nbytes, op->data.buswidth, op->data.dtr);
 	ret = spi_mem_exec_op(nor->spimem, op);
 	if (ret)
 		return ret;
 
-	if (usebouncebuf && len && op->data.dir == SPI_MEM_DATA_IN)
+	if (usebouncebuf && len && op->data.dir == SPI_MEM_DATA_IN) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		memcpy(buf, nor->bouncebuf, len);
+		pr_info("%s:%i buf[0] %02x\n", __func__, __LINE__, ((u8 *)nor->bouncebuf)[0]);
+	}
 
 	return 0;
 }
@@ -311,6 +323,8 @@ static ssize_t spi_nor_spimem_read_data(struct spi_nor *nor, loff_t ofs,
 		if (ret)
 			return ret;
 
+		pr_info("%s:%i op.addr.val %llx op.data.len %d\n",
+			__func__, __LINE__, op.addr.val, op.data.nbytes);
 		ret = spi_mem_exec_op(nor->spimem, &op);
 		if (ret)
 			return ret;
@@ -346,11 +360,13 @@ static ssize_t spi_nor_spimem_write_data(struct spi_nor *nor, loff_t ofs,
 	bool usebouncebuf = false;
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (object_is_on_stack(buf) || !virt_addr_valid(buf)) {
 		usebouncebuf = true;
 		op.data.buf.out = nor->bouncebuf;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/* get transfer protocols. */
 	op.cmd.buswidth = spi_nor_get_protocol_inst_nbits(nor->write_proto);
 	op.cmd.dtr = spi_nor_protocol_inst_is_dtr(nor->write_proto);
@@ -378,23 +394,29 @@ static ssize_t spi_nor_spimem_write_data(struct spi_nor *nor, loff_t ofs,
 		memcpy(nor->bouncebuf, buf, op.data.nbytes);
 	}
 
+	pr_info("%s:%i buf[0] = %02x\n", __func__, __LINE__, ((u8 *)op.data.buf.out)[0]);
 	ret = spi_mem_adjust_op_size(nor->spimem, &op);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i op.addr.val %llx op.data.len %d\n",
+		__func__, __LINE__, op.addr.val, op.data.nbytes);
 	ret = spi_mem_exec_op(nor->spimem, &op);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	return op.data.nbytes;
 }
 
 static ssize_t spi_nor_write_data(struct spi_nor *nor, loff_t ofs, size_t len,
 				  const u8 *buf)
 {
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (nor->spimem)
 		return spi_nor_spimem_write_data(nor, ofs, len, buf);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	return nor->write(nor, ofs, len, buf);
 }
 
@@ -574,23 +596,31 @@ static int write_cr2(struct spi_nor *nor, u32 addr, u8 cr2)
 	if (ret)
 		return ret;
 
-	return spi_nor_data_op(nor, &op, &cr2, 1);
+	ret = spi_nor_data_op(nor, &op, &cr2, 1);
+
+//	write_disable(nor);
+
+	return ret;
 }
 
 static int spi_nor_change_mode(struct spi_nor *nor, u32 newmode)
 {
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (newmode == nor->mode)
 		return 0;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (!nor->change_mode)
 		return -ENOTSUPP;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = nor->change_mode(nor, newmode);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	nor->mode = newmode;
 
 	return 0;
@@ -1692,24 +1722,31 @@ static int macronix_opi_change_mode(struct spi_nor *nor,
 				    enum spi_nor_mode newmode)
 {
 	int ret;
-	u8 val;
+	u8 val, val2;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = read_cr2(nor, CR2_REG0, &val);
 	if (ret)
 		return ret;
 
+	pr_info("%s:%i val %02x\n", __func__, __LINE__, val);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	val &= ~GENMASK(1, 0);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	switch (newmode) {
 	case SPI_NOR_MODE_SPI:
+		pr_info("%s:%i\n", __func__, __LINE__);
 		val |= CR2_REG0_MODE_SPI;
 		break;
 
 	case SPI_NOR_MODE_OPI:
+		pr_info("%s:%i\n", __func__, __LINE__);
 		val |= CR2_REG0_MODE_OPI_STR;
 		break;
 
 	case SPI_NOR_MODE_OPI_FULL_DTR:
+		pr_info("%s:%i\n", __func__, __LINE__);
 		val |= CR2_REG0_MODE_OPI_DTR;
 		break;
 
@@ -1718,18 +1755,35 @@ static int macronix_opi_change_mode(struct spi_nor *nor,
 		 * If we reach that point, there's a serious problem in the
 		 * hwcaps selection logic.
 		 */
+		pr_info("%s:%i\n", __func__, __LINE__);
 		WARN_ONCE(1, "mode %08x is not supported", newmode);
 		return -ENOTSUPP;
 	}
 
-	return write_cr2(nor, CR2_REG0, val);
+	pr_info("%s:%i val %02x\n", __func__, __LINE__, val);
+	ret = write_cr2(nor, CR2_REG0, val);
+	if (ret)
+		return ret;
+
+	nor->mode = newmode;
+	pr_info("%s:%i\n", __func__, __LINE__);
+
+	ret = read_cr2(nor, CR2_REG0, &val2);
+	if (ret)
+		return ret;
+
+	pr_info("%s:%i val2 %02x val %02x\n", __func__, __LINE__, val2, val);
+	return ret;
 }
 
 static void macronix_opi_adjust_op(struct spi_nor *nor, struct spi_mem_op *op)
 {
+	pr_info("%s:%i mode = %d\n", __func__, __LINE__, nor->mode);
 	if (nor->mode == SPI_NOR_MODE_SPI)
 		return;
 
+	pr_info("%s:%i mode = %d\n", __func__, __LINE__, nor->mode);
+	pr_info("%s:%i opcode = %04x\n", __func__, __LINE__, op->cmd.opcode);
 	switch (op->cmd.opcode) {
 	case SPINOR_OP_READ:
 	case SPINOR_OP_READ_FAST:
@@ -1804,6 +1858,10 @@ static void macronix_opi_adjust_op(struct spi_nor *nor, struct spi_mem_op *op)
 	 */
 	op->cmd.nbytes = 2;
 	op->cmd.opcode = (op->cmd.opcode << 8) | ((~op->cmd.opcode) & 0xff);
+	pr_info("%s:%i opcode = %04x nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->cmd.opcode, op->cmd.nbytes, op->cmd.buswidth, op->cmd.dtr);
+	pr_info("%s:%i addr = %llx nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->addr.val, op->addr.nbytes, op->addr.buswidth, op->addr.dtr);
+	pr_info("%s:%i dummy nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->dummy.nbytes, op->dummy.buswidth, op->dummy.dtr);
+	pr_info("%s:%i data dir %d nbytes %d busw %d dtr %d\n", __func__, __LINE__, op->data.dir, op->data.nbytes, op->data.buswidth, op->data.dtr);
 }
 
 static void macronix_opi_tweak_params(struct spi_nor *nor,
@@ -1817,6 +1875,7 @@ static void macronix_opi_tweak_params(struct spi_nor *nor,
 				0x12ed,
 				SNOR_PROTO_8_8_8 | SNOR_PROTO_INST_2BYTE);
 
+	/*
 	params->hwcaps.mask |= SNOR_HWCAPS_OPI_FULL_DTR;
 	spi_nor_set_read_settings(&params->reads[SNOR_CMD_READ_8D_8D_8D],
 				  0, 20, 0xee11,
@@ -1824,6 +1883,7 @@ static void macronix_opi_tweak_params(struct spi_nor *nor,
 	spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP_8D_8D_8D],
 				0x12ed,
 				SNOR_PROTO_8D_8D_8D | SNOR_PROTO_INST_2BYTE);
+	*/
 }
 
 /* Used when the "_ext_id" is two bytes at most */
@@ -2368,6 +2428,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 	for (i = 0; i < len; ) {
 		ssize_t written;
 		loff_t addr = to + i;
+		int sr;
 
 		/*
 		 * If page_size is a power of two, the offset can be quickly
@@ -2387,14 +2448,21 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		/* the size of data remaining on the first page */
 		page_remain = min_t(size_t,
 				    nor->page_size - page_offset, len - i);
+		pr_info("%s:%i page_remain %d nor->page_size %d page_offset %d len %d i %d\n", __func__, __LINE__, page_remain, nor->page_size, page_offset, len, i);
 
 		if (nor->flags & SNOR_F_S3AN_ADDR_DEFAULT)
 			addr = spi_nor_s3an_addr_convert(nor, addr);
 
+		pr_info("%s:%i addr %llx len %d bufoffs %08x\n", __func__, __LINE__, addr, page_remain, i);
 		write_enable(nor);
+
+		sr = read_sr(nor);
+		pr_info("%s:%i sr = %02x\n", __func__, __LINE__, sr);
+
 		ret = spi_nor_write_data(nor, addr, page_remain, buf + i);
 		if (ret < 0)
 			goto write_err;
+		pr_info("%s:%i\n", __func__, __LINE__);
 		written = ret;
 
 		ret = spi_nor_wait_till_ready(nor);
@@ -3147,6 +3215,8 @@ spi_nor_spimem_adjust_hwcaps(struct spi_nor *nor,
 {
 	unsigned int cap;
 
+	pr_info("%s:%i hwcaps = %08x\n", __func__, __LINE__, *hwcaps);
+
 	/* Start with read commands. */
 	for (cap = 0; cap < 32; cap++) {
 		int idx;
@@ -3158,25 +3228,35 @@ spi_nor_spimem_adjust_hwcaps(struct spi_nor *nor,
 		if (idx < 0)
 			continue;
 
-		if (spi_nor_spimem_check_readop(nor, &params->reads[idx]))
+		if (spi_nor_spimem_check_readop(nor, &params->reads[idx])) {
+			pr_info("%s:%i cap %d\n", __func__, __LINE__, cap);
 			*hwcaps &= ~BIT(cap);
+		}
 	}
+
+	pr_info("%s:%i hwcaps = %08x\n", __func__, __LINE__, *hwcaps);
 
 	/* Now check program commands. */
 	for (cap = 0; cap < 32; cap++) {
 		int idx;
 
+		pr_info("%s:%i cap %d\n", __func__, __LINE__, cap);
 		if (!(*hwcaps & BIT(cap)))
 			continue;
 
+		pr_info("%s:%i cap %d\n", __func__, __LINE__, cap);
 		idx = spi_nor_hwcaps_pp2cmd(BIT(cap));
 		if (idx < 0)
 			continue;
 
+		pr_info("%s:%i cap %d\n", __func__, __LINE__, cap);
 		if (spi_nor_spimem_check_progop(nor,
-						&params->page_programs[idx]))
+						&params->page_programs[idx])) {
+			pr_info("%s:%i cap %d\n", __func__, __LINE__, cap);
 			*hwcaps &= ~BIT(cap);
+		}
 	}
+	pr_info("%s:%i hwcaps = %08x\n", __func__, __LINE__, *hwcaps);
 }
 
 /**
@@ -4016,6 +4096,7 @@ static int spi_nor_select_pp(struct spi_nor *nor,
 	int cmd, best_match = fls(shared_hwcaps & SNOR_HWCAPS_PP_MASK) - 1;
 	const struct spi_nor_pp_command *pp;
 
+	pr_info("shared_hwcaps %08x best_match %d\n", shared_hwcaps, best_match);
 	if (best_match < 0)
 		return -EINVAL;
 
