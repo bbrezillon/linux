@@ -492,7 +492,7 @@ static int read_cr(struct spi_nor *nor)
 
 	if (nor->spimem) {
 		struct spi_mem_op op = SPI_MEM_OP(
-					SPI_MEM_OP_CMD(SPINOR_OP_RDCR, 1),
+					SPI_MEM_OP_CMD(0x15, 1),
 					SPI_MEM_OP_NO_ADDR,
 					SPI_MEM_OP_NO_DUMMY,
 					SPI_MEM_OP_DATA_IN(0, NULL, 1));
@@ -601,6 +601,19 @@ static int write_cr2(struct spi_nor *nor, u32 addr, u8 cr2)
 //	write_disable(nor);
 
 	return ret;
+}
+
+static int read_scur(struct spi_nor *nor, u8 *scur)
+{
+	struct spi_mem_op op = SPI_MEM_OP(SPI_MEM_OP_CMD(0x2b, 1),
+					  SPI_MEM_OP_NO_ADDR,
+					  SPI_MEM_OP_NO_DUMMY,
+					  SPI_MEM_OP_DATA_IN(0, NULL, 1));
+
+	if (!nor->spimem)
+		return -ENOTSUPP;
+
+	return spi_nor_data_op(nor, &op, scur, 1);
 }
 
 static int spi_nor_change_mode(struct spi_nor *nor, u32 newmode)
@@ -1718,13 +1731,23 @@ static int macronix_quad_enable(struct spi_nor *nor)
 	return 0;
 }
 
+static int write_sr_cr(struct spi_nor *nor, u8 *sr_cr);
+
 static int macronix_opi_change_mode(struct spi_nor *nor,
 				    enum spi_nor_mode newmode)
 {
 	int ret;
 	u8 val, val2;
+	u8 tmp[2] = { 0, 0 };
 
-	pr_info("%s:%i\n", __func__, __LINE__);
+	write_sr_cr(nor, tmp);
+	ret = read_cr(nor);
+	if (ret < 0)
+		return ret;
+
+	val = ret;
+	pr_info("%s:%i CR = %02x\n", __func__, __LINE__, val);
+
 	ret = read_cr2(nor, CR2_REG0, &val);
 	if (ret)
 		return ret;
@@ -1824,7 +1847,9 @@ static void macronix_opi_adjust_op(struct spi_nor *nor, struct spi_mem_op *op)
 	case SPINOR_OP_RDID:
 	case SPINOR_OP_RDSR:
 		op->dummy.nbytes = 4;
-		/* fallthrough */
+		op->addr.nbytes = 4;
+		op->addr.val = 0;
+		break;
 
 	case SPINOR_OP_WRSR:
 		op->addr.nbytes = 4;
@@ -1832,8 +1857,15 @@ static void macronix_opi_adjust_op(struct spi_nor *nor, struct spi_mem_op *op)
 		break;
 
 	case SPINOR_OP_RDCR:
+		op->dummy.nbytes = 4;
 		op->addr.nbytes = 4;
 		op->addr.val = 1;
+		break;
+
+	case 0x2b:
+		op->dummy.nbytes = 4;
+		op->addr.nbytes = 4;
+		op->addr.val = 0;
 		break;
 	}
 
@@ -2421,6 +2453,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 
 	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", (u32)to, len);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = spi_nor_lock_and_prep(nor, SPI_NOR_OPS_WRITE);
 	if (ret)
 		return ret;
@@ -2429,6 +2462,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		ssize_t written;
 		loff_t addr = to + i;
 		int sr;
+		u8 scur = 0;
 
 		/*
 		 * If page_size is a power of two, the offset can be quickly
@@ -2456,6 +2490,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		pr_info("%s:%i addr %llx len %d bufoffs %08x\n", __func__, __LINE__, addr, page_remain, i);
 		write_enable(nor);
 
+		mdelay(10);
 		sr = read_sr(nor);
 		pr_info("%s:%i sr = %02x\n", __func__, __LINE__, sr);
 
@@ -2465,11 +2500,20 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		pr_info("%s:%i\n", __func__, __LINE__);
 		written = ret;
 
+		sr = read_sr(nor);
+		pr_info("%s:%i sr = %02x\n", __func__, __LINE__, sr);
+
+		mdelay(10);
 		ret = spi_nor_wait_till_ready(nor);
 		if (ret)
 			goto write_err;
 		*retlen += written;
 		i += written;
+		mdelay(10);
+		sr = read_sr(nor);
+		pr_info("%s:%i sr = %02x\n", __func__, __LINE__, sr);
+		ret = read_scur(nor, &scur);
+		pr_info("%s:%i ret = %d scur = %02x\n", __func__, __LINE__, ret, scur);
 	}
 
 write_err:
