@@ -365,6 +365,8 @@ struct flash_info;
  * @flash_is_locked:	[FLASH-SPECIFIC] check if a region of the SPI NOR is
  * @quad_enable:	[FLASH-SPECIFIC] enables SPI NOR quad mode
  *			completely locked
+ * @set_4byte:		[FLASH-SPECIFIC] put the SPI NOR in 4 byte addressing
+ *			mode
  * @priv:		the private data
  */
 struct spi_nor {
@@ -401,6 +403,7 @@ struct spi_nor {
 	int (*flash_unlock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
 	int (*flash_is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
 	int (*quad_enable)(struct spi_nor *nor);
+	int (*set_4byte)(struct spi_nor *nor, bool enable);
 
 	void *priv;
 };
