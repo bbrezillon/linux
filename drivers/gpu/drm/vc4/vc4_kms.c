@@ -139,6 +139,8 @@ vc4_atomic_complete_commit(struct drm_atomic_state *state)
 	struct drm_device *dev = state->dev;
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
+	vc4_hvs_mask_underrun(dev);
+
 	drm_atomic_helper_wait_for_fences(dev, state, false);
 
 	drm_atomic_helper_wait_for_dependencies(state);
@@ -154,6 +156,8 @@ vc4_atomic_complete_commit(struct drm_atomic_state *state)
 	drm_atomic_helper_fake_vblank(state);
 
 	drm_atomic_helper_commit_hw_done(state);
+
+	vc4_hvs_unmask_underrun(dev);
 
 	drm_atomic_helper_wait_for_flip_done(dev, state);
 
