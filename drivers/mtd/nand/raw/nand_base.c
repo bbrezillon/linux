@@ -4422,7 +4422,7 @@ static void nand_set_defaults(struct nand_chip *chip)
 	nand_legacy_set_defaults(chip);
 
 	if (!chip->controller) {
-		chip->controller = &chip->dummy_controller;
+		chip->controller = &chip->legacy.dummy_controller;
 		nand_controller_init(chip->controller);
 	}
 
