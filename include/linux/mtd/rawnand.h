@@ -1002,8 +1002,9 @@ struct nand_legacy {
  * @data_buf:		[INTERN] buffer for data, size is (page size + oobsize).
  * @pagecache:		Structure containing page cache related fields
  * @pagecache.bitflips:	Number of bitflips of the cached page
- * @pagecache.page:	Page number currently in the cache. -1 means no page is
- *			currently cached
+ * @pagecache.pos:	Position of the page currently cached. Only valid if
+ *			pagecache.valid is 1.
+ * @pagecache.valid:	1 if the pagecache is valid, 0 otherwise.
  * @subpagesize:	[INTERN] holds the subpagesize
  * @id:			[INTERN] holds NAND ID
  * @parameters:		[INTERN] holds generic parameters under an easily
@@ -1052,7 +1053,8 @@ struct nand_chip {
 
 	struct {
 		unsigned int bitflips;
-		int page;
+		struct nand_pos pos;
+		unsigned int valid;
 	} pagecache;
 
 	int subpagesize;
@@ -1354,7 +1356,7 @@ void nand_deselect_target(struct nand_chip *chip);
  */
 static inline void *nand_get_data_buf(struct nand_chip *chip)
 {
-	chip->pagecache.page = -1;
+	chip->pagecache.valid = 0;
 
 	return chip->data_buf;
 }

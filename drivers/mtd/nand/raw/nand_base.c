@@ -373,12 +373,11 @@ static int nand_check_wp(struct nand_chip *chip)
 
 /**
  * nand_fill_oob - [INTERN] Transfer client buffer to oob
- * @oob: oob data buffer
- * @len: oob data write length
- * @ops: oob ops structure
+ * @chip: NAND chip object
+ * @req: NAND page IO request
  */
-static uint8_t *nand_fill_oob(struct nand_chip *chip, uint8_t *oob, size_t len,
-			      struct mtd_oob_ops *ops)
+static void nand_fill_oob(struct nand_chip *chip,
+			  const struct nand_page_io_req *req)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	int ret;
@@ -389,91 +388,170 @@ static uint8_t *nand_fill_oob(struct nand_chip *chip, uint8_t *oob, size_t len,
 	 */
 	memset(chip->oob_poi, 0xff, mtd->oobsize);
 
-	switch (ops->mode) {
-
+	switch (req->mode) {
 	case MTD_OPS_PLACE_OOB:
 	case MTD_OPS_RAW:
-		memcpy(chip->oob_poi + ops->ooboffs, oob, len);
-		return oob + len;
+		memcpy(chip->oob_poi + req->ooboffs, req->oobbuf.out,
+		       req->ooblen);
+		break;
 
 	case MTD_OPS_AUTO_OOB:
-		ret = mtd_ooblayout_set_databytes(mtd, oob, chip->oob_poi,
-						  ops->ooboffs, len);
+		ret = mtd_ooblayout_set_databytes(mtd, req->oobbuf.out,
+						  chip->oob_poi, req->ooboffs,
+						  req->ooblen);
 		BUG_ON(ret);
-		return oob + len;
+		break;
 
 	default:
 		BUG();
 	}
-	return NULL;
 }
 
 /**
- * nand_do_write_oob - [MTD Interface] NAND write out-of-band
+ * nand_write_req - write one page
+ * @chip: NAND chip descriptor
+ * @req: NAND page IO request
+ */
+static int nand_write_req(struct nand_chip *chip,
+			  const struct nand_page_io_req *req)
+{
+	unsigned int row = nanddev_pos_to_row(&chip->base, &req->pos);
+	bool use_bouncebuf = false;
+	const void *databuf = NULL;
+	int ret;
+
+	if (req->datalen) {
+		databuf = req->databuf.out;
+
+		if (req->datalen != nanddev_page_size(&chip->base))
+			use_bouncebuf = true;
+		else if (chip->options & NAND_USE_BOUNCE_BUFFER)
+			use_bouncebuf = !virt_addr_valid(databuf) ||
+					!IS_ALIGNED((unsigned long)databuf,
+						    chip->buf_align);
+
+		/* Partial page write?, or need to use bounce buffer */
+		if (use_bouncebuf) {
+			pr_debug("%s: using write bounce buffer for buf@%p\n",
+				 __func__, databuf);
+
+			databuf = chip->data_buf;
+			chip->pagecache.valid = 0;
+			memset(chip->data_buf, 0xff,
+			       nanddev_page_size(&chip->base));
+			memcpy(chip->data_buf + req->dataoffs,
+			       req->databuf.out, req->datalen);
+		}
+	} else {
+		/*
+		 * Reset the chip. Some chips (like the Toshiba TC5832DC found
+		 * in one of my DiskOnChip 2000 test units) will clear the
+		 * whole data page too if we don't do this. I have no clue why,
+		 * but I seem to have 'fixed' it in the doc2000 driver in
+		 * August 1999.  dwmw2.
+		 */
+		nand_reset(chip, req->pos.target);
+	}
+
+	if (unlikely(req->ooblen)) {
+		nand_fill_oob(chip, req);
+	} else {
+		/* We still need to erase leftover OOB data */
+		memset(chip->oob_poi, 0xff,
+		       nanddev_per_page_oobsize(&chip->base));
+	}
+
+	if (chip->cur_cs != req->pos.target) {
+		if (chip->cur_cs >= 0)
+			nand_deselect_target(chip);
+
+		nand_select_target(chip, req->pos.target);
+
+		/* Check, if it is write protected */
+		if (nand_check_wp(chip))
+			return -EIO;
+	}
+
+	/* Invalidate the page cache, when we write to the cached page. */
+	if (chip->pagecache.valid &&
+	    !nanddev_pos_cmp(&req->pos, &chip->pagecache.pos))
+		chip->pagecache.valid = 0;
+
+	if (!databuf) {
+		if (req->mode == MTD_OPS_RAW)
+			ret = chip->ecc.write_oob_raw(chip, row);
+		else
+			ret = chip->ecc.write_oob(chip, row);
+	} else {
+		bool subpage = false;
+
+		if (!(chip->options & NAND_NO_SUBPAGE_WRITE) &&
+		    chip->ecc.write_subpage)
+			subpage = req->dataoffs ||
+				  req->datalen < nanddev_page_size(&chip->base);
+
+		if (unlikely(req->mode == MTD_OPS_RAW))
+			ret = chip->ecc.write_page_raw(chip, databuf,
+						       !!req->ooblen, row);
+		else if (subpage)
+			ret = chip->ecc.write_subpage(chip, req->dataoffs,
+						      req->datalen, databuf,
+						      !!req->ooblen, row);
+		else
+			ret = chip->ecc.write_page(chip, databuf,
+						   !!req->ooblen, row);
+	}
+
+	return ret;
+}
+
+#define NOTALIGNED(x)	((x & (chip->subpagesize - 1)) != 0)
+
+/**
+ * nand_do_write_ops - [INTERN] NAND write with ECC
  * @chip: NAND chip object
  * @to: offset to write to
- * @ops: oob operation description structure
+ * @ops: oob operations description structure
  *
- * NAND write out-of-band.
+ * NAND write with ECC.
  */
-static int nand_do_write_oob(struct nand_chip *chip, loff_t to,
+static int nand_do_write_ops(struct nand_chip *chip, loff_t to,
 			     struct mtd_oob_ops *ops)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
-	int chipnr, page, status, len;
+	struct nand_io_iter iter;
+	int ret = 0;
 
-	pr_debug("%s: to = 0x%08x, len = %i\n",
-			 __func__, (unsigned int)to, (int)ops->ooblen);
+	ops->retlen = 0;
+	ops->ooblen = 0;
+	if (!ops->len && !ops->ooblen)
+		return 0;
 
-	len = mtd_oobavail(mtd, ops);
-
-	/* Do not allow write past end of page */
-	if ((ops->ooboffs + ops->ooblen) > len) {
-		pr_debug("%s: attempt to write past end of page\n",
-				__func__);
+	/* Reject writes, which are not page aligned */
+	if (NOTALIGNED(to) || NOTALIGNED(ops->len)) {
+		pr_notice("%s: attempt to write non page aligned data\n",
+			   __func__);
 		return -EINVAL;
 	}
 
-	chipnr = (int)(to >> chip->chip_shift);
+	/* Don't allow multipage oob writes with offset */
+	if (ops->oobbuf && ops->ooboffs &&
+	    ops->ooboffs + ops->ooblen > mtd_oobavail(mtd, ops))
+		return -EINVAL;
 
-	/*
-	 * Reset the chip. Some chips (like the Toshiba TC5832DC found in one
-	 * of my DiskOnChip 2000 test units) will clear the whole data page too
-	 * if we don't do this. I have no clue why, but I seem to have 'fixed'
-	 * it in the doc2000 driver in August 1999.  dwmw2.
-	 */
-	nand_reset(chip, chipnr);
-
-	nand_select_target(chip, chipnr);
-
-	/* Shift to get page */
-	page = (int)(to >> chip->page_shift);
-
-	/* Check, if it is write protected */
-	if (nand_check_wp(chip)) {
-		nand_deselect_target(chip);
-		return -EROFS;
+	nanddev_io_for_each_page(&chip->base, to, ops, &iter) {
+		ret = nand_write_req(chip, &iter.req);
+		if (ret)
+			break;
 	}
-
-	/* Invalidate the page cache, if we write to the cached page */
-	if (page == chip->pagecache.page)
-		chip->pagecache.page = -1;
-
-	nand_fill_oob(chip, ops->oobbuf, ops->ooblen, ops);
-
-	if (ops->mode == MTD_OPS_RAW)
-		status = chip->ecc.write_oob_raw(chip, page & chip->pagemask);
-	else
-		status = chip->ecc.write_oob(chip, page & chip->pagemask);
 
 	nand_deselect_target(chip);
 
-	if (status)
-		return status;
+	ops->retlen = ops->len - iter.dataleft;
+	if (unlikely(ops->ooblen))
+		ops->oobretlen = ops->ooblen - iter.oobleft;
 
-	ops->oobretlen = ops->ooblen;
-
-	return 0;
+	return ret;
 }
 
 /**
@@ -507,7 +585,7 @@ static int nand_default_block_markbad(struct nand_chip *chip, loff_t ofs)
 	if (chip->bbt_options & NAND_BBT_SCANLASTPAGE)
 		ofs += mtd->erasesize - mtd->writesize;
 	do {
-		res = nand_do_write_oob(chip, ofs, &ops);
+		res = nand_do_write_ops(chip, ofs, &ops);
 		if (!ret)
 			ret = res;
 
@@ -3056,33 +3134,34 @@ static int nand_read_page_syndrome(struct nand_chip *chip, uint8_t *buf,
 /**
  * nand_transfer_oob - [INTERN] Transfer oob to client buffer
  * @chip: NAND chip object
- * @oob: oob destination address
- * @ops: oob ops structure
- * @len: size of oob to transfer
+ * @req: NAND page IO request
  */
-static uint8_t *nand_transfer_oob(struct nand_chip *chip, uint8_t *oob,
-				  struct mtd_oob_ops *ops, size_t len)
+static void nand_transfer_oob(struct nand_chip *chip,
+			      const struct nand_page_io_req *req)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	int ret;
 
-	switch (ops->mode) {
+	if (!req->ooblen)
+		return;
 
+	switch (req->mode) {
 	case MTD_OPS_PLACE_OOB:
 	case MTD_OPS_RAW:
-		memcpy(oob, chip->oob_poi + ops->ooboffs, len);
-		return oob + len;
+		memcpy(req->oobbuf.in, chip->oob_poi + req->ooboffs,
+		       req->ooblen);
+		break;
 
 	case MTD_OPS_AUTO_OOB:
-		ret = mtd_ooblayout_get_databytes(mtd, oob, chip->oob_poi,
-						  ops->ooboffs, len);
+		ret = mtd_ooblayout_get_databytes(mtd, req->oobbuf.in,
+						  chip->oob_poi, req->ooboffs,
+						  req->ooblen);
 		BUG_ON(ret);
-		return oob + len;
+		break;
 
 	default:
 		BUG();
 	}
-	return NULL;
 }
 
 /**
@@ -3118,6 +3197,132 @@ static void nand_wait_readrdy(struct nand_chip *chip)
 	WARN_ON(nand_wait_rdy_op(chip, PSEC_TO_MSEC(sdr->tR_max), 0));
 }
 
+static int nand_read_req(struct nand_chip *chip,
+			 const struct nand_page_io_req *req)
+{
+	unsigned int row = nanddev_pos_to_row(&chip->base, &req->pos);
+	bool aligned = req->datalen == nanddev_page_size(&chip->base);
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct mtd_ecc_stats ecc_stats = mtd->ecc_stats;
+	int ret = 0, retry_mode = 0;
+	bool use_bouncebuf = false;
+	void *databuf = NULL;
+
+	if (req->datalen) {
+		databuf = req->databuf.in;
+
+		if (!aligned)
+			use_bouncebuf = true;
+		else if (chip->options & NAND_USE_BOUNCE_BUFFER)
+			use_bouncebuf = !virt_addr_valid(databuf) ||
+					!IS_ALIGNED((unsigned long)databuf,
+						    chip->buf_align);
+
+		/* The current page in the cache. */
+		if (!req->ooblen && chip->pagecache.valid &&
+		    !nanddev_pos_cmp(&req->pos, &chip->pagecache.pos)) {
+			memcpy(req->databuf.in,
+			       chip->data_buf + req->dataoffs,
+			       req->datalen);
+			return chip->pagecache.bitflips;
+		}
+
+		if (use_bouncebuf)
+			databuf = chip->data_buf;
+	}
+
+	row = nanddev_pos_to_row(&chip->base, &req->pos);
+
+	/* Invalidate page cache */
+	if (use_bouncebuf) {
+		chip->pagecache.valid = false;
+
+		if (aligned)
+			pr_debug("%s: using read bounce buffer for buf@%p\n",
+				 __func__, databuf);
+	}
+
+	if (chip->cur_cs != req->pos.target) {
+		if (chip->cur_cs >= 0)
+			nand_deselect_target(chip);
+
+		nand_select_target(chip, req->pos.target);
+	}
+
+	while (1) {
+		if (!databuf) {
+			if (req->mode == MTD_OPS_RAW)
+				ret = chip->ecc.read_oob_raw(chip, row);
+			else
+				ret = chip->ecc.read_oob(chip, row);
+		} else {
+			/*
+			 * Now read the page into the buffer. Absent an error,
+			 * the read methods return max bitflips per ecc step.
+			 */
+			if (unlikely(req->mode == MTD_OPS_RAW))
+				ret = chip->ecc.read_page_raw(chip, databuf,
+							      !!req->ooblen,
+							      row);
+			else if (!aligned && NAND_HAS_SUBPAGE_READ(chip) &&
+				 !req->ooblen)
+				ret = chip->ecc.read_subpage(chip,
+							     req->dataoffs,
+							     req->datalen,
+							     databuf, row);
+			else
+				ret = chip->ecc.read_page(chip, databuf,
+							  !req->ooblen, row);
+		}
+
+		if (ret < 0)
+			goto out;
+
+		nand_wait_readrdy(chip);
+
+		if (mtd->ecc_stats.failed == ecc_stats.failed ||
+		    retry_mode >= chip->read_retries - 1)
+			break;
+
+		/*
+		 * Apply the new retry mode, but if it fails, just return the
+		 * data we have retrieved.
+		 */
+		if (nand_setup_read_retry(chip, retry_mode + 1))
+			break;
+
+		/*
+		 * Restore the previous ECC stats, so that we start with fresh
+		 * values.
+		 */
+		mtd->ecc_stats = ecc_stats;
+		retry_mode++;
+	}
+
+	/* Transfer not aligned data */
+	if (use_bouncebuf) {
+		if (!NAND_HAS_SUBPAGE_READ(chip) && !req->ooblen &&
+		    mtd->ecc_stats.failed == ecc_stats.failed &&
+		    req->mode != MTD_OPS_RAW) {
+			chip->pagecache.pos = req->pos;
+			chip->pagecache.valid = true;
+			chip->pagecache.bitflips = ret;
+		}
+
+		memcpy(req->databuf.in, chip->data_buf + req->dataoffs,
+		       req->datalen);
+	}
+
+	nand_transfer_oob(chip, req);
+
+out:
+	/* Reset to retry mode 0 */
+	if (retry_mode)
+		WARN_ON(nand_setup_read_retry(chip, 0));
+
+	return ret;
+}
+
 /**
  * nand_do_read_ops - [INTERN] Read data with ECC
  * @chip: NAND chip object
@@ -3129,165 +3334,30 @@ static void nand_wait_readrdy(struct nand_chip *chip)
 static int nand_do_read_ops(struct nand_chip *chip, loff_t from,
 			    struct mtd_oob_ops *ops)
 {
-	int chipnr, page, realpage, col, bytes, aligned, oob_required;
 	struct mtd_info *mtd = nand_to_mtd(chip);
-	int ret = 0;
-	uint32_t readlen = ops->len;
-	uint32_t oobreadlen = ops->ooblen;
-	uint32_t max_oobsize = mtd_oobavail(mtd, ops);
-
-	uint8_t *bufpoi, *oob, *buf;
-	int use_bufpoi;
+	unsigned int ecc_failed = mtd->ecc_stats.failed;
 	unsigned int max_bitflips = 0;
-	int retry_mode = 0;
-	bool ecc_fail = false;
+	struct nand_io_iter iter;
+	int ret = 0;
 
-	chipnr = (int)(from >> chip->chip_shift);
-	nand_select_target(chip, chipnr);
-
-	realpage = (int)(from >> chip->page_shift);
-	page = realpage & chip->pagemask;
-
-	col = (int)(from & (mtd->writesize - 1));
-
-	buf = ops->datbuf;
-	oob = ops->oobbuf;
-	oob_required = oob ? 1 : 0;
-
-	while (1) {
-		unsigned int ecc_failures = mtd->ecc_stats.failed;
-
-		bytes = min(mtd->writesize - col, readlen);
-		aligned = (bytes == mtd->writesize);
-
-		if (!aligned)
-			use_bufpoi = 1;
-		else if (chip->options & NAND_USE_BOUNCE_BUFFER)
-			use_bufpoi = !virt_addr_valid(buf) ||
-				     !IS_ALIGNED((unsigned long)buf,
-						 chip->buf_align);
-		else
-			use_bufpoi = 0;
-
-		/* Is the current page in the buffer? */
-		if (realpage != chip->pagecache.page || oob) {
-			bufpoi = use_bufpoi ? chip->data_buf : buf;
-
-			if (use_bufpoi && aligned)
-				pr_debug("%s: using read bounce buffer for buf@%p\n",
-						 __func__, buf);
-
-read_retry:
-			/*
-			 * Now read the page into the buffer.  Absent an error,
-			 * the read methods return max bitflips per ecc step.
-			 */
-			if (unlikely(ops->mode == MTD_OPS_RAW))
-				ret = chip->ecc.read_page_raw(chip, bufpoi,
-							      oob_required,
-							      page);
-			else if (!aligned && NAND_HAS_SUBPAGE_READ(chip) &&
-				 !oob)
-				ret = chip->ecc.read_subpage(chip, col, bytes,
-							     bufpoi, page);
-			else
-				ret = chip->ecc.read_page(chip, bufpoi,
-							  oob_required, page);
-			if (ret < 0) {
-				if (use_bufpoi)
-					/* Invalidate page cache */
-					chip->pagecache.page = -1;
-				break;
-			}
-
-			/* Transfer not aligned data */
-			if (use_bufpoi) {
-				if (!NAND_HAS_SUBPAGE_READ(chip) && !oob &&
-				    !(mtd->ecc_stats.failed - ecc_failures) &&
-				    (ops->mode != MTD_OPS_RAW)) {
-					chip->pagecache.page = realpage;
-					chip->pagecache.bitflips = ret;
-				} else {
-					/* Invalidate page cache */
-					chip->pagecache.page = -1;
-				}
-				memcpy(buf, chip->data_buf + col, bytes);
-			}
-
-			if (unlikely(oob)) {
-				int toread = min(oobreadlen, max_oobsize);
-
-				if (toread) {
-					oob = nand_transfer_oob(chip, oob, ops,
-								toread);
-					oobreadlen -= toread;
-				}
-			}
-
-			nand_wait_readrdy(chip);
-
-			if (mtd->ecc_stats.failed - ecc_failures) {
-				if (retry_mode + 1 < chip->read_retries) {
-					retry_mode++;
-					ret = nand_setup_read_retry(chip,
-							retry_mode);
-					if (ret < 0)
-						break;
-
-					/* Reset failures; retry */
-					mtd->ecc_stats.failed = ecc_failures;
-					goto read_retry;
-				} else {
-					/* No more retry modes; real failure */
-					ecc_fail = true;
-				}
-			}
-
-			buf += bytes;
-			max_bitflips = max_t(unsigned int, max_bitflips, ret);
-		} else {
-			memcpy(buf, chip->data_buf + col, bytes);
-			buf += bytes;
-			max_bitflips = max_t(unsigned int, max_bitflips,
-					     chip->pagecache.bitflips);
-		}
-
-		readlen -= bytes;
-
-		/* Reset to retry mode 0 */
-		if (retry_mode) {
-			ret = nand_setup_read_retry(chip, 0);
-			if (ret < 0)
-				break;
-			retry_mode = 0;
-		}
-
-		if (!readlen)
+	nanddev_io_for_each_page(&chip->base, from, ops, &iter) {
+		ret = nand_read_req(chip, &iter.req);
+		if (ret < 0)
 			break;
 
-		/* For subsequent reads align to page boundary */
-		col = 0;
-		/* Increment page address */
-		realpage++;
-
-		page = realpage & chip->pagemask;
-		/* Check, if we cross a chip boundary */
-		if (!page) {
-			chipnr++;
-			nand_deselect_target(chip);
-			nand_select_target(chip, chipnr);
-		}
+		max_bitflips = max_t(unsigned int, ret, max_bitflips);
 	}
+
 	nand_deselect_target(chip);
 
-	ops->retlen = ops->len - (size_t) readlen;
-	if (oob)
-		ops->oobretlen = ops->ooblen - oobreadlen;
+	ops->retlen = ops->len - iter.dataleft;
+	if (ops->ooblen)
+		ops->oobretlen = ops->ooblen - iter.oobleft;
 
 	if (ret < 0)
 		return ret;
 
-	if (ecc_fail)
+	if (mtd->ecc_stats.failed > ecc_failed)
 		return -EBADMSG;
 
 	return max_bitflips;
@@ -3448,84 +3518,6 @@ static int nand_write_oob_syndrome(struct nand_chip *chip, int page)
 }
 
 /**
- * nand_do_read_oob - [INTERN] NAND read out-of-band
- * @chip: NAND chip object
- * @from: offset to read from
- * @ops: oob operations description structure
- *
- * NAND read out-of-band data from the spare area.
- */
-static int nand_do_read_oob(struct nand_chip *chip, loff_t from,
-			    struct mtd_oob_ops *ops)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	unsigned int max_bitflips = 0;
-	int page, realpage, chipnr;
-	struct mtd_ecc_stats stats;
-	int readlen = ops->ooblen;
-	int len;
-	uint8_t *buf = ops->oobbuf;
-	int ret = 0;
-
-	pr_debug("%s: from = 0x%08Lx, len = %i\n",
-			__func__, (unsigned long long)from, readlen);
-
-	stats = mtd->ecc_stats;
-
-	len = mtd_oobavail(mtd, ops);
-
-	chipnr = (int)(from >> chip->chip_shift);
-	nand_select_target(chip, chipnr);
-
-	/* Shift to get page */
-	realpage = (int)(from >> chip->page_shift);
-	page = realpage & chip->pagemask;
-
-	while (1) {
-		if (ops->mode == MTD_OPS_RAW)
-			ret = chip->ecc.read_oob_raw(chip, page);
-		else
-			ret = chip->ecc.read_oob(chip, page);
-
-		if (ret < 0)
-			break;
-
-		len = min(len, readlen);
-		buf = nand_transfer_oob(chip, buf, ops, len);
-
-		nand_wait_readrdy(chip);
-
-		max_bitflips = max_t(unsigned int, max_bitflips, ret);
-
-		readlen -= len;
-		if (!readlen)
-			break;
-
-		/* Increment page address */
-		realpage++;
-
-		page = realpage & chip->pagemask;
-		/* Check, if we cross a chip boundary */
-		if (!page) {
-			chipnr++;
-			nand_deselect_target(chip);
-			nand_select_target(chip, chipnr);
-		}
-	}
-	nand_deselect_target(chip);
-
-	ops->oobretlen = ops->ooblen - readlen;
-
-	if (ret < 0)
-		return ret;
-
-	if (mtd->ecc_stats.failed - stats.failed)
-		return -EBADMSG;
-
-	return max_bitflips;
-}
-
-/**
  * nand_read_oob - [MTD Interface] NAND read data and/or out-of-band
  * @mtd: MTD device structure
  * @from: offset to read from
@@ -3550,10 +3542,7 @@ static int nand_read_oob(struct mtd_info *mtd, loff_t from,
 	if (ret)
 		return ret;
 
-	if (!ops->datbuf)
-		ret = nand_do_read_oob(chip, from, ops);
-	else
-		ret = nand_do_read_ops(chip, from, ops);
+	ret = nand_do_read_ops(chip, from, ops);
 
 	nand_release_device(chip);
 	return ret;
@@ -3882,172 +3871,6 @@ static int nand_write_page_syndrome(struct nand_chip *chip, const uint8_t *buf,
 }
 
 /**
- * nand_write_page - write one page
- * @chip: NAND chip descriptor
- * @offset: address offset within the page
- * @data_len: length of actual data to be written
- * @buf: the data to write
- * @oob_required: must write chip->oob_poi to OOB
- * @page: page number to write
- * @raw: use _raw version of write_page
- */
-static int nand_write_page(struct nand_chip *chip, uint32_t offset,
-			   int data_len, const uint8_t *buf, int oob_required,
-			   int page, int raw)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	int status, subpage;
-
-	if (!(chip->options & NAND_NO_SUBPAGE_WRITE) &&
-		chip->ecc.write_subpage)
-		subpage = offset || (data_len < mtd->writesize);
-	else
-		subpage = 0;
-
-	if (unlikely(raw))
-		status = chip->ecc.write_page_raw(chip, buf, oob_required,
-						  page);
-	else if (subpage)
-		status = chip->ecc.write_subpage(chip, offset, data_len, buf,
-						 oob_required, page);
-	else
-		status = chip->ecc.write_page(chip, buf, oob_required, page);
-
-	if (status < 0)
-		return status;
-
-	return 0;
-}
-
-#define NOTALIGNED(x)	((x & (chip->subpagesize - 1)) != 0)
-
-/**
- * nand_do_write_ops - [INTERN] NAND write with ECC
- * @chip: NAND chip object
- * @to: offset to write to
- * @ops: oob operations description structure
- *
- * NAND write with ECC.
- */
-static int nand_do_write_ops(struct nand_chip *chip, loff_t to,
-			     struct mtd_oob_ops *ops)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	int chipnr, realpage, page, column;
-	uint32_t writelen = ops->len;
-
-	uint32_t oobwritelen = ops->ooblen;
-	uint32_t oobmaxlen = mtd_oobavail(mtd, ops);
-
-	uint8_t *oob = ops->oobbuf;
-	uint8_t *buf = ops->datbuf;
-	int ret;
-	int oob_required = oob ? 1 : 0;
-
-	ops->retlen = 0;
-	if (!writelen)
-		return 0;
-
-	/* Reject writes, which are not page aligned */
-	if (NOTALIGNED(to) || NOTALIGNED(ops->len)) {
-		pr_notice("%s: attempt to write non page aligned data\n",
-			   __func__);
-		return -EINVAL;
-	}
-
-	column = to & (mtd->writesize - 1);
-
-	chipnr = (int)(to >> chip->chip_shift);
-	nand_select_target(chip, chipnr);
-
-	/* Check, if it is write protected */
-	if (nand_check_wp(chip)) {
-		ret = -EIO;
-		goto err_out;
-	}
-
-	realpage = (int)(to >> chip->page_shift);
-	page = realpage & chip->pagemask;
-
-	/* Invalidate the page cache, when we write to the cached page */
-	if (to <= ((loff_t)chip->pagecache.page << chip->page_shift) &&
-	    ((loff_t)chip->pagecache.page << chip->page_shift) < (to + ops->len))
-		chip->pagecache.page = -1;
-
-	/* Don't allow multipage oob writes with offset */
-	if (oob && ops->ooboffs && (ops->ooboffs + ops->ooblen > oobmaxlen)) {
-		ret = -EINVAL;
-		goto err_out;
-	}
-
-	while (1) {
-		int bytes = mtd->writesize;
-		uint8_t *wbuf = buf;
-		int use_bufpoi;
-		int part_pagewr = (column || writelen < mtd->writesize);
-
-		if (part_pagewr)
-			use_bufpoi = 1;
-		else if (chip->options & NAND_USE_BOUNCE_BUFFER)
-			use_bufpoi = !virt_addr_valid(buf) ||
-				     !IS_ALIGNED((unsigned long)buf,
-						 chip->buf_align);
-		else
-			use_bufpoi = 0;
-
-		/* Partial page write?, or need to use bounce buffer */
-		if (use_bufpoi) {
-			pr_debug("%s: using write bounce buffer for buf@%p\n",
-					 __func__, buf);
-			if (part_pagewr)
-				bytes = min_t(int, bytes - column, writelen);
-			wbuf = nand_get_data_buf(chip);
-			memset(wbuf, 0xff, mtd->writesize);
-			memcpy(&wbuf[column], buf, bytes);
-		}
-
-		if (unlikely(oob)) {
-			size_t len = min(oobwritelen, oobmaxlen);
-			oob = nand_fill_oob(chip, oob, len, ops);
-			oobwritelen -= len;
-		} else {
-			/* We still need to erase leftover OOB data */
-			memset(chip->oob_poi, 0xff, mtd->oobsize);
-		}
-
-		ret = nand_write_page(chip, column, bytes, wbuf,
-				      oob_required, page,
-				      (ops->mode == MTD_OPS_RAW));
-		if (ret)
-			break;
-
-		writelen -= bytes;
-		if (!writelen)
-			break;
-
-		column = 0;
-		buf += bytes;
-		realpage++;
-
-		page = realpage & chip->pagemask;
-		/* Check, if we cross a chip boundary */
-		if (!page) {
-			chipnr++;
-			nand_deselect_target(chip);
-			nand_select_target(chip, chipnr);
-		}
-	}
-
-	ops->retlen = ops->len - writelen;
-	if (unlikely(oob))
-		ops->oobretlen = ops->ooblen;
-
-err_out:
-	nand_deselect_target(chip);
-	return ret;
-}
-
-/**
  * panic_nand_write - [MTD Interface] NAND write with ECC
  * @mtd: MTD device structure
  * @to: offset to write to
@@ -4104,18 +3927,13 @@ static int nand_write_oob(struct mtd_info *mtd, loff_t to,
 	case MTD_OPS_PLACE_OOB:
 	case MTD_OPS_AUTO_OOB:
 	case MTD_OPS_RAW:
+		ret = nand_do_write_ops(chip, to, ops);
 		break;
 
 	default:
-		goto out;
+		break;
 	}
 
-	if (!ops->datbuf)
-		ret = nand_do_write_oob(chip, to, ops);
-	else
-		ret = nand_do_write_ops(chip, to, ops);
-
-out:
 	nand_release_device(chip);
 	return ret;
 }
@@ -4160,90 +3978,81 @@ static int nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 int nand_erase_nand(struct nand_chip *chip, struct erase_info *instr,
 		    int allowbbt)
 {
-	int page, status, pages_per_block, ret, chipnr;
-	loff_t len;
+	struct nand_pos pos, next, end;
+	int ret;
 
-	pr_debug("%s: start = 0x%012llx, len = %llu\n",
-			__func__, (unsigned long long)instr->addr,
-			(unsigned long long)instr->len);
+	pr_debug("%s: start = 0x%012llx, len = %llu\n",	__func__,
+		 (unsigned long long)instr->addr,
+		 (unsigned long long)instr->len);
 
 	if (check_offs_len(chip, instr->addr, instr->len))
 		return -EINVAL;
+
+	nanddev_offs_to_pos(&chip->base, instr->addr, &pos);
+	nanddev_offs_to_pos(&chip->base, instr->addr + instr->len, &end);
 
 	/* Grab the lock and see if the device is available */
 	ret = nand_get_device(chip);
 	if (ret)
 		return ret;
 
-	/* Shift to get first page */
-	page = (int)(instr->addr >> chip->page_shift);
-	chipnr = (int)(instr->addr >> chip->chip_shift);
+	while (nanddev_pos_cmp(&pos, &end) < 0) {
+		unsigned int row = nanddev_pos_to_row(&chip->base, &pos);
 
-	/* Calculate pages in each block */
-	pages_per_block = 1 << (chip->phys_erase_shift - chip->page_shift);
+		/* Select the NAND device */
+		if (chip->cur_cs != pos.target) {
+			if (chip->cur_cs >= 0)
+				nand_deselect_target(chip);
 
-	/* Select the NAND device */
-	nand_select_target(chip, chipnr);
+			nand_select_target(chip, pos.target);
+		}
 
-	/* Check, if it is write protected */
-	if (nand_check_wp(chip)) {
-		pr_debug("%s: device is write protected!\n",
-				__func__);
-		ret = -EIO;
-		goto erase_exit;
-	}
-
-	/* Loop through the pages */
-	len = instr->len;
-
-	while (len) {
-		/* Check if we have a bad block, we do not erase bad blocks! */
-		if (nand_block_checkbad(chip, ((loff_t) page) <<
-					chip->page_shift, allowbbt)) {
-			pr_warn("%s: attempt to erase a bad block at page 0x%08x\n",
-				    __func__, page);
+		/* Check, if it is write protected */
+		if (nand_check_wp(chip)) {
+			pr_debug("%s: device is write protected!\n",
+				 __func__);
 			ret = -EIO;
-			goto erase_exit;
+			break;
+		}
+
+		/* Check if we have a bad block, we do not erase bad blocks! */
+		if (nand_block_checkbad(chip,
+					nanddev_pos_to_offs(&chip->base, &pos),
+					allowbbt)) {
+			pr_warn("%s: attempt to erase a bad block at page 0x%08x\n",
+				__func__, row);
+			ret = -EIO;
+			break;
 		}
 
 		/*
 		 * Invalidate the page cache, if we erase the block which
 		 * contains the current cached page.
 		 */
-		if (page <= chip->pagecache.page && chip->pagecache.page <
-		    (page + pages_per_block))
-			chip->pagecache.page = -1;
+		next = pos;
+		nanddev_pos_next_eraseblock(&chip->base, &next);
+		if (chip->pagecache.valid &&
+		    nanddev_pos_cmp(&chip->pagecache.pos, &pos) >= 0 &&
+		    nanddev_pos_cmp(&chip->pagecache.pos, &next) < 0)
+			chip->pagecache.valid = false;
 
 		if (chip->legacy.erase)
-			status = chip->legacy.erase(chip,
-						    page & chip->pagemask);
+			ret = chip->legacy.erase(chip, row);
 		else
-			status = single_erase(chip, page & chip->pagemask);
+			ret = single_erase(chip, row);
 
 		/* See if block erase succeeded */
-		if (status) {
+		if (ret) {
 			pr_debug("%s: failed erase, page 0x%08x\n",
-					__func__, page);
-			ret = -EIO;
-			instr->fail_addr =
-				((loff_t)page << chip->page_shift);
-			goto erase_exit;
+				 __func__, row);
+			break;
 		}
 
-		/* Increment page address and decrement length */
-		len -= (1ULL << chip->phys_erase_shift);
-		page += pages_per_block;
-
-		/* Check, if we cross a chip boundary */
-		if (len && !(page & chip->pagemask)) {
-			chipnr++;
-			nand_deselect_target(chip);
-			nand_select_target(chip, chipnr);
-		}
+		pos = next;
 	}
 
-	ret = 0;
-erase_exit:
+	if (ret)
+		instr->fail_addr = nanddev_pos_to_offs(&chip->base, &pos);
 
 	/* Deselect and wake up anyone waiting on the device */
 	nand_deselect_target(chip);
@@ -5753,7 +5562,7 @@ static int nand_scan_tail(struct nand_chip *chip)
 	chip->subpagesize = mtd->writesize >> mtd->subpage_sft;
 
 	/* Invalidate the pagebuffer reference */
-	chip->pagecache.page = -1;
+	chip->pagecache.valid = false;
 
 	/* Large page NAND with SOFT_ECC should support subpage reads */
 	switch (ecc->mode) {
