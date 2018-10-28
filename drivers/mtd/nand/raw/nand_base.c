@@ -456,8 +456,8 @@ static int nand_do_write_oob(struct nand_chip *chip, loff_t to,
 	}
 
 	/* Invalidate the page cache, if we write to the cached page */
-	if (page == chip->pagebuf)
-		chip->pagebuf = -1;
+	if (page == chip->pagecache.page)
+		chip->pagecache.page = -1;
 
 	nand_fill_oob(chip, ops->oobbuf, ops->ooblen, ops);
 
@@ -3170,7 +3170,7 @@ static int nand_do_read_ops(struct nand_chip *chip, loff_t from,
 			use_bufpoi = 0;
 
 		/* Is the current page in the buffer? */
-		if (realpage != chip->pagebuf || oob) {
+		if (realpage != chip->pagecache.page || oob) {
 			bufpoi = use_bufpoi ? chip->data_buf : buf;
 
 			if (use_bufpoi && aligned)
@@ -3196,7 +3196,7 @@ read_retry:
 			if (ret < 0) {
 				if (use_bufpoi)
 					/* Invalidate page cache */
-					chip->pagebuf = -1;
+					chip->pagecache.page = -1;
 				break;
 			}
 
@@ -3205,11 +3205,11 @@ read_retry:
 				if (!NAND_HAS_SUBPAGE_READ(chip) && !oob &&
 				    !(mtd->ecc_stats.failed - ecc_failures) &&
 				    (ops->mode != MTD_OPS_RAW)) {
-					chip->pagebuf = realpage;
-					chip->pagebuf_bitflips = ret;
+					chip->pagecache.page = realpage;
+					chip->pagecache.bitflips = ret;
 				} else {
 					/* Invalidate page cache */
-					chip->pagebuf = -1;
+					chip->pagecache.page = -1;
 				}
 				memcpy(buf, chip->data_buf + col, bytes);
 			}
@@ -3249,7 +3249,7 @@ read_retry:
 			memcpy(buf, chip->data_buf + col, bytes);
 			buf += bytes;
 			max_bitflips = max_t(unsigned int, max_bitflips,
-					     chip->pagebuf_bitflips);
+					     chip->pagecache.bitflips);
 		}
 
 		readlen -= bytes;
@@ -3970,9 +3970,9 @@ static int nand_do_write_ops(struct nand_chip *chip, loff_t to,
 	page = realpage & chip->pagemask;
 
 	/* Invalidate the page cache, when we write to the cached page */
-	if (to <= ((loff_t)chip->pagebuf << chip->page_shift) &&
-	    ((loff_t)chip->pagebuf << chip->page_shift) < (to + ops->len))
-		chip->pagebuf = -1;
+	if (to <= ((loff_t)chip->pagecache.page << chip->page_shift) &&
+	    ((loff_t)chip->pagecache.page << chip->page_shift) < (to + ops->len))
+		chip->pagecache.page = -1;
 
 	/* Don't allow multipage oob writes with offset */
 	if (oob && ops->ooboffs && (ops->ooboffs + ops->ooblen > oobmaxlen)) {
@@ -4210,9 +4210,9 @@ int nand_erase_nand(struct nand_chip *chip, struct erase_info *instr,
 		 * Invalidate the page cache, if we erase the block which
 		 * contains the current cached page.
 		 */
-		if (page <= chip->pagebuf && chip->pagebuf <
+		if (page <= chip->pagecache.page && chip->pagecache.page <
 		    (page + pages_per_block))
-			chip->pagebuf = -1;
+			chip->pagecache.page = -1;
 
 		if (chip->legacy.erase)
 			status = chip->legacy.erase(chip,
@@ -5790,7 +5790,7 @@ static int nand_scan_tail(struct nand_chip *chip)
 	chip->subpagesize = mtd->writesize >> mtd->subpage_sft;
 
 	/* Invalidate the pagebuffer reference */
-	chip->pagebuf = -1;
+	chip->pagecache.page = -1;
 
 	/* Large page NAND with SOFT_ECC should support subpage reads */
 	switch (ecc->mode) {
