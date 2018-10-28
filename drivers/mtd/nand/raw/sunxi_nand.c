@@ -1426,20 +1426,19 @@ pio_fallback:
 
 static int sunxi_nfc_hw_ecc_read_oob(struct nand_chip *chip, int page)
 {
-	chip->pagebuf = -1;
+	u8 *buf = nand_get_data_buf(chip);
 
-	return chip->ecc.read_page(chip, chip->data_buf, 1, page);
+	return chip->ecc.read_page(chip, buf, 1, page);
 }
 
 static int sunxi_nfc_hw_ecc_write_oob(struct nand_chip *chip, int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
+	u8 *buf = nand_get_data_buf(chip);
 	int ret;
 
-	chip->pagebuf = -1;
-
-	memset(chip->data_buf, 0xff, mtd->writesize);
-	ret = chip->ecc.write_page(chip, chip->data_buf, 1, page);
+	memset(buf, 0xff, mtd->writesize);
+	ret = chip->ecc.write_page(chip, buf, 1, page);
 	if (ret)
 		return ret;
 
