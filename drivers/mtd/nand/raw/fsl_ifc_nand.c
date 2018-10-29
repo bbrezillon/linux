@@ -731,8 +731,6 @@ static int fsl_ifc_attach_chip(struct nand_chip *chip)
 							chip->badblockpos);
 	dev_dbg(priv->dev, "%s: nand->page_shift = %d\n", __func__,
 							chip->page_shift);
-	dev_dbg(priv->dev, "%s: nand->phys_erase_shift = %d\n", __func__,
-							chip->phys_erase_shift);
 	dev_dbg(priv->dev, "%s: nand->ecc.mode = %d\n", __func__,
 							chip->ecc.mode);
 	dev_dbg(priv->dev, "%s: nand->ecc.steps = %d\n", __func__,

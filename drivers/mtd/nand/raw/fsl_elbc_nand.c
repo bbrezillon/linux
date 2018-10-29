@@ -204,10 +204,9 @@ static void set_addr(struct mtd_info *mtd, int column, int page_addr, int oob)
 
 	dev_vdbg(priv->dev, "set_addr: bank=%d, "
 			    "elbc_fcm_ctrl->addr=0x%p (0x%p), "
-	                    "index %x, pes %d ps %d\n",
+	                    "index %x\n",
 		 buf_num, elbc_fcm_ctrl->addr, priv->vbase,
-		 elbc_fcm_ctrl->index,
-	         chip->phys_erase_shift, chip->page_shift);
+		 elbc_fcm_ctrl->index);
 }
 
 /*
@@ -659,8 +658,6 @@ static int fsl_elbc_attach_chip(struct nand_chip *chip)
 	        chip->badblockpos);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->page_shift = %d\n",
 	        chip->page_shift);
-	dev_dbg(priv->dev, "fsl_elbc_init: nand->phys_erase_shift = %d\n",
-	        chip->phys_erase_shift);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecc.mode = %d\n",
 	        chip->ecc.mode);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecc.steps = %d\n",

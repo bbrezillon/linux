@@ -211,16 +211,17 @@ static const struct mtd_ooblayout_ops nand_ooblayout_lp_hamming_ops = {
 
 static int check_offs_len(struct nand_chip *chip, loff_t ofs, uint64_t len)
 {
+	struct nand_pos pos;
 	int ret = 0;
 
 	/* Start address must align on block boundary */
-	if (ofs & ((1ULL << chip->phys_erase_shift) - 1)) {
+	if (nanddev_offs_to_pos(&chip->base, ofs, &pos) || pos.page) {
 		pr_debug("%s: unaligned address\n", __func__);
 		ret = -EINVAL;
 	}
 
 	/* Length must align on block boundary */
-	if (len & ((1ULL << chip->phys_erase_shift) - 1)) {
+	if (nanddev_offs_to_pos(&chip->base, ofs + len, &pos) || pos.page) {
 		pr_debug("%s: length not block aligned\n", __func__);
 		ret = -EINVAL;
 	}
@@ -648,7 +649,7 @@ static int nand_block_markbad_lowlevel(struct nand_chip *chip, loff_t ofs)
 		/* Attempt erase before marking OOB */
 		memset(&einfo, 0, sizeof(einfo));
 		einfo.addr = ofs;
-		einfo.len = 1ULL << chip->phys_erase_shift;
+		einfo.len = nanddev_eraseblock_size(&chip->base);
 		nand_erase_nand(chip, &einfo, 0);
 
 		/* Write bad block marker to OOB */
@@ -1730,11 +1731,11 @@ int nand_exit_status_op(struct nand_chip *chip)
  */
 int nand_erase_op(struct nand_chip *chip, unsigned int eraseblock)
 {
-	unsigned int page = eraseblock <<
-			    (chip->phys_erase_shift - chip->page_shift);
+	unsigned int page;
 	int ret;
 	u8 status;
 
+	page = eraseblock * nanddev_pages_per_eraseblock(&chip->base);
 	if (nand_has_exec_op(chip)) {
 		const struct nand_sdr_timings *sdr =
 			nand_get_sdr_timings(&chip->data_interface);
@@ -3961,7 +3962,7 @@ static int single_erase(struct nand_chip *chip, int page)
 	unsigned int eraseblock;
 
 	/* Send commands to erase a block */
-	eraseblock = page >> (chip->phys_erase_shift - chip->page_shift);
+	eraseblock = page / nanddev_pages_per_eraseblock(&chip->base);
 
 	return nand_erase_op(chip, eraseblock);
 }
@@ -4621,8 +4622,7 @@ ident_done:
 	/* Convert chipsize to number of pages per chip -1 */
 	targetsize = nanddev_target_size(&chip->base);
 
-	chip->bbt_erase_shift = chip->phys_erase_shift =
-		ffs(mtd->erasesize) - 1;
+	chip->bbt_erase_shift = ffs(mtd->erasesize) - 1;
 
 	if (nanddev_pages_per_target(&chip->base) -1 > U16_MAX)
 		chip->options |= NAND_ROW_ADDR_3;

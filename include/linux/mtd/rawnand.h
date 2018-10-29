@@ -980,7 +980,6 @@ struct nand_legacy {
  *			before writing
  * @page_shift:		[INTERN] number of address bits in a page (column
  *			address bits).
- * @phys_erase_shift:	[INTERN] number of address bits in a physical eraseblock
  * @bbt_erase_shift:	[INTERN] number of address bits in a bbt entry
  * @options:		[BOARDSPECIFIC] various chip options. They can partly
  *			be set to inform nand_scan about special functionality.
@@ -1043,7 +1042,6 @@ struct nand_chip {
 	unsigned int bbt_options;
 
 	int page_shift;
-	int phys_erase_shift;
 	int bbt_erase_shift;
 	u8 *data_buf;
 

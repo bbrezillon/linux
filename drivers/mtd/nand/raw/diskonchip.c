@@ -1060,7 +1060,7 @@ static inline int __init nftl_partscan(struct mtd_info *mtd, struct mtd_partitio
 		mh->FirstPhysicalEUN, mh->FormattedSize,
 		mh->UnitSizeFactor);
 
-	blocks = mtd->size >> this->phys_erase_shift;
+	blocks = nanddev_neraseblocks(&this->base);
 	maxblocks = min(32768U, mtd->erasesize - psize);
 
 	if (mh->UnitSizeFactor == 0x00) {
@@ -1142,10 +1142,11 @@ static inline int __init inftl_partscan(struct mtd_info *mtd, struct mtd_partiti
 	int blocks;
 	int vshift, lastvunit = 0;
 	int i;
-	int end = mtd->size;
+	loff_t end = nanddev_size(&this->base);
 
 	if (inftl_bbt_write)
-		end -= (INFTL_BBT_RESERVED_BLOCKS << this->phys_erase_shift);
+		end -= INFTL_BBT_RESERVED_BLOCKS *
+		       nanddev_eraseblock_size(&this->base);
 
 	buf = kmalloc(mtd->writesize, GFP_KERNEL);
 	if (!buf) {
@@ -1182,7 +1183,8 @@ static inline int __init inftl_partscan(struct mtd_info *mtd, struct mtd_partiti
 		((unsigned char *) &mh->OsakVersion)[3] & 0xf,
 		mh->PercentUsed);
 
-	vshift = this->phys_erase_shift + mh->BlockMultiplierBits;
+	vshift = fls(nanddev_eraseblock_size(&this->base)) - 1 +
+		 mh->BlockMultiplierBits;
 
 	blocks = mtd->size >> vshift;
 	if (blocks > 32768) {
