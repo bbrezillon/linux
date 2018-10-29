@@ -641,14 +641,11 @@ static int fsl_elbc_attach_chip(struct nand_chip *chip)
 	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
-	unsigned int al;
+	unsigned int al = 0;
 
 	/* calculate FMR Address Length field */
-	al = 0;
-	if (chip->pagemask & 0xffff0000)
-		al++;
-	if (chip->pagemask & 0xff000000)
-		al++;
+	if (chip->options & NAND_ROW_ADDR_3)
+		al = 1;
 
 	priv->fmr |= al << FMR_AL_SHIFT;
 
@@ -656,8 +653,6 @@ static int fsl_elbc_attach_chip(struct nand_chip *chip)
 	        nanddev_ntargets(&chip->base));
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->chipsize = %lld\n",
 	        nanddev_target_size(&chip->base));
-	dev_dbg(priv->dev, "fsl_elbc_init: nand->pagemask = %8x\n",
-	        chip->pagemask);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->legacy.chip_delay = %d\n",
 	        chip->legacy.chip_delay);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->badblockpos = %d\n",

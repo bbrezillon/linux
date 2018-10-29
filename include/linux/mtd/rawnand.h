@@ -998,7 +998,6 @@ struct nand_legacy {
  *			      set to the actually used ONFI mode if the chip is
  *			      ONFI compliant or deduced from the datasheet if
  *			      the NAND chip is not ONFI compliant.
- * @pagemask:		[INTERN] page number mask = number of (pages / chip) - 1
  * @data_buf:		[INTERN] buffer for data, size is (page size + oobsize).
  * @pagecache:		Structure containing page cache related fields
  * @pagecache.bitflips:	Number of bitflips of the cached page
@@ -1048,7 +1047,6 @@ struct nand_chip {
 	int phys_erase_shift;
 	int bbt_erase_shift;
 	int chip_shift;
-	int pagemask;
 	u8 *data_buf;
 
 	struct {

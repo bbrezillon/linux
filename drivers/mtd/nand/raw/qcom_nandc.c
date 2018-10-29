@@ -2200,9 +2200,11 @@ static int qcom_nandc_block_bad(struct nand_chip *chip, loff_t ofs)
 	struct qcom_nand_host *host = to_qcom_nand_host(chip);
 	struct qcom_nand_controller *nandc = get_qcom_nand_controller(chip);
 	struct nand_ecc_ctrl *ecc = &chip->ecc;
-	int page, ret, bbpos, bad = 0;
+	int row, ret, bbpos, bad = 0;
+	struct nand_pos pos;
 
-	page = (int)(ofs >> chip->page_shift) & chip->pagemask;
+	nanddev_offs_to_pos(&chip->base, ofs, &pos);
+	row = nanddev_pos_to_row(&chip->base, &pos);
 
 	/*
 	 * configure registers for a raw sub page read, the address is set to
@@ -2213,7 +2215,7 @@ static int qcom_nandc_block_bad(struct nand_chip *chip, loff_t ofs)
 	host->use_ecc = false;
 
 	clear_bam_transaction(nandc);
-	ret = copy_last_cw(host, page);
+	ret = copy_last_cw(host, row);
 	if (ret)
 		goto err;
 
@@ -2237,7 +2239,8 @@ static int qcom_nandc_block_markbad(struct nand_chip *chip, loff_t ofs)
 	struct qcom_nand_host *host = to_qcom_nand_host(chip);
 	struct qcom_nand_controller *nandc = get_qcom_nand_controller(chip);
 	struct nand_ecc_ctrl *ecc = &chip->ecc;
-	int page, ret;
+	struct nand_pos pos;
+	int row, ret;
 
 	clear_read_regs(nandc);
 	clear_bam_transaction(nandc);
@@ -2249,11 +2252,12 @@ static int qcom_nandc_block_markbad(struct nand_chip *chip, loff_t ofs)
 	 */
 	memset(nandc->data_buffer, 0x00, host->cw_size);
 
-	page = (int)(ofs >> chip->page_shift) & chip->pagemask;
+	nanddev_offs_to_pos(&chip->base, ofs, &pos);
+	row = nanddev_pos_to_row(&chip->base, &pos);
 
 	/* prepare write */
 	host->use_ecc = false;
-	set_address(host, host->cw_size * (ecc->steps - 1), page);
+	set_address(host, host->cw_size * (ecc->steps - 1), row);
 	update_rw_regs(host, 1, false);
 
 	config_nand_page_write(nandc);

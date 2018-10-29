@@ -1289,7 +1289,7 @@ static void preset_v3(struct mtd_info *mtd)
 		NFC_V3_CONFIG2_INT_MSK |
 		NFC_V3_CONFIG2_NUM_ADDR_PHASE0;
 
-	addr_phases = fls(chip->pagemask) >> 3;
+	addr_phases = chip->options & NAND_ROW_ADDR_3 ? 3 : 2;
 
 	if (mtd->writesize == 2048) {
 		config2 |= NFC_V3_CONFIG2_PS_2048;

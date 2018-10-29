@@ -245,7 +245,6 @@ static void mpc5121_nfc_done(struct mtd_info *mtd)
 static void mpc5121_nfc_addr_cycle(struct mtd_info *mtd, int column, int page)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	u32 pagemask = chip->pagemask;
 
 	if (column != -1) {
 		mpc5121_nfc_send_addr(mtd, column);
@@ -254,11 +253,11 @@ static void mpc5121_nfc_addr_cycle(struct mtd_info *mtd, int column, int page)
 	}
 
 	if (page != -1) {
-		do {
-			mpc5121_nfc_send_addr(mtd, page & 0xFF);
-			page >>= 8;
-			pagemask >>= 8;
-		} while (pagemask);
+		unsigned int naddrs = chip->options & NAND_ROW_ADDR_3 ? 2 : 3;
+		unsigned int i;
+
+		for (i = 0; i < naddrs; i++)
+			mpc5121_nfc_send_addr(mtd, (page >> (i * 8)) & 0xFF);
 	}
 }
 

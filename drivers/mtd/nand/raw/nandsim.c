@@ -2329,7 +2329,6 @@ static int __init ns_init_module(void)
 		memorg->eraseblocks_per_lun = 1 << overridesize;
 		targetsize = nanddev_target_size(&chip->base);
 		chip->chip_shift = ffs(nsmtd->erasesize) + overridesize - 1;
-		chip->pagemask = (targetsize >> chip->page_shift) - 1;
 	}
 
 	if ((retval = setup_wear_reporting(nsmtd)) != 0)

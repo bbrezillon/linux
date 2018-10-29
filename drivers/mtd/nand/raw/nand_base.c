@@ -291,29 +291,38 @@ static void nand_release_device(struct nand_chip *chip)
  */
 static int nand_block_bad(struct nand_chip *chip, loff_t ofs)
 {
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	int page, page_end, res;
+	unsigned int i, row, npages = 1;
+	struct nand_pos pos;
+	int ret;
 	u8 bad;
 
-	if (chip->bbt_options & NAND_BBT_SCANLASTPAGE)
-		ofs += mtd->erasesize - mtd->writesize;
+	nanddev_offs_to_pos(&chip->base, ofs, &pos);
 
-	page = (int)(ofs >> chip->page_shift) & chip->pagemask;
-	page_end = page + (chip->bbt_options & NAND_BBT_SCAN2NDPAGE ? 2 : 1);
+	if (chip->bbt_options & NAND_BBT_SCANLASTPAGE) {
+		pos.page = nanddev_pages_per_eraseblock(&chip->base) - 1;
+	} else {
+		pos.page = 0;
+		if (chip->bbt_options & NAND_BBT_SCAN2NDPAGE)
+			npages++;
+	}
 
-	for (; page < page_end; page++) {
-		res = chip->ecc.read_oob(chip, page);
-		if (res < 0)
-			return res;
+	for (i = 0; i < npages; i++) {
+		row = nanddev_pos_to_row(&chip->base, &pos);
+		ret = chip->ecc.read_oob(chip, row);
+		if (ret < 0)
+			return ret;
 
 		bad = chip->oob_poi[chip->badblockpos];
 
 		if (likely(chip->badblockbits == 8))
-			res = bad != 0xFF;
+			ret = bad != 0xFF;
 		else
-			res = hweight8(bad) < chip->badblockbits;
-		if (res)
-			return res;
+			ret = hweight8(bad) < chip->badblockbits;
+
+		if (ret)
+			return ret;
+
+		nanddev_pos_next_page(&chip->base, &pos);
 	}
 
 	return 0;
@@ -4607,7 +4616,6 @@ ident_done:
 	chip->page_shift = ffs(mtd->writesize) - 1;
 	/* Convert chipsize to number of pages per chip -1 */
 	targetsize = nanddev_target_size(&chip->base);
-	chip->pagemask = (targetsize >> chip->page_shift) - 1;
 
 	chip->bbt_erase_shift = chip->phys_erase_shift =
 		ffs(mtd->erasesize) - 1;
