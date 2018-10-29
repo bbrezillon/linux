@@ -1067,7 +1067,10 @@ static int nand_update_bbt(struct nand_chip *this, loff_t offs)
 
 	/* Do we have a bbt per chip? */
 	if (td->options & NAND_BBT_PERCHIP) {
-		chip = (int)(offs >> this->chip_shift);
+		struct nand_pos pos;
+
+		nanddev_offs_to_pos(&this->base, offs, &pos);
+		chip = pos.target;
 		chipsel = chip;
 	} else {
 		chip = 0;

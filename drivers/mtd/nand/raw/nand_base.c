@@ -3894,11 +3894,13 @@ static int panic_nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 			    size_t *retlen, const uint8_t *buf)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	int chipnr = (int)(to >> chip->chip_shift);
 	struct mtd_oob_ops ops;
+	struct nand_pos pos;
 	int ret;
 
-	nand_select_target(chip, chipnr);
+	nanddev_offs_to_pos(&chip->base, to, &pos);
+
+	nand_select_target(chip, pos.target);
 
 	/* Wait for the device to get ready */
 	panic_nand_wait(chip, 400);
@@ -4097,15 +4099,17 @@ static void nand_sync(struct mtd_info *mtd)
 static int nand_block_isbad(struct mtd_info *mtd, loff_t offs)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	int chipnr = (int)(offs >> chip->chip_shift);
+	struct nand_pos pos;
 	int ret;
+
+	nanddev_offs_to_pos(&chip->base, offs, &pos);
 
 	/* Select the NAND device */
 	ret = nand_get_device(chip);
 	if (ret)
 		return ret;
 
-	nand_select_target(chip, chipnr);
+	nand_select_target(chip, pos.target);
 
 	ret = nand_block_checkbad(chip, offs, 0);
 
@@ -4619,14 +4623,8 @@ ident_done:
 
 	chip->bbt_erase_shift = chip->phys_erase_shift =
 		ffs(mtd->erasesize) - 1;
-	if (targetsize & 0xffffffff)
-		chip->chip_shift = ffs((unsigned)targetsize) - 1;
-	else {
-		chip->chip_shift = ffs((unsigned)(targetsize >> 32));
-		chip->chip_shift += 32 - 1;
-	}
 
-	if (chip->chip_shift - chip->page_shift > 16)
+	if (nanddev_pages_per_target(&chip->base) -1 > U16_MAX)
 		chip->options |= NAND_ROW_ADDR_3;
 
 	chip->badblockbits = 8;

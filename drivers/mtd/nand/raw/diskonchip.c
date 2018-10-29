@@ -1190,7 +1190,8 @@ static inline int __init inftl_partscan(struct mtd_info *mtd, struct mtd_partiti
 		goto out;
 	}
 
-	blocks = doc->chips_per_floor << (this->chip_shift - this->phys_erase_shift);
+	blocks = doc->chips_per_floor *
+		 nanddev_eraseblocks_per_lun(&this->base);
 	if (inftl_bbt_write && (blocks > mtd->erasesize)) {
 		pr_err("Writeable BBTs spanning more than one erase block are not yet supported.  FIX ME!\n");
 		goto out;

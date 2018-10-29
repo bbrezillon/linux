@@ -729,8 +729,6 @@ static int fsl_ifc_attach_chip(struct nand_chip *chip)
 		chip->legacy.chip_delay);
 	dev_dbg(priv->dev, "%s: nand->badblockpos = %d\n", __func__,
 							chip->badblockpos);
-	dev_dbg(priv->dev, "%s: nand->chip_shift = %d\n", __func__,
-							chip->chip_shift);
 	dev_dbg(priv->dev, "%s: nand->page_shift = %d\n", __func__,
 							chip->page_shift);
 	dev_dbg(priv->dev, "%s: nand->phys_erase_shift = %d\n", __func__,

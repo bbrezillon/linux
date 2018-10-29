@@ -1203,7 +1203,6 @@ static int denali_multidev_fixup(struct denali_nand_info *denali)
 	chip->page_shift += 1;
 	chip->phys_erase_shift += 1;
 	chip->bbt_erase_shift += 1;
-	chip->chip_shift += 1;
 	chip->ecc.size <<= 1;
 	chip->ecc.bytes <<= 1;
 	chip->ecc.strength <<= 1;

@@ -1549,10 +1549,11 @@ static int gpmi_block_markbad(struct nand_chip *chip, loff_t ofs)
 	struct gpmi_nand_data *this = nand_get_controller_data(chip);
 	int ret = 0;
 	uint8_t *block_mark;
-	int column, page, chipnr;
+	struct nand_pos pos;
+	int column, row;
 
-	chipnr = (int)(ofs >> chip->chip_shift);
-	nand_select_target(chip, chipnr);
+	nanddev_offs_to_pos(&chip->base, ofs, &pos);
+	nand_select_target(chip, pos.target);
 
 	column = !GPMI_IS_MX23(this) ? mtd->writesize : 0;
 
@@ -1561,9 +1562,9 @@ static int gpmi_block_markbad(struct nand_chip *chip, loff_t ofs)
 	block_mark[0] = 0; /* bad block marker */
 
 	/* Shift to get page */
-	page = (int)(ofs >> chip->page_shift);
+	row = nanddev_pos_to_row(&chip->base, &pos);
 
-	ret = nand_prog_page_op(chip, page, column, block_mark, 1);
+	ret = nand_prog_page_op(chip, row, column, block_mark, 1);
 
 	nand_deselect_target(chip);
 
@@ -1732,11 +1733,7 @@ static int mx23_boot_init(struct gpmi_nand_data  *this)
 	struct device *dev = this->dev;
 	struct nand_chip *chip = &this->nand;
 	struct mtd_info *mtd = nand_to_mtd(chip);
-	unsigned int block_count;
-	unsigned int block;
-	int     chipnr;
-	int     page;
-	loff_t  byte;
+	struct nand_pos pos, end;
 	uint8_t block_mark;
 	int     ret = 0;
 
@@ -1755,25 +1752,20 @@ static int mx23_boot_init(struct gpmi_nand_data  *this)
 	 */
 	dev_dbg(dev, "Transcribing bad block marks...\n");
 
-	/* Compute the number of blocks in the entire medium. */
-	block_count = nanddev_eraseblocks_per_target(&chip->base);
+	nanddev_offs_to_pos(&chip->base, nanddev_size(&chip->base), &end);
 
 	/*
 	 * Loop over all the blocks in the medium, transcribing block marks as
 	 * we go.
 	 */
-	for (block = 0; block < block_count; block++) {
-		/*
-		 * Compute the chip, page and byte addresses for this block's
-		 * conventional mark.
-		 */
-		chipnr = block >> (chip->chip_shift - chip->phys_erase_shift);
-		page = block << (chip->phys_erase_shift - chip->page_shift);
-		byte = block <<  chip->phys_erase_shift;
+	for (nanddev_offs_to_pos(&chip->base, 0, &pos);
+	     nanddev_pos_cmp(&pos, &end) < 0;
+	     nanddev_pos_next_eraseblock(&chip->base, &pos)) {
+		unsigned int row = nanddev_pos_to_row(&chip->base, &pos);
 
 		/* Send the command to read the conventional block mark. */
-		nand_select_target(chip, chipnr);
-		nand_read_page_op(chip, page, mtd->writesize, NULL, 0);
+		nand_select_target(chip, pos.target);
+		nand_read_page_op(chip, row, mtd->writesize, NULL, 0);
 		block_mark = chip->legacy.read_byte(chip);
 		nand_deselect_target(chip);
 
@@ -1783,8 +1775,11 @@ static int mx23_boot_init(struct gpmi_nand_data  *this)
 		 * location where we transcribe block marks.
 		 */
 		if (block_mark != 0xff) {
-			dev_dbg(dev, "Transcribing mark in block %u\n", block);
-			ret = chip->legacy.block_markbad(chip, byte);
+			loff_t offs = nanddev_pos_to_offs(&chip->base, &pos);
+
+			dev_dbg(dev, "Transcribing mark in block %u:%u\n",
+				pos.target, pos.eraseblock);
+			ret = chip->legacy.block_markbad(chip, offs);
 			if (ret)
 				dev_err(dev,
 					"Failed to mark block bad with ret %d\n",

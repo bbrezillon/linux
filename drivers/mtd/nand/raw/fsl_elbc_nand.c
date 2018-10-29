@@ -657,8 +657,6 @@ static int fsl_elbc_attach_chip(struct nand_chip *chip)
 	        chip->legacy.chip_delay);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->badblockpos = %d\n",
 	        chip->badblockpos);
-	dev_dbg(priv->dev, "fsl_elbc_init: nand->chip_shift = %d\n",
-	        chip->chip_shift);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->page_shift = %d\n",
 	        chip->page_shift);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->phys_erase_shift = %d\n",

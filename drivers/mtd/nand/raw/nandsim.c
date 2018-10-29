@@ -2314,7 +2314,6 @@ static int __init ns_init_module(void)
 	if (overridesize) {
 		uint64_t new_size = (uint64_t)nsmtd->erasesize << overridesize;
 		struct nand_memory_organization *memorg;
-		u64 targetsize;
 
 		memorg = nanddev_get_memorg(&chip->base);
 
@@ -2327,8 +2326,6 @@ static int __init ns_init_module(void)
 		/* N.B. This relies on nand_scan not doing anything with the size before we change it */
 		nsmtd->size = new_size;
 		memorg->eraseblocks_per_lun = 1 << overridesize;
-		targetsize = nanddev_target_size(&chip->base);
-		chip->chip_shift = ffs(nsmtd->erasesize) + overridesize - 1;
 	}
 
 	if ((retval = setup_wear_reporting(nsmtd)) != 0)
