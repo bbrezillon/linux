@@ -4622,8 +4622,6 @@ ident_done:
 	/* Convert chipsize to number of pages per chip -1 */
 	targetsize = nanddev_target_size(&chip->base);
 
-	chip->bbt_erase_shift = ffs(mtd->erasesize) - 1;
-
 	if (nanddev_pages_per_target(&chip->base) -1 > U16_MAX)
 		chip->options |= NAND_ROW_ADDR_3;
 

@@ -1084,11 +1084,10 @@ static inline int __init nftl_partscan(struct mtd_info *mtd, struct mtd_partitio
 	   should be.  Thus, this code is somewhat dependent on the exact
 	   implementation of the NAND layer.  */
 	if (mh->UnitSizeFactor != 0xff) {
-		this->bbt_erase_shift += (0xff - mh->UnitSizeFactor);
 		memorg->pages_per_eraseblock <<= (0xff - mh->UnitSizeFactor);
 		mtd->erasesize <<= (0xff - mh->UnitSizeFactor);
 		pr_info("Setting virtual erase size to %d\n", mtd->erasesize);
-		blocks = mtd->size >> this->bbt_erase_shift;
+		blocks = DIV_ROUND_DOWN_ULL(mtd->size, mtd->erasesize);
 		maxblocks = min(32768U, mtd->erasesize - psize);
 	}
 
@@ -1111,7 +1110,8 @@ static inline int __init nftl_partscan(struct mtd_info *mtd, struct mtd_partitio
 
 	parts[numparts].name = " DiskOnChip BDTL partition";
 	parts[numparts].offset = offs;
-	parts[numparts].size = (mh->NumEraseUnits - numheaders) << this->bbt_erase_shift;
+	parts[numparts].size = (u64)(mh->NumEraseUnits - numheaders) *
+			       mtd->erasesize;
 
 	offs += parts[numparts].size;
 	numparts++;

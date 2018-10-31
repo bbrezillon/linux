@@ -171,6 +171,7 @@ static int read_bbt(struct nand_chip *this, uint8_t *buf, int page, int num,
 		    struct nand_bbt_descr *td, int offs)
 {
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int res, ret = 0, i, j, act = 0;
 	size_t retlen, len, totlen;
 	loff_t from;
@@ -184,7 +185,7 @@ static int read_bbt(struct nand_chip *this, uint8_t *buf, int page, int num,
 	from = ((loff_t)page) << this->page_shift;
 
 	while (totlen) {
-		len = min(totlen, (size_t)(1 << this->bbt_erase_shift));
+		len = min(totlen, (size_t)(1 << bbt_erase_shift));
 		if (marker_len) {
 			/*
 			 * In case the BBT marker is not in the OOB area it
@@ -220,7 +221,7 @@ static int read_bbt(struct nand_chip *this, uint8_t *buf, int page, int num,
 				if (reserved_block_code && (tmp == reserved_block_code)) {
 					pr_info("nand_read_bbt: reserved block at 0x%012llx\n",
 						 (loff_t)(offs + act) <<
-						 this->bbt_erase_shift);
+						 bbt_erase_shift);
 					bbt_mark_entry(this, offs + act,
 							BBT_BLOCK_RESERVED);
 					mtd->ecc_stats.bbtblocks++;
@@ -232,7 +233,7 @@ static int read_bbt(struct nand_chip *this, uint8_t *buf, int page, int num,
 				 */
 				pr_info("nand_read_bbt: bad block at 0x%012llx\n",
 					 (loff_t)(offs + act) <<
-					 this->bbt_erase_shift);
+					 bbt_erase_shift);
 				/* Factory marked bad or worn out? */
 				if (tmp == 0)
 					bbt_mark_entry(this, offs + act,
@@ -264,6 +265,7 @@ static int read_abs_bbt(struct nand_chip *this, uint8_t *buf,
 			struct nand_bbt_descr *td, int chip)
 {
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	u64 targetsize = nanddev_target_size(&this->base);
 	int res = 0, i;
 
@@ -272,15 +274,15 @@ static int read_abs_bbt(struct nand_chip *this, uint8_t *buf,
 		for (i = 0; i < nanddev_ntargets(&this->base); i++) {
 			if (chip == -1 || chip == i)
 				res = read_bbt(this, buf, td->pages[i],
-					targetsize >> this->bbt_erase_shift,
+					targetsize >> bbt_erase_shift,
 					td, offs);
 			if (res)
 				return res;
-			offs += targetsize >> this->bbt_erase_shift;
+			offs += targetsize >> bbt_erase_shift;
 		}
 	} else {
 		res = read_bbt(this, buf, td->pages[0],
-				mtd->size >> this->bbt_erase_shift, td, 0);
+				mtd->size >> bbt_erase_shift, td, 0);
 		if (res)
 			return res;
 	}
@@ -462,6 +464,7 @@ static int create_bbt(struct nand_chip *this, uint8_t *buf,
 {
 	u64 targetsize = nanddev_target_size(&this->base);
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int i, numblocks, numpages;
 	int startblock;
 	loff_t from;
@@ -474,7 +477,7 @@ static int create_bbt(struct nand_chip *this, uint8_t *buf,
 		numpages = 1;
 
 	if (chip == -1) {
-		numblocks = mtd->size >> this->bbt_erase_shift;
+		numblocks = mtd->size >> bbt_erase_shift;
 		startblock = 0;
 		from = 0;
 	} else {
@@ -483,10 +486,10 @@ static int create_bbt(struct nand_chip *this, uint8_t *buf,
 			        chip + 1, nanddev_ntargets(&this->base));
 			return -EINVAL;
 		}
-		numblocks = targetsize >> this->bbt_erase_shift;
+		numblocks = targetsize >> bbt_erase_shift;
 		startblock = chip * numblocks;
 		numblocks += startblock;
-		from = (loff_t)startblock << this->bbt_erase_shift;
+		from = (loff_t)startblock << bbt_erase_shift;
 	}
 
 	if (this->bbt_options & NAND_BBT_SCANLASTPAGE)
@@ -508,7 +511,7 @@ static int create_bbt(struct nand_chip *this, uint8_t *buf,
 			mtd->ecc_stats.badblocks++;
 		}
 
-		from += (1 << this->bbt_erase_shift);
+		from += (1 << bbt_erase_shift);
 	}
 	return 0;
 }
@@ -533,15 +536,16 @@ static int search_bbt(struct nand_chip *this, uint8_t *buf,
 {
 	u64 targetsize = nanddev_target_size(&this->base);
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int i, chips;
 	int startblock, block, dir;
 	int scanlen = mtd->writesize + mtd->oobsize;
 	int bbtblocks;
-	int blocktopage = this->bbt_erase_shift - this->page_shift;
+	int blocktopage = bbt_erase_shift - this->page_shift;
 
 	/* Search direction top -> down? */
 	if (td->options & NAND_BBT_LASTBLOCK) {
-		startblock = (mtd->size >> this->bbt_erase_shift) - 1;
+		startblock = (mtd->size >> bbt_erase_shift) - 1;
 		dir = -1;
 	} else {
 		startblock = 0;
@@ -551,11 +555,11 @@ static int search_bbt(struct nand_chip *this, uint8_t *buf,
 	/* Do we have a bbt per chip? */
 	if (td->options & NAND_BBT_PERCHIP) {
 		chips = nanddev_ntargets(&this->base);
-		bbtblocks = targetsize >> this->bbt_erase_shift;
+		bbtblocks = targetsize >> bbt_erase_shift;
 		startblock &= bbtblocks - 1;
 	} else {
 		chips = 1;
-		bbtblocks = mtd->size >> this->bbt_erase_shift;
+		bbtblocks = mtd->size >> bbt_erase_shift;
 	}
 
 	for (i = 0; i < chips; i++) {
@@ -566,7 +570,7 @@ static int search_bbt(struct nand_chip *this, uint8_t *buf,
 		for (block = 0; block < td->maxblocks; block++) {
 
 			int actblock = startblock + dir * block;
-			loff_t offs = (loff_t)actblock << this->bbt_erase_shift;
+			loff_t offs = (loff_t)actblock << bbt_erase_shift;
 
 			/* Read first page */
 			scan_read(this, buf, offs, mtd->writesize, td);
@@ -579,7 +583,7 @@ static int search_bbt(struct nand_chip *this, uint8_t *buf,
 				break;
 			}
 		}
-		startblock += targetsize >> this->bbt_erase_shift;
+		startblock += targetsize >> bbt_erase_shift;
 	}
 	/* Check, if we found a bbt for each requested chip */
 	for (i = 0; i < chips; i++) {
@@ -630,6 +634,8 @@ static int get_bbt_block(struct nand_chip *this, struct nand_bbt_descr *td,
 			 struct nand_bbt_descr *md, int chip)
 {
 	u64 targetsize = nanddev_target_size(&this->base);
+	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int startblock, dir, page, numblocks, i;
 
 	/*
@@ -639,9 +645,9 @@ static int get_bbt_block(struct nand_chip *this, struct nand_bbt_descr *td,
 	 */
 	if (td->pages[chip] != -1)
 		return td->pages[chip] >>
-				(this->bbt_erase_shift - this->page_shift);
+				(bbt_erase_shift - this->page_shift);
 
-	numblocks = (int)(targetsize >> this->bbt_erase_shift);
+	numblocks = (int)(targetsize >> bbt_erase_shift);
 	if (!(td->options & NAND_BBT_PERCHIP))
 		numblocks *= nanddev_ntargets(&this->base);
 
@@ -667,7 +673,7 @@ static int get_bbt_block(struct nand_chip *this, struct nand_bbt_descr *td,
 			continue;
 		}
 
-		page = block << (this->bbt_erase_shift - this->page_shift);
+		page = block << (bbt_erase_shift - this->page_shift);
 
 		/* Check, if the block is used by the mirror table */
 		if (!md || md->pages[chip] != page)
@@ -693,12 +699,14 @@ static void mark_bbt_block_bad(struct nand_chip *this,
 			       struct nand_bbt_descr *td,
 			       int chip, int block)
 {
+	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	loff_t to;
 	int res;
 
 	bbt_mark_entry(this, block, BBT_BLOCK_WORN);
 
-	to = (loff_t)block << this->bbt_erase_shift;
+	to = (loff_t)block << bbt_erase_shift;
 	res = nand_markbad_bbm(this, to);
 	if (res)
 		pr_warn("nand_bbt: error %d while marking block %d bad\n",
@@ -723,6 +731,7 @@ static int write_bbt(struct nand_chip *this, uint8_t *buf,
 {
 	u64 targetsize = nanddev_target_size(&this->base);
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	struct erase_info einfo;
 	int i, res, chip = 0;
 	int bits, page, offs, numblocks, sft, sftmsk;
@@ -742,7 +751,7 @@ static int write_bbt(struct nand_chip *this, uint8_t *buf,
 		rcode = 0xff;
 	/* Write bad block table per chip rather than per device? */
 	if (td->options & NAND_BBT_PERCHIP) {
-		numblocks = (int)(targetsize >> this->bbt_erase_shift);
+		numblocks = (int)(targetsize >> bbt_erase_shift);
 		/* Full device write or specific chip? */
 		if (chipsel == -1) {
 			nrchips = nanddev_ntargets(&this->base);
@@ -751,7 +760,7 @@ static int write_bbt(struct nand_chip *this, uint8_t *buf,
 			chip = chipsel;
 		}
 	} else {
-		numblocks = (int)(mtd->size >> this->bbt_erase_shift);
+		numblocks = (int)(mtd->size >> bbt_erase_shift);
 		nrchips = 1;
 	}
 
@@ -770,7 +779,7 @@ static int write_bbt(struct nand_chip *this, uint8_t *buf,
 		 * get_bbt_block() returns a block number, shift the value to
 		 * get a page number.
 		 */
-		page = block << (this->bbt_erase_shift - this->page_shift);
+		page = block << (bbt_erase_shift - this->page_shift);
 
 		/* Set up shift count and masks for the flash table */
 		bits = td->options & NAND_BBT_NRBITS_MSK;
@@ -796,8 +805,8 @@ static int write_bbt(struct nand_chip *this, uint8_t *buf,
 		/* Must we save the block contents? */
 		if (td->options & NAND_BBT_SAVECONTENT) {
 			/* Make it block aligned */
-			to &= ~(((loff_t)1 << this->bbt_erase_shift) - 1);
-			len = 1 << this->bbt_erase_shift;
+			to &= ~(((loff_t)1 << bbt_erase_shift) - 1);
+			len = 1 << bbt_erase_shift;
 			res = mtd_read(mtd, to, len, &retlen, buf);
 			if (res < 0) {
 				if (retlen != len) {
@@ -863,7 +872,7 @@ static int write_bbt(struct nand_chip *this, uint8_t *buf,
 
 		memset(&einfo, 0, sizeof(einfo));
 		einfo.addr = to;
-		einfo.len = 1 << this->bbt_erase_shift;
+		einfo.len = 1 << bbt_erase_shift;
 		res = nand_erase_nand(this, &einfo, 1);
 		if (res < 0) {
 			pr_warn("nand_bbt: error while erasing BBT block %d\n",
@@ -1049,6 +1058,7 @@ static int check_create(struct nand_chip *this, uint8_t *buf,
 static int nand_update_bbt(struct nand_chip *this, loff_t offs)
 {
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int len, res = 0;
 	int chip, chipsel;
 	uint8_t *buf;
@@ -1059,7 +1069,7 @@ static int nand_update_bbt(struct nand_chip *this, loff_t offs)
 		return -EINVAL;
 
 	/* Allocate a temporary buffer for one eraseblock incl. oob */
-	len = (1 << this->bbt_erase_shift);
+	len = (1 << bbt_erase_shift);
 	len += (len >> this->page_shift) * mtd->oobsize;
 	buf = kmalloc(len, GFP_KERNEL);
 	if (!buf)
@@ -1109,16 +1119,17 @@ static void mark_bbt_region(struct nand_chip *this, struct nand_bbt_descr *td)
 {
 	u64 targetsize = nanddev_target_size(&this->base);
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int i, j, chips, block, nrblocks, update;
 	uint8_t oldval;
 
 	/* Do we have a bbt per chip? */
 	if (td->options & NAND_BBT_PERCHIP) {
 		chips = nanddev_ntargets(&this->base);
-		nrblocks = (int)(targetsize >> this->bbt_erase_shift);
+		nrblocks = (int)(targetsize >> bbt_erase_shift);
 	} else {
 		chips = 1;
-		nrblocks = (int)(mtd->size >> this->bbt_erase_shift);
+		nrblocks = (int)(mtd->size >> bbt_erase_shift);
 	}
 
 	for (i = 0; i < chips; i++) {
@@ -1126,13 +1137,13 @@ static void mark_bbt_region(struct nand_chip *this, struct nand_bbt_descr *td)
 		    !(td->options & NAND_BBT_WRITE)) {
 			if (td->pages[i] == -1)
 				continue;
-			block = td->pages[i] >> (this->bbt_erase_shift - this->page_shift);
+			block = td->pages[i] >> (bbt_erase_shift - this->page_shift);
 			oldval = bbt_get_entry(this, block);
 			bbt_mark_entry(this, block, BBT_BLOCK_RESERVED);
 			if ((oldval != BBT_BLOCK_RESERVED) &&
 					td->reserved_block_code)
 				nand_update_bbt(this, (loff_t)block <<
-						this->bbt_erase_shift);
+						bbt_erase_shift);
 			continue;
 		}
 		update = 0;
@@ -1154,7 +1165,7 @@ static void mark_bbt_region(struct nand_chip *this, struct nand_bbt_descr *td)
 		 */
 		if (update && td->reserved_block_code)
 			nand_update_bbt(this, (loff_t)(block - 1) <<
-					this->bbt_erase_shift);
+					bbt_erase_shift);
 	}
 }
 
@@ -1170,6 +1181,7 @@ static void verify_bbt_descr(struct nand_chip *this, struct nand_bbt_descr *bd)
 {
 	u64 targetsize = nanddev_target_size(&this->base);
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	u32 pattern_len;
 	u32 bits;
 	u32 table_size;
@@ -1197,14 +1209,14 @@ static void verify_bbt_descr(struct nand_chip *this, struct nand_bbt_descr *bd)
 	}
 
 	if (bd->options & NAND_BBT_PERCHIP)
-		table_size = targetsize >> this->bbt_erase_shift;
+		table_size = targetsize >> bbt_erase_shift;
 	else
-		table_size = mtd->size >> this->bbt_erase_shift;
+		table_size = mtd->size >> bbt_erase_shift;
 	table_size >>= 3;
 	table_size *= bits;
 	if (bd->options & NAND_BBT_NO_OOB)
 		table_size += pattern_len;
-	BUG_ON(table_size > (1 << this->bbt_erase_shift));
+	BUG_ON(table_size > (1 << bbt_erase_shift));
 }
 
 /**
@@ -1222,12 +1234,13 @@ static void verify_bbt_descr(struct nand_chip *this, struct nand_bbt_descr *bd)
 static int nand_scan_bbt(struct nand_chip *this, struct nand_bbt_descr *bd)
 {
 	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int len, res;
 	uint8_t *buf;
 	struct nand_bbt_descr *td = this->bbt_td;
 	struct nand_bbt_descr *md = this->bbt_md;
 
-	len = (mtd->size >> (this->bbt_erase_shift + 2)) ? : 1;
+	len = (mtd->size >> (bbt_erase_shift + 2)) ? : 1;
 	/*
 	 * Allocate memory (2bit per block) and clear the memory bad block
 	 * table.
@@ -1251,7 +1264,7 @@ static int nand_scan_bbt(struct nand_chip *this, struct nand_bbt_descr *bd)
 	verify_bbt_descr(this, md);
 
 	/* Allocate a temporary buffer for one eraseblock incl. oob */
-	len = (1 << this->bbt_erase_shift);
+	len = (1 << bbt_erase_shift);
 	len += (len >> this->page_shift) * mtd->oobsize;
 	buf = vmalloc(len);
 	if (!buf) {
@@ -1409,9 +1422,11 @@ EXPORT_SYMBOL(nand_create_bbt);
  */
 int nand_isreserved_bbt(struct nand_chip *this, loff_t offs)
 {
+	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int block;
 
-	block = (int)(offs >> this->bbt_erase_shift);
+	block = (int)(offs >> bbt_erase_shift);
 	return bbt_get_entry(this, block) == BBT_BLOCK_RESERVED;
 }
 
@@ -1423,9 +1438,11 @@ int nand_isreserved_bbt(struct nand_chip *this, loff_t offs)
  */
 int nand_isbad_bbt(struct nand_chip *this, loff_t offs, int allowbbt)
 {
+	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int block, res;
 
-	block = (int)(offs >> this->bbt_erase_shift);
+	block = (int)(offs >> bbt_erase_shift);
 	res = bbt_get_entry(this, block);
 
 	pr_debug("nand_isbad_bbt(): bbt info for offs 0x%08x: (block %d) 0x%02x\n",
@@ -1449,9 +1466,11 @@ int nand_isbad_bbt(struct nand_chip *this, loff_t offs, int allowbbt)
  */
 int nand_markbad_bbt(struct nand_chip *this, loff_t offs)
 {
+	struct mtd_info *mtd = nand_to_mtd(this);
+	unsigned int bbt_erase_shift = ffs(mtd->erasesize) - 1;
 	int block, ret = 0;
 
-	block = (int)(offs >> this->bbt_erase_shift);
+	block = (int)(offs >> bbt_erase_shift);
 
 	/* Mark bad block in memory */
 	bbt_mark_entry(this, block, BBT_BLOCK_WORN);
