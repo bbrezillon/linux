@@ -984,6 +984,7 @@ static const struct mtd_ooblayout_ops doc200x_ooblayout_ops = {
 static int __init find_media_headers(struct mtd_info *mtd, u_char *buf, const char *id, int findmirror)
 {
 	struct nand_chip *this = mtd_to_nand(mtd);
+	unsigned int page_shift = fls(nanddev_page_size(&this->base)) - 1;
 	struct doc_priv *doc = nand_get_controller_data(this);
 	unsigned offs;
 	int ret;
@@ -1000,12 +1001,12 @@ static int __init find_media_headers(struct mtd_info *mtd, u_char *buf, const ch
 			continue;
 		pr_info("Found DiskOnChip %s Media Header at 0x%x\n", id, offs);
 		if (doc->mh0_page == -1) {
-			doc->mh0_page = offs >> this->page_shift;
+			doc->mh0_page = offs >> page_shift;
 			if (!findmirror)
 				return 1;
 			continue;
 		}
-		doc->mh1_page = offs >> this->page_shift;
+		doc->mh1_page = offs >> page_shift;
 		return 2;
 	}
 	if (doc->mh0_page == -1) {
@@ -1014,7 +1015,7 @@ static int __init find_media_headers(struct mtd_info *mtd, u_char *buf, const ch
 	}
 	/* Only one mediaheader was found.  We want buf to contain a
 	   mediaheader on return, so we'll have to re-read the one we found. */
-	offs = doc->mh0_page << this->page_shift;
+	offs = doc->mh0_page << page_shift;
 	ret = mtd_read(mtd, offs, mtd->writesize, &retlen, buf);
 	if (retlen != mtd->writesize) {
 		/* Insanity.  Give up. */
@@ -1027,12 +1028,13 @@ static int __init find_media_headers(struct mtd_info *mtd, u_char *buf, const ch
 static inline int __init nftl_partscan(struct mtd_info *mtd, struct mtd_partition *parts)
 {
 	struct nand_chip *this = mtd_to_nand(mtd);
+	unsigned int page_shift = fls(nanddev_page_size(&this->base)) - 1;
 	struct doc_priv *doc = nand_get_controller_data(this);
 	struct nand_memory_organization *memorg;
 	int ret = 0;
 	u_char *buf;
 	struct NFTLMediaHeader *mh;
-	const unsigned psize = 1 << this->page_shift;
+	const unsigned psize = 1 << page_shift;
 	int numparts = 0;
 	unsigned blocks, maxblocks;
 	int offs, numheaders;
@@ -1098,7 +1100,7 @@ static inline int __init nftl_partscan(struct mtd_info *mtd, struct mtd_partitio
 
 	/* Skip past the media headers. */
 	offs = max(doc->mh0_page, doc->mh1_page);
-	offs <<= this->page_shift;
+	offs <<= page_shift;
 	offs += mtd->erasesize;
 
 	if (show_firmware_partition == 1) {
@@ -1133,6 +1135,7 @@ static inline int __init nftl_partscan(struct mtd_info *mtd, struct mtd_partitio
 static inline int __init inftl_partscan(struct mtd_info *mtd, struct mtd_partition *parts)
 {
 	struct nand_chip *this = mtd_to_nand(mtd);
+	unsigned int page_shift = fls(nanddev_page_size(&this->base)) - 1;
 	struct doc_priv *doc = nand_get_controller_data(this);
 	int ret = 0;
 	u_char *buf;
@@ -1155,7 +1158,7 @@ static inline int __init inftl_partscan(struct mtd_info *mtd, struct mtd_partiti
 
 	if (!find_media_headers(mtd, buf, "BNAND", 0))
 		goto out;
-	doc->mh1_page = doc->mh0_page + (4096 >> this->page_shift);
+	doc->mh1_page = doc->mh0_page + (4096 >> page_shift);
 	mh = (struct INFTLMediaHeader *)buf;
 
 	le32_to_cpus(&mh->NoOfBootImageBlocks);

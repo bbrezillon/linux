@@ -421,6 +421,7 @@ static int sunxi_nfc_dev_ready(struct nand_chip *nand)
 
 static void sunxi_nfc_select_chip(struct nand_chip *nand, int chip)
 {
+	unsigned int page_shift = fls(nanddev_page_size(&nand->base)) - 1;
 	struct mtd_info *mtd = nand_to_mtd(nand);
 	struct sunxi_nand_chip *sunxi_nand = to_sunxi_nand(nand);
 	struct sunxi_nfc *nfc = to_sunxi_nfc(sunxi_nand->nand.controller);
@@ -440,7 +441,7 @@ static void sunxi_nfc_select_chip(struct nand_chip *nand, int chip)
 		sel = &sunxi_nand->sels[chip];
 
 		ctl |= NFC_CE_SEL(sel->cs) | NFC_EN |
-		       NFC_PAGE_SHIFT(nand->page_shift);
+		       NFC_PAGE_SHIFT(page_shift);
 		if (sel->rb < 0) {
 			nand->legacy.dev_ready = NULL;
 		} else {

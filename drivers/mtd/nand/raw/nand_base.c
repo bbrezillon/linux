@@ -4617,8 +4617,6 @@ ident_done:
 
 	nand_decode_bbm_options(chip);
 
-	/* Calculate the address shift from the page size */
-	chip->page_shift = ffs(mtd->writesize) - 1;
 	/* Convert chipsize to number of pages per chip -1 */
 	targetsize = nanddev_target_size(&chip->base);
 
@@ -5571,7 +5569,7 @@ static int nand_scan_tail(struct nand_chip *chip)
 	/* Large page NAND with SOFT_ECC should support subpage reads */
 	switch (ecc->mode) {
 	case NAND_ECC_SOFT:
-		if (chip->page_shift > 9)
+		if (nanddev_page_size(&chip->base) > 512)
 			chip->options |= NAND_SUBPAGE_READ;
 		break;
 

@@ -980,12 +980,12 @@ static int s3c2410_nand_attach_chip(struct nand_chip *chip)
 			break;
 		}
 
-		dev_dbg(info->device, "chip %p => page shift %d\n",
-			chip, chip->page_shift);
+		dev_dbg(info->device, "chip %p => page size %d\n",
+			chip, nanddev_page_size(&chip->base));
 
 		/* change the behaviour depending on whether we are using
 		 * the large or small page nand device */
-		if (chip->page_shift > 10) {
+		if (nanddev_page_size(&chip->base) > 1024) {
 			chip->ecc.size	    = 256;
 			chip->ecc.bytes	    = 3;
 		} else {

@@ -1041,7 +1041,6 @@ struct nand_chip {
 	unsigned int options;
 	unsigned int bbt_options;
 
-	int page_shift;
 	u8 *data_buf;
 
 	struct {

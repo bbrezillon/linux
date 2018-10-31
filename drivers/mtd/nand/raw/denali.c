@@ -1200,7 +1200,6 @@ static int denali_multidev_fixup(struct denali_nand_info *denali)
 	mtd->erasesize <<= 1;
 	mtd->writesize <<= 1;
 	mtd->oobsize <<= 1;
-	chip->page_shift += 1;
 	chip->ecc.size <<= 1;
 	chip->ecc.bytes <<= 1;
 	chip->ecc.strength <<= 1;

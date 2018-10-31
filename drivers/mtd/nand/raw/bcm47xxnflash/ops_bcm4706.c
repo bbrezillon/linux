@@ -97,7 +97,7 @@ static void bcm47xxnflash_ops_bcm4706_read(struct mtd_info *mtd, uint8_t *buf,
 	int i;
 	int toread;
 
-	/* Don't validate column using nand_chip->page_shift, it may be bigger
+	/* Don't validate column using pagesize, it may be bigger
 	 * when accessing OOB */
 
 	while (len) {
@@ -146,7 +146,7 @@ static void bcm47xxnflash_ops_bcm4706_write(struct mtd_info *mtd,
 	const u32 *data = (u32 *)buf;
 	int i;
 
-	/* Don't validate column using nand_chip->page_shift, it may be bigger
+	/* Don't validate column using pagesize, it may be bigger
 	 * when accessing OOB */
 
 	for (i = 0; i < len; i += 4, data++) {
@@ -435,7 +435,7 @@ int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n)
 	}
 	tbits += 19; /* Broadcom increases *index* by 20, we increase *pos* */
 
-	col_bits = b47n->nand_chip.page_shift + 1;
+	col_bits = fls(nanddev_page_size(&b47n->nand_chip.base));
 	col_size = (col_bits + 7) / 8;
 
 	row_bits = tbits - col_bits + 1;

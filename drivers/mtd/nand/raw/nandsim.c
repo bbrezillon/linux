@@ -668,7 +668,7 @@ static int __init init_nandsim(struct mtd_info *mtd)
 	ns->geom.pgnum    = div_u64(ns->geom.totsz, ns->geom.pgsz);
 	ns->geom.totszoob = ns->geom.totsz + (uint64_t)ns->geom.pgnum * ns->geom.oobsz;
 	ns->geom.secshift = ffs(ns->geom.secsz) - 1;
-	ns->geom.pgshift  = chip->page_shift;
+	ns->geom.pgshift  = fls(nanddev_page_size(&chip->base)) - 1;
 	ns->geom.pgsec    = ns->geom.secsz / ns->geom.pgsz;
 	ns->geom.secszoob = ns->geom.secsz + ns->geom.oobsz * ns->geom.pgsec;
 	ns->options = 0;
