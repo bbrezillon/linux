@@ -172,6 +172,17 @@ enum nand_ecc_algo {
 /* Non chip related options */
 /* This option skips the bbt scan during initialization. */
 #define NAND_SKIP_BBTSCAN	0x00010000
+
+/*
+ * The NAND controller does not rely on the BBM to detect whether a block is
+ * bad or not (most commonly because the controller can't read this BBM). In
+ * this case the core should consider all blocks as good when doing BBM based
+ * detection, The controller driver can populate the BBT manually if needed.
+ * Please don't use this flag unless proven necessary (most controllers can
+ * access the BBM properly).
+ */
+#define NAND_NO_BBM		0x00020000
+
 /* Chip may not exist, so silence any errors in scan */
 #define NAND_SCAN_SILENT_NODEV	0x00040000
 /*
