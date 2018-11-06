@@ -12,45 +12,6 @@
 #include <linux/mtd/nand.h>
 #include <linux/slab.h>
 
-int nandev_bbt_default_populate_cache(struct nand_chip *chip,
-				      unsigned int start, unsigned int len,
-				      void *buffer)
-{
-	u8 *bitmap = buffer;
-	unsigned i, j;
-
-	if (stop < start)
-	       return -EINVAL;
-
-	for (i = 0; i + start < len; i += 4) {
-		u8 val = bitmap[i / 4];
-
-		for (j = 0; j < 4; j++) {
-			enum nand_bbt_block_status status;
-
-			switch (val & 3) {
-			case 0:
-				status = NAND_BBT_BLOCK_FACTORY_BAD;
-				break;
-
-			case 1:
-			case 2:
-				status = NAND_BBT_BLOCK_WORN;
-				break;
-
-			case 3:
-				status = NAND_BBT_BLOCK_GOOD;
-				break;
-			}
-
-			nanddev_bbt_set_block_status(nand, i + start, status);
-			val >>= 2;
-		}
-	}
-}
-
-int 
-
 /**
  * nanddev_bbt_init() - Initialize the BBT (Bad Block Table)
  * @nand: NAND device
@@ -150,41 +111,19 @@ int nanddev_bbt_set_block_status(struct nand_device *nand, unsigned int entry,
 			     ((entry * bits_per_block) / BITS_PER_LONG);
 	unsigned int offs = (entry * bits_per_block) % BITS_PER_LONG;
 	unsigned long val = status & GENMASK(bits_per_block - 1, 0);
-	struct mtd_info *mtd = nanddev_to_mtd(nand);
-	unsigned int old;
 
 	if (entry >= nanddev_neraseblocks(nand))
 		return -ERANGE;
 
-	old = pos[0] & GENMASK(offs + bits_per_block - 1, offs);
-	old >>= offs;
 	pos[0] &= ~GENMASK(offs + bits_per_block - 1, offs);
 	pos[0] |= val << offs;
 
 	if (bits_per_block + offs > BITS_PER_LONG) {
 		unsigned int rbits = bits_per_block + offs - BITS_PER_LONG;
 
-		old |= (pos[1] & GENMASK(rbits - 1, 0)) << rbits;
 		pos[1] &= ~GENMASK(rbits - 1, 0);
 		pos[1] |= val >> rbits;
 	}
-
-	if (old == val)
-		return 0;
-
-	switch (status) {
-	case NAND_BBT_BLOCK_RESERVED:
-		mtd->ecc_stats.bbtblocks++;
-		break;
-
-	case NAND_BBT_BLOCK_WORN:
-	case NAND_BBT_BLOCK_FACTORY_BAD:
-		mtd->ecc_stats.badblocks++;
-		break;
-
-	default:
-		break;
-	};
 
 	return 0;
 }

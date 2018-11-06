@@ -125,20 +125,12 @@ struct nand_ecc_req {
 
 #define NAND_ECCREQ(str, stp) { .strength = (str), .step_size = (stp) }
 
-struct nand_bbt_ops {
-	int (*init)(struct nand_device *nand);
-	int (*update)(struct nand_device *nand);
-	void (*cleanup)(struct nand_device *nand);
-};
-
 /**
  * struct nand_bbt - bad block table object
  * @cache: in memory BBT cache
  */
 struct nand_bbt {
 	unsigned long *cache;
-	const struct nand_bbt_ops *ops;
-	void *priv;
 };
 
 struct nand_device;
