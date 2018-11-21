@@ -235,6 +235,7 @@ enum spi_nor_option_flags {
 	SNOR_F_BROKEN_RESET	= BIT(6),
 	SNOR_F_4B_OPCODES	= BIT(7),
 	SNOR_F_HAS_LOCK		= BIT(8),
+	SNOR_F_CLR_SW_PROT_BITS	= BIT(9),
 };
 
 /**

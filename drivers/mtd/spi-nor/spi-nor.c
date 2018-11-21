@@ -3567,10 +3567,7 @@ static int spi_nor_init(struct spi_nor *nor)
 	 * Atmel, SST, Intel/Numonyx, and others serial NOR tend to power up
 	 * with the software protection bits set
 	 */
-	if (JEDEC_MFR(nor->info) == SNOR_MFR_ATMEL ||
-	    JEDEC_MFR(nor->info) == SNOR_MFR_INTEL ||
-	    JEDEC_MFR(nor->info) == SNOR_MFR_SST ||
-	    nor->info->flags & SPI_NOR_HAS_LOCK) {
+	if (nor->flags & SNOR_F_CLR_SW_PROT_BITS) {
 		write_enable(nor);
 		write_sr(nor, 0);
 		spi_nor_wait_till_ready(nor);
@@ -3691,11 +3688,34 @@ static void spansion_post_sfdp_fixups(struct spi_nor *nor)
 	}
 }
 
+static void intel_post_sfdp_fixups(struct spi_nor *nor)
+{
+	nor->flags |= SNOR_F_CLR_SW_PROT_BITS;
+}
+
+static void atmel_post_sfdp_fixups(struct spi_nor *nor)
+{
+	nor->flags |= SNOR_F_CLR_SW_PROT_BITS;
+}
+
+static void sst_post_sfdp_fixups(struct spi_nor *nor)
+{
+	nor->flags |= SNOR_F_CLR_SW_PROT_BITS;
+}
+
 static int
 spi_nor_manufacturer_post_sfdp_fixups(struct spi_nor *nor,
 				      struct spi_nor_flash_parameter *params)
 {
 	switch (JEDEC_MFR(nor->info)) {
+	case SNOR_MFR_ATMEL:
+		atmel_post_sfdp_fixups(nor);
+		break;
+
+	case SNOR_MFR_INTEL:
+		intel_post_sfdp_fixups(nor);
+		break;
+
 	case SNOR_MFR_ST:
 	case SNOR_MFR_MICRON:
 		st_micron_post_sfdp_fixups(nor);
@@ -3707,6 +3727,10 @@ spi_nor_manufacturer_post_sfdp_fixups(struct spi_nor *nor,
 
 	case SNOR_MFR_SPANSION:
 		spansion_post_sfdp_fixups(nor);
+		break;
+
+	case SNOR_MFR_SST:
+		sst_post_sfdp_fixups(nor);
 		break;
 
 	case SNOR_MFR_WINBOND:
@@ -3896,6 +3920,7 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 		mtd->_lock = spi_nor_lock;
 		mtd->_unlock = spi_nor_unlock;
 		mtd->_is_locked = spi_nor_is_locked;
+		nor->flags |= SNOR_F_CLR_SW_PROT_BITS;
 	}
 
 	/*
