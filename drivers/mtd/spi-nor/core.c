@@ -1722,6 +1722,23 @@ static const struct flash_info spi_nor_ids[] = {
 	{ },
 };
 
+static const struct spi_nor_manufacturer *manufacturers[0];
+
+static const struct flash_info *
+spi_nor_search_part_by_id(const struct flash_info *parts, unsigned int nparts,
+			  const u8 *id)
+{
+	unsigned int i;
+
+	for (i = 0; i < nparts; i++) {
+		if (parts[i].id_len &&
+		    !memcmp(parts[i].id, id, parts[i].id_len))
+			return &parts[i];
+	}
+
+	return NULL;
+}
+
 static const struct flash_info *spi_nor_read_id(struct spi_nor *nor)
 {
 	int			tmp;
@@ -1734,13 +1751,21 @@ static const struct flash_info *spi_nor_read_id(struct spi_nor *nor)
 		return ERR_PTR(tmp);
 	}
 
-	for (tmp = 0; tmp < ARRAY_SIZE(spi_nor_ids) - 1; tmp++) {
-		info = &spi_nor_ids[tmp];
-		if (info->id_len) {
-			if (!memcmp(info->id, id, info->id_len))
-				return &spi_nor_ids[tmp];
+	for (tmp = 0; tmp < ARRAY_SIZE(manufacturers); tmp++) {
+		info = spi_nor_search_part_by_id(manufacturers[tmp]->parts,
+						 manufacturers[tmp]->nparts,
+						 id);
+		if (info) {
+			nor->manufacturer = manufacturers[tmp];
+			return info;
 		}
 	}
+
+	info = spi_nor_search_part_by_id(spi_nor_ids,
+					 ARRAY_SIZE(spi_nor_ids) - 1, id);
+	if (info)
+		return info;
+
 	dev_err(nor->dev, "unrecognized JEDEC id bytes: %02x, %02x, %02x\n",
 		id[0], id[1], id[2]);
 	return ERR_PTR(-ENODEV);
@@ -2334,9 +2359,22 @@ spi_nor_post_bfpt_fixups(struct spi_nor *nor,
 			 const struct sfdp_bfpt *bfpt,
 			 struct spi_nor_flash_parameter *params)
 {
-	if (nor->info->fixups && nor->info->fixups->post_bfpt)
-		return nor->info->fixups->post_bfpt(nor, bfpt_header, bfpt,
-						    params);
+	int ret;
+
+	if (nor->manufacturer && nor->manufacturer->fixups &&
+	    nor->manufacturer->fixups->post_bfpt) {
+		ret = nor->manufacturer->fixups->post_bfpt(nor, bfpt_header,
+							   bfpt, params);
+		if (ret)
+			return ret;
+	}
+
+	if (nor->info->fixups && nor->info->fixups->post_bfpt) {
+		ret = nor->info->fixups->post_bfpt(nor, bfpt_header, bfpt,
+						   params);
+		if (ret)
+			return ret;
+	}
 
 	return 0;
 }
@@ -3426,6 +3464,10 @@ static int
 spi_nor_manufacturer_post_sfdp_fixups(struct spi_nor *nor,
 				      struct spi_nor_flash_parameter *params)
 {
+	if (nor->manufacturer && nor->manufacturer->fixups &&
+	    nor->manufacturer->fixups->post_sfdp)
+		return nor->manufacturer->fixups->post_sfdp(nor, params);
+
 	switch (JEDEC_MFR(nor->info)) {
 	case SNOR_MFR_ATMEL:
 		atmel_post_sfdp_fixups(nor);
@@ -3481,15 +3523,25 @@ static int spi_nor_post_sfdp_fixups(struct spi_nor *nor,
 	return ret;
 }
 
-static const struct flash_info *spi_nor_match_id(const char *name)
+static const struct flash_info *spi_nor_match_id(struct spi_nor *nor,
+						 const char *name)
 {
-	const struct flash_info *id = spi_nor_ids;
+	unsigned int i, j;
 
-	while (id->name) {
-		if (!strcmp(name, id->name))
-			return id;
-		id++;
+	for (i = 0; i < ARRAY_SIZE(spi_nor_ids) - 1; i++) {
+		if (!strcmp(name, spi_nor_ids[i].name))
+			return &spi_nor_ids[i];
 	}
+
+	for (i = 0; i < ARRAY_SIZE(manufacturers); i++) {
+		for (j = 0; j < manufacturers[i]->nparts; j++) {
+			if (!strcmp(name, manufacturers[i]->parts[j].name)) {
+				nor->manufacturer = manufacturers[i];
+				return &manufacturers[i]->parts[j];
+			}
+		}
+	}
+
 	return NULL;
 }
 
@@ -3514,7 +3566,7 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	nor->write_proto = SNOR_PROTO_1_1_1;
 
 	if (name)
-		info = spi_nor_match_id(name);
+		info = spi_nor_match_id(nor, name);
 	/* Try to auto-detect if chip name wasn't specified or not found */
 	if (!info)
 		info = spi_nor_read_id(nor);

@@ -333,11 +333,18 @@ struct spi_nor_erase_map {
 struct flash_info;
 
 /**
+ * struct flash_info - Forward declaration of a structure used internally by
+ *		       the core and manufacturer drivers
+ */
+struct spi_nor_manufacturer;
+
+/**
  * struct spi_nor - Structure for defining a the SPI NOR layer
  * @mtd:		point to a mtd_info structure
  * @lock:		the lock for the read/write/erase/lock/unlock operations
  * @dev:		point to a spi device, or a spi nor controller device.
  * @info:		spi-nor part JDEC MFR id and other info
+ * @manufacturer:	spi-nor manufacturer
  * @page_size:		the page size of the SPI NOR
  * @addr_width:		number of address bytes
  * @erase_opcode:	the opcode for erasing a sector
@@ -376,6 +383,7 @@ struct spi_nor {
 	struct mutex		lock;
 	struct device		*dev;
 	const struct flash_info	*info;
+	const struct spi_nor_manufacturer *manufacturer;
 	u32			page_size;
 	u8			addr_width;
 	u8			erase_opcode;

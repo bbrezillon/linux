@@ -318,4 +318,18 @@ struct flash_info {
 		.addr_width = 3,					\
 		.flags = SPI_NOR_NO_FR | SPI_S3AN,
 
+/**
+ * struct spi_nor_manufacturer - SPI NOR manufacturer object
+ * @name: manufacturer name
+ * @parts: array of parts supported by this manufacturer
+ * @nparts: number of entries in the parts array
+ * @fixups: hooks called at various points in time during spi_nor_scan()
+ */
+struct spi_nor_manufacturer {
+	const char *name;
+	const struct flash_info *parts;
+	unsigned int nparts;
+	const struct spi_nor_fixups *fixups;
+};
+
 #endif /* __LINUX_MTD_SPI_NOR_INTERNALS_H */
