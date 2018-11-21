@@ -234,6 +234,7 @@ enum spi_nor_option_flags {
 	SNOR_F_USE_CLSR		= BIT(5),
 	SNOR_F_BROKEN_RESET	= BIT(6),
 	SNOR_F_4B_OPCODES	= BIT(7),
+	SNOR_F_HAS_LOCK		= BIT(8),
 };
 
 /**
@@ -360,13 +361,10 @@ struct flash_info;
  * @erase:		[DRIVER-SPECIFIC] erase a sector of the SPI NOR
  *			at the offset @offs; if not provided by the driver,
  *			spi-nor will send the erase opcode via write_reg()
- * @flash_lock:		[FLASH-SPECIFIC] lock a region of the SPI NOR
- * @flash_unlock:	[FLASH-SPECIFIC] unlock a region of the SPI NOR
- * @flash_is_locked:	[FLASH-SPECIFIC] check if a region of the SPI NOR is
  * @quad_enable:	[FLASH-SPECIFIC] enables SPI NOR quad mode
- *			completely locked
  * @set_4byte:		[FLASH-SPECIFIC] put the SPI NOR in 4 byte addressing
  *			mode
+ * @locking_ops:	[FLASH-SPECIFIC] SPI NOR locking methods
  * @priv:		the private data
  */
 struct spi_nor {
@@ -399,14 +397,26 @@ struct spi_nor {
 			size_t len, const u_char *write_buf);
 	int (*erase)(struct spi_nor *nor, loff_t offs);
 
-	int (*flash_lock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
-	int (*flash_unlock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
-	int (*flash_is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
 	int (*quad_enable)(struct spi_nor *nor);
 	int (*set_4byte)(struct spi_nor *nor, bool enable);
 
+	const struct spi_nor_locking_ops *locking_ops;
+
 	void *priv;
 };
+
+/**
+ * struct spi_nor_locking_ops - SPI NOR locking methods
+ * @lock: lock a region of the SPI NOR
+ * @unlock: unlock a region of the SPI NOR
+ * @is_locked: check if a region of the SPI NOR is completely locked
+ */
+struct spi_nor_locking_ops {
+	int (*lock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
+	int (*unlock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
+	int (*is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
+};
+
 
 static u64 __maybe_unused
 spi_nor_region_is_last(const struct spi_nor_erase_region *region)
