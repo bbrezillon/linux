@@ -332,6 +332,9 @@ struct spi_nor_manufacturer {
 	const struct spi_nor_fixups *fixups;
 };
 
+/* Manufacturer drivers. */
+extern const struct spi_nor_manufacturer spi_nor_atmel;
+
 /* Core helpers. */
 int en4_ex4_set_4byte(struct spi_nor *nor, bool enable);
 int en4_ex4_wen_set_4byte(struct spi_nor *nor, bool enable);
