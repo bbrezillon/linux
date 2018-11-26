@@ -113,7 +113,7 @@ static int write_sr(struct spi_nor *nor, u8 val)
  * Set write enable latch with Write Enable command.
  * Returns negative if error occurred.
  */
-static int write_enable(struct spi_nor *nor)
+int write_enable(struct spi_nor *nor)
 {
 	return nor->write_reg(nor, SPINOR_OP_WREN, NULL, 0);
 }
@@ -121,16 +121,10 @@ static int write_enable(struct spi_nor *nor)
 /*
  * Send write disable instruction to the chip.
  */
-static int write_disable(struct spi_nor *nor)
+int write_disable(struct spi_nor *nor)
 {
 	return nor->write_reg(nor, SPINOR_OP_WRDI, NULL, 0);
 }
-
-static struct spi_nor *mtd_to_spi_nor(struct mtd_info *mtd)
-{
-	return mtd->priv;
-}
-
 
 static u8 spi_nor_convert_opcode(u8 opcode, const u8 table[][2], size_t size)
 {
@@ -322,7 +316,7 @@ static int spi_nor_wait_till_ready_with_timeout(struct spi_nor *nor,
 	return -ETIMEDOUT;
 }
 
-static int spi_nor_wait_till_ready(struct spi_nor *nor)
+int spi_nor_wait_till_ready(struct spi_nor *nor)
 {
 	return spi_nor_wait_till_ready_with_timeout(nor,
 						    DEFAULT_READY_WAIT_JIFFIES);
@@ -340,7 +334,7 @@ static int erase_chip(struct spi_nor *nor)
 	return nor->write_reg(nor, SPINOR_OP_CHIP_ERASE, NULL, 0);
 }
 
-static int spi_nor_lock_and_prep(struct spi_nor *nor, enum spi_nor_ops ops)
+int spi_nor_lock_and_prep(struct spi_nor *nor, enum spi_nor_ops ops)
 {
 	int ret = 0;
 
@@ -357,7 +351,7 @@ static int spi_nor_lock_and_prep(struct spi_nor *nor, enum spi_nor_ops ops)
 	return ret;
 }
 
-static void spi_nor_unlock_and_unprep(struct spi_nor *nor, enum spi_nor_ops ops)
+void spi_nor_unlock_and_unprep(struct spi_nor *nor, enum spi_nor_ops ops)
 {
 	if (nor->unprepare)
 		nor->unprepare(nor, ops);
@@ -1140,7 +1134,7 @@ static int write_sr_cr(struct spi_nor *nor, u8 *sr_cr)
 	return 0;
 }
 
-static int no_quad_enable(struct spi_nor *nor)
+int no_quad_enable(struct spi_nor *nor)
 {
 	return 0;
 }
@@ -1155,7 +1149,7 @@ static int no_quad_enable(struct spi_nor *nor)
  *
  * Return: 0 on success, -errno otherwise.
  */
-static int sr1_bit6_quad_enable(struct spi_nor *nor)
+int sr1_bit6_quad_enable(struct spi_nor *nor)
 {
 	int ret, val;
 
@@ -3324,13 +3318,13 @@ void spi_nor_restore(struct spi_nor *nor)
 }
 EXPORT_SYMBOL_GPL(spi_nor_restore);
 
-static int en4_ex4_set_4byte(struct spi_nor *nor, bool enable)
+int en4_ex4_set_4byte(struct spi_nor *nor, bool enable)
 {
 	return nor->write_reg(nor, enable ? SPINOR_OP_EN4B : SPINOR_OP_EX4B,
 			      NULL, 0);
 }
 
-static int en4_ex4_wen_set_4byte(struct spi_nor *nor, bool enable)
+int en4_ex4_wen_set_4byte(struct spi_nor *nor, bool enable)
 {
 	int ret;
 

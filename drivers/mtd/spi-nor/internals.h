@@ -332,4 +332,20 @@ struct spi_nor_manufacturer {
 	const struct spi_nor_fixups *fixups;
 };
 
+/* Core helpers. */
+int en4_ex4_set_4byte(struct spi_nor *nor, bool enable);
+int en4_ex4_wen_set_4byte(struct spi_nor *nor, bool enable);
+int sr1_bit6_quad_enable(struct spi_nor *nor);
+int no_quad_enable(struct spi_nor *nor);
+int write_enable(struct spi_nor *nor);
+int write_disable(struct spi_nor *nor);
+int spi_nor_lock_and_prep(struct spi_nor *nor, enum spi_nor_ops ops);
+void spi_nor_unlock_and_unprep(struct spi_nor *nor, enum spi_nor_ops ops);
+int spi_nor_wait_till_ready(struct spi_nor *nor);
+
+static inline struct spi_nor *mtd_to_spi_nor(struct mtd_info *mtd)
+{
+	return mtd->priv;
+}
+
 #endif /* __LINUX_MTD_SPI_NOR_INTERNALS_H */
