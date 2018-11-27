@@ -245,16 +245,6 @@ struct flash_info {
 #define SPI_NOR_XSR_RDY		BIT(10)	/*
 					 * S3AN flashes have specific opcode to
 					 * read the status register.
-					 * Flags SPI_NOR_XSR_RDY and SPI_S3AN
-					 * use the same bit as one implies the
-					 * other, but we will get rid of
-					 * SPI_S3AN soon.
-					 */
-#define	SPI_S3AN		BIT(10)	/*
-					 * Xilinx Spartan 3AN In-System Flash
-					 * (MFR cannot be used for probing
-					 * because it has the same value as
-					 * ATMEL flashes)
 					 */
 #define SPI_NOR_4B_OPCODES	BIT(11)	/*
 					 * Use dedicated 4byte address op codes
@@ -316,7 +306,7 @@ struct flash_info {
 		.n_sectors = (_n_sectors),				\
 		.page_size = _page_size,				\
 		.addr_width = 3,					\
-		.flags = SPI_NOR_NO_FR | SPI_S3AN,
+		.flags = SPI_NOR_NO_FR | SPI_NOR_XSR_RDY,
 
 /**
  * struct spi_nor_manufacturer - SPI NOR manufacturer object
@@ -348,6 +338,7 @@ extern const struct spi_nor_manufacturer spi_nor_spansion;
 extern const struct spi_nor_manufacturer spi_nor_sst;
 extern const struct spi_nor_manufacturer spi_nor_st;
 extern const struct spi_nor_manufacturer spi_nor_winbond;
+extern const struct spi_nor_manufacturer spi_nor_xilinx;
 
 /* Core helpers. */
 int en4_ex4_set_4byte(struct spi_nor *nor, bool enable);

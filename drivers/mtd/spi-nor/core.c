@@ -358,26 +358,6 @@ void spi_nor_unlock_and_unprep(struct spi_nor *nor, enum spi_nor_ops ops)
 	mutex_unlock(&nor->lock);
 }
 
-/*
- * This code converts an address to the Default Address Mode, that has non
- * power of two page sizes. We must support this mode because it is the default
- * mode supported by Xilinx tools, it can access the whole flash area and
- * changing over to the Power-of-two mode is irreversible and corrupts the
- * original data.
- * Addr can safely be unsigned int, the biggest S3AN device is smaller than
- * 4 MiB.
- */
-static u32 s3an_convert_addr(struct spi_nor *nor, u32 addr)
-{
-	u32 offset, page;
-
-	offset = addr % nor->page_size;
-	page = addr / nor->page_size;
-	page <<= (nor->page_size > 512) ? 10 : 9;
-
-	return page | offset;
-}
-
 static u32 spi_nor_convert_addr(struct spi_nor *nor, u32 addr)
 {
 	if (!nor->convert_addr)
@@ -1364,13 +1344,6 @@ static int sr2_bit7_quad_enable(struct spi_nor *nor)
  * old entries may be missing 4K flag.
  */
 static const struct flash_info spi_nor_ids[] = {
-	/* Xilinx S3AN Internal Flash */
-	{ "3S50AN", S3AN_INFO(0x1f2200, 64, 264) },
-	{ "3S200AN", S3AN_INFO(0x1f2400, 256, 264) },
-	{ "3S400AN", S3AN_INFO(0x1f2400, 256, 264) },
-	{ "3S700AN", S3AN_INFO(0x1f2500, 512, 264) },
-	{ "3S1400AN", S3AN_INFO(0x1f2600, 512, 528) },
-
 	/* XMC (Wuhan Xinxin Semiconductor Manufacturing Corp.) */
 	{ "XM25QH64A", INFO(0x207017, 0, 64 * 1024, 128, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "XM25QH128A", INFO(0x207018, 0, 64 * 1024, 256, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
@@ -1393,6 +1366,7 @@ static const struct spi_nor_manufacturer *manufacturers[] = {
 	&spi_nor_sst,
 	&spi_nor_st,
 	&spi_nor_winbond,
+	&spi_nor_xilinx,
 };
 
 static const struct flash_info *
@@ -2935,81 +2909,25 @@ int en4_ex4_wen_set_4byte(struct spi_nor *nor, bool enable)
 	return ret;
 }
 
-static int s3an_post_sfdp_fixups(struct spi_nor *nor)
-{
-	int ret;
-	u8 val;
-
-	ret = nor->read_reg(nor, SPINOR_OP_XRDSR, &val, 1);
-	if (ret < 0) {
-		dev_err(nor->dev, "error %d reading XRDSR\n", (int) ret);
-		return ret;
-	}
-
-	/*
-	 * We choose the opcodes we want to use, so let's add
-	 * SNOR_F_SKIP_SETUP to prevent spi_nor_setup() from changing
-	 * them behind our back.
-	 */
-	nor->flags |= SNOR_F_SKIP_SETUP;
-	nor->erase_opcode = SPINOR_OP_XSE;
-	nor->program_opcode = SPINOR_OP_XPP;
-	nor->read_opcode = SPINOR_OP_READ;
-	nor->flags |= SNOR_F_NO_OP_CHIP_ERASE;
-
-	/*
-	 * This flashes have a page size of 264 or 528 bytes (known as
-	 * Default addressing mode). It can be changed to a more standard
-	 * Power of two mode where the page size is 256/512. This comes
-	 * with a price: there is 3% less of space, the data is corrupted
-	 * and the page size cannot be changed back to default addressing
-	 * mode.
-	 *
-	 * The current addressing mode can be read from the XRDSR register
-	 * and should not be changed, because is a destructive operation.
-	 */
-	if (val & XSR_PAGESIZE) {
-		/* Flash in Power of 2 mode */
-		nor->page_size = (nor->page_size == 264) ? 256 : 512;
-		nor->mtd.writebufsize = nor->page_size;
-		nor->mtd.size = 8 * nor->page_size * nor->info->n_sectors;
-		nor->mtd.erasesize = 8 * nor->page_size;
-	} else {
-		/* Flash in Default addressing mode */
-		nor->convert_addr = s3an_convert_addr;
-	}
-
-	return 0;
-}
-
-
-static int
-spi_nor_manufacturer_post_sfdp_fixups(struct spi_nor *nor,
-				      struct spi_nor_flash_parameter *params)
-{
-	if (nor->manufacturer && nor->manufacturer->fixups &&
-	    nor->manufacturer->fixups->post_sfdp)
-		return nor->manufacturer->fixups->post_sfdp(nor, params);
-
-	if (nor->info->flags & SPI_S3AN)
-		return s3an_post_sfdp_fixups(nor);
-
-	return 0;
-}
-
 static int spi_nor_post_sfdp_fixups(struct spi_nor *nor,
 				    struct spi_nor_flash_parameter *params)
 {
 	int ret;
 
-	ret = spi_nor_manufacturer_post_sfdp_fixups(nor, params);
-	if (ret)
-		return ret;
+	if (nor->manufacturer && nor->manufacturer->fixups &&
+	    nor->manufacturer->fixups->post_sfdp) {
+		ret = nor->manufacturer->fixups->post_sfdp(nor, params);
+		if (ret)
+			return ret;
+	}
 
-	if (nor->info->fixups && nor->info->fixups->post_sfdp)
+	if (nor->info->fixups && nor->info->fixups->post_sfdp) {
 		ret = nor->info->fixups->post_sfdp(nor, params);
+		if (ret)
+			return ret;
+	}
 
-	return ret;
+	return 0;
 }
 
 static const struct flash_info *spi_nor_match_id(struct spi_nor *nor,
