@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 spi-nor-objs			:= core.o
 spi-nor-objs			+= atmel.o
+spi-nor-objs			+= catalyst.o
 spi-nor-objs			+= eon.o
 spi-nor-objs			+= esmt.o
 spi-nor-objs			+= everspin.o
