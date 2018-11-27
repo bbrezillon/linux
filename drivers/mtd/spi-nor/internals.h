@@ -345,16 +345,31 @@ extern const struct spi_nor_manufacturer spi_nor_xmc;
 int en4_ex4_set_4byte(struct spi_nor *nor, bool enable);
 int en4_ex4_wen_set_4byte(struct spi_nor *nor, bool enable);
 int sr1_bit6_quad_enable(struct spi_nor *nor);
+int sr2_bit7_quad_enable(struct spi_nor *nor);
+int sr2_bit1_read_quad_enable(struct spi_nor *nor);
+int sr2_bit1_no_read_quad_enable(struct spi_nor *nor);
 int no_quad_enable(struct spi_nor *nor);
 int write_enable(struct spi_nor *nor);
 int write_disable(struct spi_nor *nor);
 int spi_nor_lock_and_prep(struct spi_nor *nor, enum spi_nor_ops ops);
 void spi_nor_unlock_and_unprep(struct spi_nor *nor, enum spi_nor_ops ops);
 int spi_nor_wait_till_ready(struct spi_nor *nor);
+void spi_nor_init_uniform_erase_map(struct spi_nor_erase_map *map,
+                                    u8 erase_mask, u64 flash_size);
+void spi_nor_set_erase_type(struct spi_nor_erase_type *erase, u32 size,
+                            u8 opcode);
+struct spi_nor_erase_region *
+spi_nor_region_next(struct spi_nor_erase_region *region);
+int spi_nor_read_raw(struct spi_nor *nor, u32 addr, size_t len, u8 *buf);
+int spi_nor_hwcaps_read2cmd(u32 hwcaps);
 
 static inline struct spi_nor *mtd_to_spi_nor(struct mtd_info *mtd)
 {
 	return mtd->priv;
 }
+
+/* SFDP functions. */
+int spi_nor_parse_sfdp(struct spi_nor *nor,
+		       struct spi_nor_flash_parameter *params);
 
 #endif /* __LINUX_MTD_SPI_NOR_INTERNALS_H */
