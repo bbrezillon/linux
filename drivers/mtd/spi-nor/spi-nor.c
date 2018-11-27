@@ -218,6 +218,11 @@ struct sfdp_bfpt {
 /**
  * struct spi_nor_fixups - SPI NOR fixup hooks
  * @post_bfpt: called after the BFPT table has been parsed
+ * @post_sfdp: called after SFDP has been parsed (is also called for SPI NORs
+ *	       that do not support RDSFDP). Typically used to tweak various
+ *	       parameters that could not be extracted by other means (i.e.
+ *	       when information provided by the SFDP/flash_info tables are
+ *	       incomplete or wrong).
  *
  * Those hooks can be used to tweak the SPI NOR configuration when the SFDP
  * table is broken or not available.
@@ -226,6 +231,8 @@ struct spi_nor_fixups {
 	int (*post_bfpt)(struct spi_nor *nor,
 			 const struct sfdp_parameter_header *bfpt_header,
 			 const struct sfdp_bfpt *bfpt,
+			 struct spi_nor_flash_parameter *params);
+	int (*post_sfdp)(struct spi_nor *nor,
 			 struct spi_nor_flash_parameter *params);
 };
 
@@ -3658,6 +3665,15 @@ void spi_nor_restore(struct spi_nor *nor)
 }
 EXPORT_SYMBOL_GPL(spi_nor_restore);
 
+static int spi_nor_post_sfdp_fixups(struct spi_nor *nor,
+				    struct spi_nor_flash_parameter *params)
+{
+	if (nor->info->fixups && nor->info->fixups->post_sfdp)
+		return nor->info->fixups->post_sfdp(nor, params);
+
+	return 0;
+}
+
 static const struct flash_info *spi_nor_match_id(const char *name)
 {
 	const struct flash_info *id = spi_nor_ids;
@@ -3804,6 +3820,18 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	/* Some devices cannot do fast-read, no matter what DT tells us */
 	if (info->flags & SPI_NOR_NO_FR)
 		params.hwcaps.mask &= ~SNOR_HWCAPS_READ_FAST;
+
+	/*
+	 * Post SFDP fixups. Has to be called before spi_nor_setup() because
+	 * some fixups might modify params that are then used by
+	 * spi_nor_setup() to select the opcodes.
+	 */
+	ret = spi_nor_post_sfdp_fixups(nor, &params);
+	if (ret) {
+		dev_err(dev, "failed in the post-SFDP fixups (err %d)\n",
+			ret);
+		return ret;
+	}
 
 	/*
 	 * Configure the SPI memory:
