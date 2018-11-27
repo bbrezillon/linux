@@ -3503,6 +3503,13 @@ static int spi_nor_setup(struct spi_nor *nor,
 	int err;
 
 	/*
+	 * Some manufacturers select the opcode to use in their fixups()
+	 * method, and explicitly ask to skip the generic selection logic.
+	 */
+	if (nor->flags & SNOR_F_SKIP_SETUP)
+		return 0;
+
+	/*
 	 * Keep only the hardware capabilities supported by both the SPI
 	 * controller and the SPI flash memory.
 	 */
