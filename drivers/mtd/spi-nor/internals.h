@@ -188,6 +188,8 @@ struct sfdp_bfpt {
 
 /**
  * struct spi_nor_fixups - SPI NOR fixup hooks
+ * @sfdp_hdr: SFDP header fixups
+ * @sfdp_hdr: SFDP parameter headers fixups
  * @post_bfpt: called after the BFPT table has been parsed
  * @post_sfdp: called after SFDP has been parsed (is also called for SPI NORs
  *	       that do not support RDSFDP). Typically used to tweak various
@@ -199,6 +201,11 @@ struct sfdp_bfpt {
  * table is broken or not available.
  */
 struct spi_nor_fixups {
+	int (*sfdp_hdr)(struct spi_nor *nor,
+			struct sfdp_header *hdr);
+	int (*sfdp_param_hdrs)(struct spi_nor *nor,
+			       struct sfdp_header *hdr,
+			       struct sfdp_parameter_header *param_hdrs);
 	int (*post_bfpt)(struct spi_nor *nor,
 			 const struct sfdp_parameter_header *bfpt_header,
 			 const struct sfdp_bfpt *bfpt,

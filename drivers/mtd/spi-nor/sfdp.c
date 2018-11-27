@@ -534,8 +534,8 @@ static const struct sfdp_bfpt_erase sfdp_bfpt_erases[] = {
 static int
 spi_nor_post_bfpt_fixups(struct spi_nor *nor,
 			 const struct sfdp_parameter_header *bfpt_header,
-			 const struct sfdp_bfpt *bfpt,
-			 struct spi_nor_flash_parameter *params)
+                         const struct sfdp_bfpt *bfpt,
+                         struct spi_nor_flash_parameter *params)
 {
 	int ret;
 
@@ -748,6 +748,50 @@ static int spi_nor_parse_bfpt(struct spi_nor *nor,
 	return spi_nor_post_bfpt_fixups(nor, bfpt_header, &bfpt, params);
 }
 
+static int spi_nor_sfdp_hdr_fixups(struct spi_nor *nor,
+				   struct sfdp_header *hdr)
+{
+	int ret;
+
+	if (nor->manufacturer && nor->manufacturer->fixups &&
+	    nor->manufacturer->fixups->sfdp_hdr) {
+		ret = nor->manufacturer->fixups->sfdp_hdr(nor, hdr);
+		if (ret)
+			return ret;
+	}
+
+	if (nor->info->fixups && nor->info->fixups->sfdp_hdr) {
+		ret = nor->info->fixups->sfdp_hdr(nor, hdr);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int
+spi_nor_sfdp_param_hdrs_fixups(struct spi_nor *nor, struct sfdp_header *hdr,
+			       struct sfdp_parameter_header *param_hdrs)
+{
+	int ret;
+
+	if (nor->manufacturer && nor->manufacturer->fixups &&
+	    nor->manufacturer->fixups->sfdp_param_hdrs) {
+		ret = nor->manufacturer->fixups->sfdp_param_hdrs(nor, hdr,
+								 param_hdrs);
+		if (ret)
+			return ret;
+	}
+
+	if (nor->info->fixups && nor->info->fixups->sfdp_hdr) {
+		ret = nor->info->fixups->sfdp_param_hdrs(nor, hdr, param_hdrs);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 /**
  * spi_nor_parse_sfdp() - parse the Serial Flash Discoverable Parameters.
  * @nor:		pointer to a 'struct spi_nor'
@@ -775,6 +819,10 @@ int spi_nor_parse_sfdp(struct spi_nor *nor,
 	/* Get the SFDP header. */
 	err = spi_nor_read_sfdp_dma_unsafe(nor, 0, sizeof(header), &header);
 	if (err < 0)
+		return err;
+
+	err = spi_nor_sfdp_hdr_fixups(nor, &header);
+	if (err)
 		return err;
 
 	/* Check the SFDP header version. */
@@ -815,6 +863,11 @@ int spi_nor_parse_sfdp(struct spi_nor *nor,
 			dev_err(dev, "failed to read SFDP parameter headers\n");
 			goto exit;
 		}
+
+		err = spi_nor_sfdp_param_hdrs_fixups(nor, &header,
+						     param_headers);
+		if (err)
+			return err;
 	}
 
 	/*
