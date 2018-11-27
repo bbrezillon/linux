@@ -229,13 +229,12 @@ enum spi_nor_option_flags {
 	SNOR_F_USE_FSR		= BIT(0),
 	SNOR_F_HAS_SR_TB	= BIT(1),
 	SNOR_F_NO_OP_CHIP_ERASE	= BIT(2),
-	SNOR_F_S3AN_ADDR_DEFAULT = BIT(3),
-	SNOR_F_READY_XSR_RDY	= BIT(4),
-	SNOR_F_USE_CLSR		= BIT(5),
-	SNOR_F_BROKEN_RESET	= BIT(6),
-	SNOR_F_4B_OPCODES	= BIT(7),
-	SNOR_F_HAS_LOCK		= BIT(8),
-	SNOR_F_CLR_SW_PROT_BITS	= BIT(9),
+	SNOR_F_READY_XSR_RDY	= BIT(3),
+	SNOR_F_USE_CLSR		= BIT(4),
+	SNOR_F_BROKEN_RESET	= BIT(5),
+	SNOR_F_4B_OPCODES	= BIT(6),
+	SNOR_F_HAS_LOCK		= BIT(7),
+	SNOR_F_CLR_SW_PROT_BITS	= BIT(8),
 };
 
 /**
@@ -365,6 +364,9 @@ struct flash_info;
  * @quad_enable:	[FLASH-SPECIFIC] enables SPI NOR quad mode
  * @set_4byte:		[FLASH-SPECIFIC] put the SPI NOR in 4 byte addressing
  *			mode
+ * @convert_addr:	[FLASH-SPECIFIC] convert an absolute address into
+ *			something the flash will understand. Particularly
+ *			useful when pagesize is not a power-of-2
  * @locking_ops:	[FLASH-SPECIFIC] SPI NOR locking methods
  * @priv:		the private data
  */
@@ -400,6 +402,7 @@ struct spi_nor {
 
 	int (*quad_enable)(struct spi_nor *nor);
 	int (*set_4byte)(struct spi_nor *nor, bool enable);
+	u32 (*convert_addr)(struct spi_nor *nor, u32 addr);
 
 	const struct spi_nor_locking_ops *locking_ops;
 
