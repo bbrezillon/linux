@@ -212,7 +212,7 @@ static void vc4_hvs_report_underrun(struct drm_device *dev)
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
 	atomic_inc(&vc4->underrun);
-	DRM_DEV_ERROR(dev->dev, "HVS underrun\n");
+//	DRM_DEV_ERROR(dev->dev, "HVS underrun\n");
 }
 
 static irqreturn_t vc4_hvs_irq_handler(int irq, void *data)
@@ -222,6 +222,8 @@ static irqreturn_t vc4_hvs_irq_handler(int irq, void *data)
 	u32 status;
 
 	status = HVS_READ(SCALER_DISPSTAT);
+	status &= SCALER_DISPSTAT_EUFLOW(0) | SCALER_DISPSTAT_EUFLOW(1) |
+		  SCALER_DISPSTAT_EUFLOW(2);
 
 	if (status &
 	    (SCALER_DISPSTAT_EUFLOW(0) | SCALER_DISPSTAT_EUFLOW(1) |
@@ -288,14 +290,9 @@ static int vc4_hvs_bind(struct device *dev, struct device *master, void *data)
 	dispctrl = HVS_READ(SCALER_DISPCTRL);
 
 	dispctrl |= SCALER_DISPCTRL_ENABLE;
-	dispctrl |= SCALER_DISPCTRL_DSPEISLUR(0) | SCALER_DISPCTRL_DISPEIRQ(0) |
-		    SCALER_DISPCTRL_DSPEISLUR(1) | SCALER_DISPCTRL_DISPEIRQ(1) |
-		    SCALER_DISPCTRL_DSPEISLUR(2) | SCALER_DISPCTRL_DISPEIRQ(2);
-
-	/* Set DSP3 (PV1) to use HVS channel 2, which would otherwise
-	 * be unused.
-	 */
-	dispctrl &= ~SCALER_DISPCTRL_DSP3_MUX_MASK;
+	dispctrl |= SCALER_DISPCTRL_DISPEIRQ(0) |
+		    SCALER_DISPCTRL_DISPEIRQ(1) |
+		    SCALER_DISPCTRL_DISPEIRQ(2);
 	dispctrl &= ~(SCALER_DISPCTRL_DMAEIRQ |
 		      SCALER_DISPCTRL_SLVWREIRQ |
 		      SCALER_DISPCTRL_SLVRDEIRQ |
@@ -305,7 +302,15 @@ static int vc4_hvs_bind(struct device *dev, struct device *master, void *data)
 		      SCALER_DISPCTRL_DSPEIEOLN(0) |
 		      SCALER_DISPCTRL_DSPEIEOLN(1) |
 		      SCALER_DISPCTRL_DSPEIEOLN(2) |
+		      SCALER_DISPCTRL_DSPEISLUR(0) |
+		      SCALER_DISPCTRL_DSPEISLUR(1) |
+		      SCALER_DISPCTRL_DSPEISLUR(2) |
 		      SCALER_DISPCTRL_SCLEIRQ);
+
+	/* Set DSP3 (PV1) to use HVS channel 2, which would otherwise
+	 * be unused.
+	 */
+	dispctrl &= ~SCALER_DISPCTRL_DSP3_MUX_MASK;
 	dispctrl |= VC4_SET_FIELD(2, SCALER_DISPCTRL_DSP3_MUX);
 
 	HVS_WRITE(SCALER_DISPCTRL, dispctrl);
