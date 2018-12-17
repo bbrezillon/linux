@@ -909,7 +909,12 @@ static int sunxi_nfc_hw_ecc_read_chunks_dma(struct nand_chip *nand, uint8_t *buf
 
 	dma_async_issue_pending(nfc->dmac);
 
-	writel(NFC_PAGE_OP | NFC_DATA_SWAP_METHOD | NFC_DATA_TRANS,
+	writel((u32)page << 16, nfc->regs + NFC_REG_ADDR_LOW);
+	writel((u32)page >> 16, nfc->regs + NFC_REG_ADDR_HIGH);
+	writel(NFC_PAGE_OP | NFC_DATA_SWAP_METHOD | NFC_DATA_TRANS |
+	       NFC_SEND_CMD1 | NFC_CMD(NAND_CMD_READ0) | NFC_SEND_CMD2 |
+	       NFC_SEND_ADR | NFC_WAIT_FLAG |
+	       NFC_ADR_NUM(nand->options & NAND_ROW_ADDR_3 ? 5 : 4),
 	       nfc->regs + NFC_REG_CMD);
 
 	ret = sunxi_nfc_wait_events(nfc, NFC_CMD_INT_FLAG, false, 0);
@@ -1109,7 +1114,7 @@ static int sunxi_nfc_hw_ecc_read_page_dma(struct nand_chip *nand, u8 *buf,
 
 	sunxi_nfc_select_chip(nand, nand->cur_cs);
 
-	nand_read_page_op(nand, page, 0, NULL, 0);
+//	nand_read_page_op(nand, page, 0, NULL, 0);
 
 	ret = sunxi_nfc_hw_ecc_read_chunks_dma(nand, buf, oob_required, page,
 					       nand->ecc.steps);
@@ -1165,7 +1170,7 @@ static int sunxi_nfc_hw_ecc_read_subpage_dma(struct nand_chip *nand,
 
 	sunxi_nfc_select_chip(nand, nand->cur_cs);
 
-	nand_read_page_op(nand, page, 0, NULL, 0);
+//	nand_read_page_op(nand, page, 0, NULL, 0);
 
 	ret = sunxi_nfc_hw_ecc_read_chunks_dma(nand, buf, false, page, nchunks);
 	if (ret >= 0)
@@ -1520,6 +1525,8 @@ static int sunxi_nfc_setup_data_interface(struct nand_chip *nand, int csline,
 	min_clk_period = NSEC_PER_SEC / real_clk_rate;
 	if (min_clk_period * 2 < 30 || min_clk_period * 1000 < timings->tREA_max)
 		sunxi_nand->timing_ctl = NFC_TIMING_CTL_EDO;
+
+	pr_info("%s:%i real_clk_rate = %lu req_clk_rate %lu timing_ctl %08x timing_cfg = %08x\n", __func__, __LINE__, real_clk_rate, sunxi_nand->clk_rate, sunxi_nand->timing_ctl, sunxi_nand->timing_cfg);
 
 	return 0;
 }
