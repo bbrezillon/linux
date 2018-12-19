@@ -1421,8 +1421,10 @@ int mtd_write_oob(struct mtd_info *mtd, loff_t to,
 	ledtrig_mtd_activity();
 
 	/* Check the validity of a potential fallback on mtd->_write */
+	//pr_info("%s:%i\n", __func__, __LINE__);
 	if (!master->_write_oob && (!master->_write || ops->oobbuf))
 		return -EOPNOTSUPP;
+//	pr_info("%s:%i\n", __func__, __LINE__);
 
 	if (mtd->flags & MTD_MLC_IN_SLC_MODE)
 		return mtd_oob_io_slc(mtd, to, false, ops);

@@ -1526,7 +1526,7 @@ static int sunxi_nfc_setup_data_interface(struct nand_chip *nand, int csline,
 	if (min_clk_period * 2 < 30 || min_clk_period * 1000 < timings->tREA_max)
 		sunxi_nand->timing_ctl = NFC_TIMING_CTL_EDO;
 
-	pr_info("%s:%i real_clk_rate = %lu req_clk_rate %lu timing_ctl %08x timing_cfg = %08x\n", __func__, __LINE__, real_clk_rate, sunxi_nand->clk_rate, sunxi_nand->timing_ctl, sunxi_nand->timing_cfg);
+	//pr_info("%s:%i real_clk_rate = %lu req_clk_rate %lu timing_ctl %08x timing_cfg = %08x\n", __func__, __LINE__, real_clk_rate, sunxi_nand->clk_rate, sunxi_nand->timing_ctl, sunxi_nand->timing_cfg);
 
 	return 0;
 }
