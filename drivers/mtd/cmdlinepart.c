@@ -22,7 +22,7 @@
  *
  * mtdparts=<mtddef>[;<mtddef]
  * <mtddef>  := <mtd-id>:<partdef>[,<partdef>]
- * <partdef> := <size>[@<offset>][<name>][ro][lk]
+ * <partdef> := <size>[@<offset>][<name>][ro][lk][slc]
  * <mtd-id>  := unique name used in mapping driver/device (mtd->name)
  * <size>    := standard linux memsize OR "-" to denote all remaining space
  *              size is automatically truncated at end of device
@@ -105,7 +105,7 @@ static struct mtd_partition * newpart(char *s,
 	int name_len;
 	unsigned char *extra_mem;
 	char delim;
-	unsigned int mask_flags;
+	unsigned int mask_flags, add_flags;
 
 	/* fetch the partition size */
 	if (*s == '-') {
@@ -122,6 +122,7 @@ static struct mtd_partition * newpart(char *s,
 
 	/* fetch partition name and flags */
 	mask_flags = 0; /* this is going to be a regular partition */
+	add_flags = 0;
 	delim = 0;
 
 	/* check for offset */
@@ -165,6 +166,12 @@ static struct mtd_partition * newpart(char *s,
 		s += 2;
 	}
 
+	/* if slc is found use emulated SLC mode on this partition*/
+	if (!strncmp(s, "slc", 3)) {
+		add_flags |= MTD_MLC_IN_SLC_MODE;
+		s += 3;
+	}
+
 	/* test if more partitions are following */
 	if (*s == ',') {
 		if (size == SIZE_REMAINING) {
@@ -197,6 +204,7 @@ static struct mtd_partition * newpart(char *s,
 	parts[this_part].size = size;
 	parts[this_part].offset = offset;
 	parts[this_part].mask_flags = mask_flags;
+	parts[this_part].add_flags = add_flags;
 	if (name)
 		strlcpy(extra_mem, name, name_len + 1);
 	else
