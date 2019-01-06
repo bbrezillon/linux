@@ -157,10 +157,15 @@
 	status = "okay";
 };
 
+&gpu {
+	status = "okay";
+};
+
 &hdmi {
 	ddc-i2c-bus = <&i2c3>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&hdmi_cec>;
+	ddc-i2c-bus = <&i2c3>;
 	status = "okay";
 };
 
@@ -598,6 +603,7 @@
 	status = "okay";
 };
 
+/*
 &vopl {
 	status = "okay";
 };
@@ -605,3 +611,4 @@
 &vopl_mmu {
 	status = "okay";
 };
+*/
