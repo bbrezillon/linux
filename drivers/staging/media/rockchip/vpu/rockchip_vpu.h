@@ -71,6 +71,28 @@ enum rockchip_vpu_codec_mode {
 	RK_VPU_MODE_JPEG_ENC,
 };
 
+/*
+ * struct rockchip_vpu_mc - media controller data
+ *
+ * @source:		&struct media_entity pointer with the source entity
+ * @source_pad:		&struct media_pad with the source pad.
+ * @sink:		&struct media_entity pointer with the sink entity
+ * @sink_pad:		&struct media_pad with the sink pad.
+ * @proc:		&struct media_entity pointer with the M2M device itself.
+ * @proc_pads:		&struct media_pad with the @proc pads.
+ * @intf_devnode:	&struct media_intf devnode pointer with the interface
+ *			with controls the M2M device.
+ */
+struct rockchip_vpu_mc {
+	struct media_entity	*source;
+	struct media_pad	source_pad;
+	struct media_entity	sink;
+	struct media_pad	sink_pad;
+	struct media_entity	proc;
+	struct media_pad	proc_pads[2];
+	struct media_intf_devnode *intf_devnode;
+};
+
 /**
  * struct rockchip_vpu_dev - driver data
  * @v4l2_dev:		V4L2 device to register video devices for.
@@ -78,6 +100,8 @@ enum rockchip_vpu_codec_mode {
  * @mdev:		media device associated to this device.
  * @vfd_enc:		Video device for encoder.
  * @pdev:		Pointer to VPU platform device.
+ * @mc:			Array of media controller topology structs
+ *			for encoder and decoder.
  * @dev:		Pointer to device for convenient logging using
  *			dev_ macros.
  * @clocks:		Array of clock handles.
@@ -95,6 +119,7 @@ struct rockchip_vpu_dev {
 	struct media_device mdev;
 	struct video_device *vfd_enc;
 	struct platform_device *pdev;
+	struct rockchip_vpu_mc mc[2];
 	struct device *dev;
 	struct clk_bulk_data clocks[ROCKCHIP_VPU_MAX_CLOCKS];
 	void __iomem *base;

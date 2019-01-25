@@ -330,7 +330,7 @@ static int rockchip_vpu_video_device_register(struct rockchip_vpu_dev *vpu)
 {
 	const struct of_device_id *match;
 	struct video_device *vfd;
-	int function, ret;
+	int ret;
 
 	match = of_match_node(of_rockchip_vpu_match, vpu->dev->of_node);
 	vfd = video_device_alloc();
@@ -357,19 +357,166 @@ static int rockchip_vpu_video_device_register(struct rockchip_vpu_dev *vpu)
 	}
 	v4l2_info(&vpu->v4l2_dev, "registered as /dev/video%d\n", vfd->num);
 
-	function = MEDIA_ENT_F_PROC_VIDEO_ENCODER;
-	ret = v4l2_m2m_register_media_controller(vpu->m2m_dev, vfd, function);
-	if (ret) {
-		v4l2_err(&vpu->v4l2_dev, "Failed to init mem2mem media controller\n");
-		goto err_unreg_video;
-	}
 	return 0;
-
-err_unreg_video:
-	video_unregister_device(vfd);
 err_free_dev:
 	video_device_release(vfd);
 	return ret;
+}
+
+static int rockchip_vpu_register_entity(struct media_device *mdev,
+	struct media_entity *entity, const char *entity_name,
+	struct media_pad *pads, int num_pads, int function,
+	struct video_device *vdev)
+{
+	char *name;
+	int ret;
+
+	entity->obj_type = MEDIA_ENTITY_TYPE_BASE;
+	if (function == MEDIA_ENT_F_IO_V4L) {
+		entity->info.dev.major = VIDEO_MAJOR;
+		entity->info.dev.minor = vdev->minor;
+	}
+	name = kasprintf(GFP_KERNEL, "%s-%s", vdev->name, entity_name);
+	if (!name)
+		return -ENOMEM;
+	entity->name = name;
+	entity->function = function;
+
+	ret = media_entity_pads_init(entity, num_pads, pads);
+	if (ret)
+		goto err_free_name;
+	ret = media_device_register_entity(mdev, entity);
+	if (ret)
+		goto err_free_name;
+
+	return 0;
+
+err_free_name:
+	kfree(name);
+	return ret;
+}
+
+static int rockchip_register_mc(struct media_device *mdev,
+				struct rockchip_vpu_mc *mc,
+				struct video_device *vdev,
+				int function)
+{
+	struct media_link *link;
+	int ret;
+
+	/* Create the three encoder entities with their pads */
+	mc->source = &vdev->entity;
+	mc->source_pad.flags = MEDIA_PAD_FL_SOURCE;
+	ret = rockchip_vpu_register_entity(mdev, mc->source,
+			"source", &mc->source_pad, 1, MEDIA_ENT_F_IO_V4L, vdev);
+	if (ret)
+		return ret;
+
+	mc->proc_pads[0].flags = MEDIA_PAD_FL_SINK;
+	mc->proc_pads[1].flags = MEDIA_PAD_FL_SOURCE;
+	ret = rockchip_vpu_register_entity(mdev, &mc->proc,
+			"proc", mc->proc_pads, 2, function, vdev);
+	if (ret)
+		goto err_rel_entity0;
+
+	mc->sink_pad.flags = MEDIA_PAD_FL_SINK;
+	ret = rockchip_vpu_register_entity(mdev, &mc->sink,
+			"sink", &mc->sink_pad, 1, MEDIA_ENT_F_IO_V4L, vdev);
+	if (ret)
+		goto err_rel_entity1;
+
+	/* Connect the three entities */
+	ret = media_create_pad_link(mc->source, 0, &mc->proc, 1,
+			MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
+	if (ret)
+		goto err_rel_entity2;
+
+	ret = media_create_pad_link(&mc->proc, 0, &mc->sink, 0,
+			MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
+	if (ret)
+		goto err_rm_links0;
+
+	/* Create video interface */
+	mc->intf_devnode = media_devnode_create(mdev,
+			MEDIA_INTF_T_V4L_VIDEO, 0,
+			VIDEO_MAJOR, vdev->minor);
+	if (!mc->intf_devnode) {
+		ret = -ENOMEM;
+		goto err_rm_links1;
+	}
+
+	/* Connect the two DMA engines to the interface */
+	link = media_create_intf_link(mc->source,
+			&mc->intf_devnode->intf,
+			MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
+	if (!link) {
+		ret = -ENOMEM;
+		goto err_rm_devnode;
+	}
+
+	link = media_create_intf_link(&mc->sink,
+			&mc->intf_devnode->intf,
+			MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
+	if (!link) {
+		ret = -ENOMEM;
+		goto err_rm_devnode;
+	}
+	return 0;
+
+err_rm_devnode:
+	media_devnode_remove(mc->intf_devnode);
+err_rm_links1:
+	media_entity_remove_links(&mc->sink);
+err_rm_links0:
+	media_entity_remove_links(&mc->proc);
+	media_entity_remove_links(mc->source);
+err_rel_entity2:
+	media_device_unregister_entity(&mc->proc);
+	kfree(mc->proc.name);
+err_rel_entity1:
+	media_device_unregister_entity(&mc->sink);
+	kfree(mc->sink.name);
+err_rel_entity0:
+	media_device_unregister_entity(mc->source);
+	kfree(mc->source->name);
+	return ret;
+}
+
+static void rockchip_unregister_mc(struct rockchip_vpu_mc *mc)
+{
+	media_devnode_remove(mc->intf_devnode);
+	media_entity_remove_links(mc->source);
+	media_entity_remove_links(&mc->sink);
+	media_entity_remove_links(&mc->proc);
+	media_device_unregister_entity(mc->source);
+	media_device_unregister_entity(&mc->sink);
+	media_device_unregister_entity(&mc->proc);
+	kfree(mc->source->name);
+	kfree(mc->sink.name);
+	kfree(mc->proc.name);
+}
+
+static int rockchip_register_media_controller(struct rockchip_vpu_dev *vpu)
+{
+	int ret;
+
+	/*
+	 * We have one memory-to-memory device, to hold a single queue
+	 * of memory-to-memory serialized jobs.
+	 * There is a set of pads and processing entities for the encoder,
+	 * and another set for the decoder.
+	 * Also, there are two V4L interface, one for each set of entities.
+	 */
+
+	if (vpu->vfd_enc) {
+		ret = rockchip_register_mc(&vpu->mdev, &vpu->mc[0],
+					   vpu->vfd_enc,
+					   MEDIA_ENT_F_PROC_VIDEO_ENCODER);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static int rockchip_vpu_probe(struct platform_device *pdev)
@@ -470,12 +617,21 @@ static int rockchip_vpu_probe(struct platform_device *pdev)
 		goto err_m2m_rel;
 	}
 
+	ret = rockchip_register_media_controller(vpu);
+	if (ret) {
+		v4l2_err(&vpu->v4l2_dev, "Failed to register media controller\n");
+		goto err_video_dev_unreg;
+	}
+
 	ret = media_device_register(&vpu->mdev);
 	if (ret) {
 		v4l2_err(&vpu->v4l2_dev, "Failed to register mem2mem media device\n");
-		goto err_video_dev_unreg;
+		goto err_mc_unreg;
 	}
 	return 0;
+err_mc_unreg:
+	if (vpu->vfd_enc)
+		rockchip_unregister_mc(&vpu->mc[0]);
 err_video_dev_unreg:
 	if (vpu->vfd_enc) {
 		video_unregister_device(vpu->vfd_enc);
@@ -498,10 +654,10 @@ static int rockchip_vpu_remove(struct platform_device *pdev)
 	v4l2_info(&vpu->v4l2_dev, "Removing %s\n", pdev->name);
 
 	media_device_unregister(&vpu->mdev);
-	v4l2_m2m_unregister_media_controller(vpu->m2m_dev);
 	v4l2_m2m_release(vpu->m2m_dev);
 	media_device_cleanup(&vpu->mdev);
 	if (vpu->vfd_enc) {
+		rockchip_unregister_mc(&vpu->mc[0]);
 		video_unregister_device(vpu->vfd_enc);
 		video_device_release(vpu->vfd_enc);
 	}
