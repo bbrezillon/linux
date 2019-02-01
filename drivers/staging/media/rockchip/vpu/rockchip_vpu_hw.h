@@ -48,6 +48,15 @@ struct rockchip_vpu_mpeg2_dec_hw_ctx {
 };
 
 /**
+ * struct rockchip_vpu_h264_dec_hw_ctx - Per context data specific to H264
+ * decoding.
+ * @priv_tbl:		Private auxiliary buffer for hardware.
+ */
+struct rockchip_vpu_h264_dec_hw_ctx {
+	struct rockchip_vpu_aux_buf priv;
+};
+
+/**
  * struct rockchip_vpu_codec_ops - codec mode specific operations
  *
  * @init:	If needed, can be used for initialization.
@@ -79,6 +88,7 @@ enum rockchip_vpu_enc_fmt {
 };
 
 extern const struct rockchip_vpu_variant rk3399_vpu_variant;
+extern const struct rockchip_vpu_variant rk3399_vdec_variant;
 extern const struct rockchip_vpu_variant rk3288_vpu_variant;
 
 void rockchip_vpu_watchdog(struct work_struct *work);
@@ -98,5 +108,9 @@ void rockchip_vpu_mpeg2_dec_copy_qtable(u8 *qtable,
 	const struct v4l2_ctrl_mpeg2_quantization *ctrl);
 int rockchip_vpu_mpeg2_dec_init(struct rockchip_vpu_ctx *ctx);
 void rockchip_vpu_mpeg2_dec_exit(struct rockchip_vpu_ctx *ctx);
+
+int rk3399_vdec_h264_init(struct rockchip_vpu_ctx *ctx);
+void rk3399_vdec_h264_exit(struct rockchip_vpu_ctx *ctx);
+void rk3399_vdec_h264_run(struct rockchip_vpu_ctx *ctx);
 
 #endif /* ROCKCHIP_VPU_HW_H_ */

@@ -285,6 +285,36 @@ static struct rockchip_vpu_ctrl controls[] = {
 		.cfg = {
 			.elem_size = sizeof(struct v4l2_ctrl_mpeg2_quantization),
 		},
+        }, {
+		.id = V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS,
+		.codec = RK_VPU_H264_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_h264_decode_params),
+		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_H264_SLICE_PARAMS,
+		.codec = RK_VPU_H264_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_h264_slice_params),
+		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_H264_SPS,
+		.codec = RK_VPU_H264_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_h264_sps),
+		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_H264_PPS,
+		.codec = RK_VPU_H264_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_h264_pps),
+		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_H264_SCALING_MATRIX,
+		.codec = RK_VPU_H264_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_h264_scaling_matrix),
+		},
 	},
 };
 
@@ -419,6 +449,7 @@ static const struct v4l2_file_operations rockchip_vpu_fops = {
 
 static const struct of_device_id of_rockchip_vpu_match[] = {
 	{ .compatible = "rockchip,rk3399-vpu", .data = &rk3399_vpu_variant, },
+	{ .compatible = "rockchip,rk3399-vdec", .data = &rk3399_vdec_variant, },
 	{ .compatible = "rockchip,rk3288-vpu", .data = &rk3288_vpu_variant, },
 	{ /* sentinel */ }
 };

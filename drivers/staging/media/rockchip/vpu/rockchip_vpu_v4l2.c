@@ -521,6 +521,7 @@ rockchip_vpu_queue_setup(struct vb2_queue *vq,
 {
 	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
 	struct v4l2_pix_format_mplane *pixfmt;
+	unsigned int extra_size0 = 0;
 	int i;
 
 	switch (vq->type) {
@@ -535,10 +536,20 @@ rockchip_vpu_queue_setup(struct vb2_queue *vq,
 		return -EINVAL;
 	}
 
+	/* The H264 decoder needs extra size on the output buffer. */
+	if (ctx->vpu_src_fmt->fourcc == V4L2_PIX_FMT_H264_SLICE_ANNEXB)
+		extra_size0 = 128 * pixfmt->width / 16 * pixfmt->height / 16;
+
 	if (*num_planes) {
 		if (*num_planes != pixfmt->num_planes)
 			return -EINVAL;
-		for (i = 0; i < pixfmt->num_planes; ++i)
+		/*
+		 * The application is not aware of the extra size needed
+		 * for some codecs, so amend it without failing.
+		 */
+		if (sizes[0] < (pixfmt->plane_fmt[0].sizeimage + extra_size0))
+			sizes[0] = pixfmt->plane_fmt[0].sizeimage + extra_size0;
+		for (i = 1; i < pixfmt->num_planes; ++i)
 			if (sizes[i] < pixfmt->plane_fmt[i].sizeimage)
 				return -EINVAL;
 		return 0;

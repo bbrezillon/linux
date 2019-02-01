@@ -9,5 +9,7 @@ rockchip-vpu-y += \
 		rk3399_vpu_hw.o \
 		rk3399_vpu_hw_jpeg_enc.o \
 		rk3399_vpu_hw_mpeg2_dec.o \
+		rk3399_vdec_hw.o \
+		rk3399_vdec_hw_h264.o \
 		rockchip_vpu_jpeg.o \
 		rockchip_vpu_mpeg2.o
