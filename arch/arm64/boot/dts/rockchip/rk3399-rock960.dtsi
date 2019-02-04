@@ -630,7 +630,7 @@
 };
 
 &vopl {
-	status = "okay";
+	status = "disabled";
 };
 
 &vopl_mmu {
