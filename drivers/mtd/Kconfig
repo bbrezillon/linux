@@ -151,8 +151,8 @@ config SSFDC
 config SM_FTL
 	tristate "SmartMedia/xD new translation layer"
 	depends on BLOCK
+	depends on MTD_NAND_ECC_SW_HAMMING
 	select MTD_BLKDEVS
-	select MTD_NAND_ECC_SW_HAMMING
 	help
 	  This enables EXPERIMENTAL R/W support for SmartMedia/xD
 	  FTL (Flash translation layer).
