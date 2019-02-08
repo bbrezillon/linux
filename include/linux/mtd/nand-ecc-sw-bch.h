@@ -8,58 +8,65 @@
 #ifndef __MTD_NAND_ECC_SW_BCH_H__
 #define __MTD_NAND_ECC_SW_BCH_H__
 
-struct mtd_info;
-struct nand_chip;
-struct nand_bch_control;
+#include <linux/mtd/nand.h>
+#include <linux/bch.h>
+
+/**
+ * struct nand_ecc_sw_bch_conf - private software BCH ECC engine structure
+ * @reqooblen: Save the actual user OOB length requested before overwriting it
+ * @spare_oobbuf: Spare OOB buffer if none is provided
+ * @code_size: Number of bytes needed to store a code (one code per step)
+ * @nsteps: Number of steps
+ * @calc_buf: Buffer to use when calculating ECC bytes
+ * @code_buf: Buffer to use when reading (raw) ECC bytes from the chip
+ * @bch: BCH control structure
+ * @errloc: error location array
+ * @eccmask: XOR ecc mask, allows erased pages to be decoded as valid
+ */
+struct nand_ecc_sw_bch_conf {
+	unsigned int reqooblen;
+	void *spare_oobbuf;
+	unsigned int code_size;
+	unsigned int nsteps;
+	u8 *calc_buf;
+	u8 *code_buf;
+	struct bch_control *bch;
+	unsigned int *errloc;
+	unsigned char *eccmask;
+};
 
 #if IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_BCH)
 
-static inline int mtd_nand_has_bch(void) { return 1; }
-
-/*
- * Calculate BCH ecc code
- */
-int nand_bch_calculate_ecc(struct nand_chip *chip, const u_char *dat,
-			   u_char *ecc_code);
-
-/*
- * Detect and correct bit errors
- */
-int nand_bch_correct_data(struct nand_chip *chip, u_char *dat,
-			  u_char *read_ecc, u_char *calc_ecc);
-/*
- * Initialize BCH encoder/decoder
- */
-struct nand_bch_control *nand_bch_init(struct mtd_info *mtd);
-/*
- * Release BCH encoder/decoder resources
- */
-void nand_bch_free(struct nand_bch_control *nbc);
+int nand_ecc_sw_bch_calculate(struct nand_device *nand,
+			      const unsigned char *buf, unsigned char *code);
+int nand_ecc_sw_bch_correct(struct nand_device *nand, unsigned char *buf,
+			    unsigned char *read_ecc, unsigned char *calc_ecc);
+int nand_ecc_sw_bch_init(struct nand_device *nand);
+void nand_ecc_sw_bch_cleanup(struct nand_device *nand);
 
 #else /* !CONFIG_MTD_NAND_ECC_SW_BCH */
 
-static inline int mtd_nand_has_bch(void) { return 0; }
-
-static inline int
-nand_bch_calculate_ecc(struct nand_chip *chip, const u_char *dat,
-		       u_char *ecc_code)
-{
-	return -1;
-}
-
-static inline int
-nand_bch_correct_data(struct nand_chip *chip, unsigned char *buf,
-		      unsigned char *read_ecc, unsigned char *calc_ecc)
+static inline int nand_ecc_sw_bch_calculate(struct nand_device *nand,
+					    const unsigned char *buf,
+					    unsigned char *code)
 {
 	return -ENOTSUPP;
 }
 
-static inline struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
+static inline int nand_ecc_sw_bch_correct(struct nand_device *nand,
+					  unsigned char *buf,
+					  unsigned char *read_ecc,
+					  unsigned char *calc_ecc)
 {
-	return NULL;
+	return -ENOTSUPP;
 }
 
-static inline void nand_bch_free(struct nand_bch_control *nbc) {}
+static inline int nand_ecc_sw_bch_init(struct nand_device *nand)
+{
+	return -EINVAL;
+}
+
+static inline void nand_ecc_sw_bch_cleanup(struct nand_device *nand) {}
 
 #endif /* CONFIG_MTD_NAND_ECC_SW_BCH */
 
