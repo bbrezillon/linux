@@ -1031,7 +1031,7 @@ static int spinand_init(struct spinand_device *spinand)
 
 	/*
 	 * Right now, we don't support ECC, so let the whole oob
-	 * area is available for user.
+	 * area available for the user.
 	 */
 	mtd->_read_oob = spinand_mtd_read;
 	mtd->_write_oob = spinand_mtd_write;
