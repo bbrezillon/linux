@@ -5515,6 +5515,13 @@ static int nand_scan_tail(struct nand_chip *chip)
 		break;
 	}
 
+	/*
+	 * If there is no specific user request for the ECC engine provider, use
+	 * the one chosen by the driver being instantiated.
+	 */
+	chip->base.ecc.defaults.provider = ecc->engine_type;
+	chip->base.ecc.defaults.algo = ecc->algo;
+
 	ret = nanddev_init(&chip->base, &rawnand_ops, mtd->owner);
 	if (ret)
 		goto err_nand_manuf_cleanup;
