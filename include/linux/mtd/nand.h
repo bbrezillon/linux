@@ -127,6 +127,10 @@ struct nand_page_io_req {
 	int mode;
 };
 
+extern const struct mtd_ooblayout_ops nand_ooblayout_sp_ops;
+extern const struct mtd_ooblayout_ops nand_ooblayout_lp_ops;
+extern const struct mtd_ooblayout_ops nand_ooblayout_lp_hamming_ops;
+
 /**
  * enum nand_ecc_engine_type - NAND ECC engine type/provider
  * @NAND_ECC_ENGINE_INVALID: Invalid value
@@ -181,6 +185,9 @@ struct nand_ecc_props {
 };
 
 #define NAND_ECCREQ(str, stp) { .strength = (str), .step_size = (stp) }
+
+/* NAND ECC misc flags */
+#define NAND_ECC_MAXIMIZE BIT(0)
 
 /**
  * struct nand_bbt - bad block table object
@@ -253,12 +260,14 @@ struct nand_ecc_engine {
 	struct nand_ecc_engine_ops *ops;
 };
 
+void nand_ecc_read_user_conf(struct nand_device *nand);
 int nand_ecc_init_ctx(struct nand_device *nand);
 void nand_ecc_cleanup_ctx(struct nand_device *nand);
 int nand_ecc_prepare_io_req(struct nand_device *nand,
 			    struct nand_page_io_req *req);
 int nand_ecc_finish_io_req(struct nand_device *nand,
 			   struct nand_page_io_req *req);
+bool nand_ecc_correction_is_enough(struct nand_device *nand);
 
 /**
  * struct nand_ecc - High-level ECC object
@@ -345,6 +354,17 @@ static inline struct nand_device *mtd_to_nanddev(struct mtd_info *mtd)
 static inline struct mtd_info *nanddev_to_mtd(struct nand_device *nand)
 {
 	return &nand->mtd;
+}
+
+/**
+ * nanddev_get_flash_node() - Get the device node attached to a NAND device
+ * @nand: NAND device
+ *
+ * Return: the device node linked to @nand.
+ */
+static inline struct device_node *nanddev_get_flash_node(struct nand_device *nand)
+{
+	return mtd_get_of_node(nanddev_to_mtd(nand));
 }
 
 /*
