@@ -580,7 +580,8 @@ static bool spinand_isbad(struct nand_device *nand, const struct nand_pos *pos)
 	spinand_select_target(spinand, pos->target);
 	spinand_read_page(spinand, &req, false);
 	if (spinand->oobbuf[0] != 0xff || spinand->oobbuf[1] != 0xff)
-		return true;
+		printk("would be bad, but fuck it\n");
+//		return true;
 
 	return false;
 }

@@ -128,7 +128,7 @@ int nanddev_erase(struct nand_device *nand, const struct nand_pos *pos)
 	if (nanddev_isbad(nand, pos) || nanddev_isreserved(nand, pos)) {
 		pr_warn("attempt to erase a bad/reserved block @%llx\n",
 			nanddev_pos_to_offs(nand, pos));
-		return -EIO;
+//		return -EIO;
 	}
 
 	return nand->ops->erase(nand, pos);
