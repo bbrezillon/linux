@@ -49,6 +49,10 @@
 		flash@0 {
 			compatible = "spi-nand";
 			reg = <0>;
+			nand-ecc-mode = "soft";
+			nand-ecc-algo = "bch";
+			nand-ecc-strength = <8>;
+			nand-ecc-step-size = <512>;
 			spi-max-frequency = <25000000>;
 			spi-tx-bus-width = <4>;
 			spi-rx-bus-width = <4>;
