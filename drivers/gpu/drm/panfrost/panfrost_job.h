@@ -11,6 +11,10 @@ struct panfrost_device;
 struct panfrost_gem_object;
 struct panfrost_file_priv;
 
+struct panfrost_job_perfcnt_ctx {
+
+};
+
 struct panfrost_job {
 	struct drm_sched_job base;
 
@@ -37,6 +41,10 @@ struct panfrost_job {
 
 	/* Fence to be signaled by drm-sched once its done with the job */
 	struct dma_fence *render_done_fence;
+
+	/* Perfcnt context */
+	struct panfrost_perfcnt_job_ctx *perfcnt_ctx;
+	struct dma_fence *perfcnt_fence;
 };
 
 int panfrost_job_init(struct panfrost_device *pfdev);

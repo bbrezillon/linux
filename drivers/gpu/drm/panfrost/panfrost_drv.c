@@ -18,6 +18,7 @@
 #include "panfrost_mmu.h"
 #include "panfrost_job.h"
 #include "panfrost_gpu.h"
+#include "panfrost_perfcnt.h"
 
 static int panfrost_ioctl_get_param(struct drm_device *ddev, void *data, struct drm_file *file)
 {
@@ -218,6 +219,10 @@ static int panfrost_ioctl_submit(struct drm_device *dev, void *data,
 	if (ret)
 		goto fail;
 
+	ret = panfrost_perfcnt_create_job_ctx(job, file, args);
+	if (ret)
+		goto fail;
+
 	ret = panfrost_job_push(job);
 	if (ret)
 		goto fail;
@@ -312,6 +317,7 @@ panfrost_open(struct drm_device *dev, struct drm_file *file)
 {
 	struct panfrost_device *pfdev = dev->dev_private;
 	struct panfrost_file_priv *panfrost_priv;
+	int ret;
 
 	panfrost_priv = kzalloc(sizeof(*panfrost_priv), GFP_KERNEL);
 	if (!panfrost_priv)
@@ -320,7 +326,16 @@ panfrost_open(struct drm_device *dev, struct drm_file *file)
 	panfrost_priv->pfdev = pfdev;
 	file->driver_priv = panfrost_priv;
 
-	return panfrost_job_open(panfrost_priv);
+	ret = panfrost_job_open(panfrost_priv);
+	if (ret)
+		goto err_free_priv;
+
+	panfrost_perfcnt_open(panfrost_priv);
+	return 0;
+
+err_free_priv:
+	kfree(panfrost_priv);
+	return ret;
 }
 
 static void
@@ -328,6 +343,7 @@ panfrost_postclose(struct drm_device *dev, struct drm_file *file)
 {
 	struct panfrost_file_priv *panfrost_priv = file->driver_priv;
 
+	panfrost_perfcnt_close(panfrost_priv);
 	panfrost_job_close(panfrost_priv);
 
 	kfree(panfrost_priv);
@@ -347,6 +363,10 @@ static const struct drm_ioctl_desc panfrost_drm_driver_ioctls[] = {
 	PANFROST_IOCTL(MMAP_BO,		mmap_bo,	DRM_RENDER_ALLOW),
 	PANFROST_IOCTL(GET_PARAM,	get_param,	DRM_RENDER_ALLOW),
 	PANFROST_IOCTL(GET_BO_OFFSET,	get_bo_offset,	DRM_RENDER_ALLOW),
+	PANFROST_IOCTL(GET_PERFCNT_LAYOUT, get_perfcnt_layout, DRM_RENDER_ALLOW),
+	PANFROST_IOCTL(CREATE_PERFMON,	create_perfmon,	DRM_RENDER_ALLOW),
+	PANFROST_IOCTL(DESTROY_PERFMON,	destroy_perfmon, DRM_RENDER_ALLOW),
+	PANFROST_IOCTL(GET_PERFMON_VALUES, get_perfmon_values, DRM_RENDER_ALLOW),
 };
 
 DEFINE_DRM_GEM_SHMEM_FOPS(panfrost_drm_driver_fops);

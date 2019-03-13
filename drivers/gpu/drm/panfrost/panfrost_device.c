@@ -10,6 +10,7 @@
 #include "panfrost_gpu.h"
 #include "panfrost_job.h"
 #include "panfrost_mmu.h"
+#include "panfrost_perfcnt.h"
 
 static int panfrost_clk_init(struct panfrost_device *pfdev)
 {
@@ -107,7 +108,13 @@ int panfrost_device_init(struct panfrost_device *pfdev)
 	if (err)
 		goto err_out3;
 
+	err = panfrost_perfcnt_init(pfdev);
+	if (err)
+		goto err_out4;
+
 	return 0;
+err_out4:
+	panfrost_job_fini(pfdev);
 err_out3:
 	panfrost_mmu_fini(pfdev);
 err_out2:
@@ -121,6 +128,7 @@ err_out0:
 
 void panfrost_device_fini(struct panfrost_device *pfdev)
 {
+	panfrost_perfcnt_fini(pfdev);
 	panfrost_job_fini(pfdev);
 	panfrost_mmu_fini(pfdev);
 	panfrost_gpu_fini(pfdev);

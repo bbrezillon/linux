@@ -14,6 +14,7 @@
 #include "panfrost_features.h"
 #include "panfrost_issues.h"
 #include "panfrost_gem.h"
+#include "panfrost_perfcnt.h"
 #include "panfrost_regs.h"
 
 #define job_write(dev, reg, data) writel(data, dev->iomem + (reg))
@@ -143,6 +144,7 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 	if (WARN_ON(job_read(pfdev, JS_COMMAND_NEXT(js))))
 		return;
 
+	panfrost_perfcnt_run_job(job);
 
 	job_write(pfdev, JS_HEAD_NEXT_LO(js), jc_head & 0xFFFFFFFF);
 	job_write(pfdev, JS_HEAD_NEXT_HI(js), jc_head >> 32);
@@ -217,6 +219,12 @@ int panfrost_job_push(struct panfrost_job *job)
 		goto unlock;
 	}
 
+	ret = panfrost_perfcnt_push_job(job);
+	if (ret) {
+		mutex_unlock(&pfdev->sched_lock);
+		goto unlock;
+	}
+
 	job->render_done_fence = dma_fence_get(&job->base.s_fence->finished);
 
 	kref_get(&job->refcount); /* put by scheduler job completion */
@@ -256,6 +264,9 @@ static void panfrost_job_cleanup(struct kref *ref)
 
 	for (i = 0; i < job->bo_count; i++)
 		drm_gem_object_put_unlocked(job->bos[i]);
+
+	panfrost_perfcnt_clean_job_ctx(job);
+
 	kvfree(job->bos);
 
 	kfree(job);
@@ -298,6 +309,13 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 			job->implicit_fences[i] = NULL;
 			return fence;
 		}
+	}
+
+	/* Return the perfmon wait fence if any. */
+	if (job->perfcnt_fence) {
+		fence = job->perfcnt_fence;
+		job->perfcnt_fence = NULL;
+		return fence;
 	}
 
 	return NULL;
@@ -351,6 +369,7 @@ static void panfrost_job_timedout(struct drm_sched_job *sched_job)
 	/* For now, just say we're done. No reset and retry. */
 //	job_write(pfdev, JS_COMMAND(js), JS_COMMAND_HARD_STOP);
 	dma_fence_signal(job->done_fence);
+	panfrost_perfcnt_finish_job(job);
 }
 
 static const struct drm_sched_backend_ops panfrost_sched_ops = {
@@ -425,6 +444,8 @@ static irqreturn_t panfrost_job_irq_handler(int irq, void *data)
 
 		if (status & JOB_INT_MASK_DONE(j)) {
 			dma_fence_signal(pfdev->jobs[j]->done_fence);
+			panfrost_perfcnt_finish_job(pfdev->jobs[j]);
+			pfdev->jobs[j]->perfcnt_ctx = NULL;
 		}
 
 		status &= ~mask;

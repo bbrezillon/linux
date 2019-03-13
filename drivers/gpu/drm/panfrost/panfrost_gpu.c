@@ -13,10 +13,8 @@
 #include "panfrost_features.h"
 #include "panfrost_issues.h"
 #include "panfrost_gpu.h"
+#include "panfrost_perfcnt.h"
 #include "panfrost_regs.h"
-
-#define gpu_write(dev, reg, data) writel(data, dev->iomem + reg)
-#define gpu_read(dev, reg) readl(dev->iomem + reg)
 
 static irqreturn_t panfrost_gpu_irq_handler(int irq, void *data)
 {
@@ -36,6 +34,12 @@ static irqreturn_t panfrost_gpu_irq_handler(int irq, void *data)
 
 		done = true;
 	}
+
+	if (state & GPU_IRQ_PERFCNT_SAMPLE_COMPLETED)
+		panfrost_perfcnt_sample_done(pfdev);
+
+	if (state & GPU_IRQ_CLEAN_CACHES_COMPLETED)
+		panfrost_perfcnt_clean_cache_done(pfdev);
 
 	gpu_write(pfdev, GPU_INT_CLEAR, state);
 
@@ -147,14 +151,16 @@ struct panfrost_model {
 		u32 revision;
 		u64 issues;
 	} revs[MAX_HW_REVS];
+	u64 perfcnt[PANFROST_NUM_BLOCKS];
 };
 
 #define GPU_MODEL(_name, _id, ...) \
-{\
+{								\
 	.name = __stringify(_name),				\
 	.id = _id,						\
 	.features = hw_features_##_name,			\
 	.issues = hw_issues_##_name,				\
+	.perfcnt = hw_perfcnt_##_name,				\
 	.revs = { __VA_ARGS__ },				\
 }
 
@@ -193,12 +199,16 @@ static const struct panfrost_model gpu_models[] = {
 
 static void panfrost_gpu_init_features(struct panfrost_device *pfdev)
 {
+	struct drm_panfrost_block_perfcounters *perfcnt_layout;
 	u32 gpu_id, num_js, major, minor, status, rev;
 	const char *name = "unknown";
 	u64 hw_feat = 0;
-	u64 hw_issues = hw_issues_all;
+	u64 hw_issues = hw_issues_all, mask;
 	const struct panfrost_model *model;
+	unsigned int num;
 	int i;
+
+	perfcnt_layout = pfdev->features.perfcnt_layout;
 
 	pfdev->features.l2_features = gpu_read(pfdev, GPU_L2_FEATURES);
 	pfdev->features.core_features = gpu_read(pfdev, GPU_CORE_FEATURES);
@@ -267,8 +277,31 @@ static void panfrost_gpu_init_features(struct panfrost_device *pfdev)
 		if (best >= 0)
 			hw_issues |= model->revs[best].issues;
 
+		for (i = 0; i < PANFROST_NUM_BLOCKS; i++)
+			perfcnt_layout[i].counters = model->perfcnt[i];
+
 		break;
 	}
+
+	/* Only one Job Manager. */
+	perfcnt_layout[PANFROST_JM_BLOCK].instances = BIT(1);
+
+	num = hweight64(pfdev->features.shader_present);
+	mask = GENMASK(num - 1, 0);
+	perfcnt_layout[PANFROST_SHADER_BLOCK].instances = mask;
+	num = hweight64(pfdev->features.l2_present);
+	mask = GENMASK(num - 1, 0);
+	perfcnt_layout[PANFROST_MMU_L2_BLOCK].instances = mask;
+
+	/*
+	 * In v4 HW we have one tiler per core group, with the number
+	 * of core groups being equal to the number of L2 caches. Other
+	 * HW versions just have one tiler.
+	 */
+	if (hw_feat & HW_FEATURE_V4)
+		perfcnt_layout[PANFROST_TILER_BLOCK].instances = mask;
+	else
+		perfcnt_layout[PANFROST_TILER_BLOCK].instances = BIT(1);
 
 	bitmap_from_u64(pfdev->features.hw_features, hw_feat);
 	bitmap_from_u64(pfdev->features.hw_issues, hw_issues);
