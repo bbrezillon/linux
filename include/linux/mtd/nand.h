@@ -256,10 +256,16 @@ struct nand_ecc_engine_ops {
 
 /**
  * struct nand_ecc_engine - Generic ECC engine abstraction for NAND devices
+ * @dev: Host device
+ * @node: Private field for registration time
  * @ops: ECC engine operations
+ * @priv: Private data
  */
 struct nand_ecc_engine {
+	struct device *dev;
+	struct list_head node;
 	struct nand_ecc_engine_ops *ops;
+	void *priv;
 };
 
 void nand_ecc_read_user_conf(struct nand_device *nand);
@@ -270,8 +276,14 @@ int nand_ecc_prepare_io_req(struct nand_device *nand,
 int nand_ecc_finish_io_req(struct nand_device *nand,
 			   struct nand_page_io_req *req);
 bool nand_ecc_correction_is_enough(struct nand_device *nand);
+int nand_ecc_register_hw_engine(struct nand_ecc_engine *engine);
+int nand_ecc_unregister_hw_engine(struct nand_ecc_engine *engine);
 struct nand_ecc_engine *nand_ecc_get_sw_engine(struct nand_device *nand);
 struct nand_ecc_engine *nand_ecc_get_ondie_engine(struct nand_device *nand);
+struct nand_ecc_engine *nand_ecc_get_hw_engine(struct nand_device *nand);
+struct nand_ecc_engine *nand_ecc_match_hw_engine(struct device *dev);
+void nand_ecc_put_hw_engine(struct nand_device *nand);
+
 
 /**
  * struct nand_ecc - High-level ECC object

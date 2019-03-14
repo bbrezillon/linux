@@ -96,6 +96,12 @@
 
 #include <linux/module.h>
 #include <linux/mtd/nand.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
+#include <linux/of_platform.h>
+
+static LIST_HEAD(hw_engines);
+static DEFINE_MUTEX(hw_engines_mutex);
 
 int nand_ecc_init_ctx(struct nand_device *nand)
 {
@@ -487,6 +493,39 @@ bool nand_ecc_correction_is_enough(struct nand_device *nand)
 }
 EXPORT_SYMBOL(nand_ecc_correction_is_enough);
 
+int nand_ecc_register_hw_engine(struct nand_ecc_engine *engine)
+{
+	struct nand_ecc_engine *item;
+
+	if (!engine)
+		return -ENOTSUPP;
+
+	/* Prevent multiple registrations of one engine */
+	list_for_each_entry(item, &hw_engines, node)
+		if (item == engine)
+			return 0;
+
+	mutex_lock(&hw_engines_mutex);
+	list_add_tail(&engine->node, &hw_engines);
+	mutex_unlock(&hw_engines_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL(nand_ecc_register_hw_engine);
+
+int nand_ecc_unregister_hw_engine(struct nand_ecc_engine *engine)
+{
+	if (!engine)
+		return -ENOTSUPP;
+
+	mutex_lock(&hw_engines_mutex);
+	list_del(&engine->node);
+	mutex_unlock(&hw_engines_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL(nand_ecc_unregister_hw_engine);
+
 struct nand_ecc_engine *nand_ecc_get_sw_engine(struct nand_device *nand)
 {
 	unsigned int algo = nand->ecc.user_conf.algo;
@@ -512,6 +551,72 @@ struct nand_ecc_engine *nand_ecc_get_ondie_engine(struct nand_device *nand)
 	return nand->ecc.ondie_engine;
 }
 EXPORT_SYMBOL(nand_ecc_get_ondie_engine);
+
+struct nand_ecc_engine *nand_ecc_match_hw_engine(struct device *dev)
+{
+	struct nand_ecc_engine *item;
+
+	list_for_each_entry(item, &hw_engines, node)
+		if (item->dev == dev)
+			return item;
+
+	return NULL;
+}
+EXPORT_SYMBOL(nand_ecc_match_hw_engine);
+
+struct nand_ecc_engine *nand_ecc_get_hw_engine(struct nand_device *nand)
+{
+	struct nand_ecc_engine *engine = NULL;
+	struct device *dev = &nand->mtd.dev;
+	struct platform_device *pdev;
+	struct device_node *np;
+
+	if (list_empty(&hw_engines))
+		return NULL;
+
+	/* Check for an explicit ecc-engine property in the parent */
+	np = of_parse_phandle(dev->of_node->parent, "ecc-engine", 0);
+	if (np) {
+
+		pdev = of_find_device_by_node(np);
+		if (!pdev)
+			return ERR_PTR(-EPROBE_DEFER);
+
+		engine = nand_ecc_match_hw_engine(&pdev->dev);
+		of_dev_put(pdev);
+		of_node_put(np);
+	}
+
+	/* Support DTs without ecc-engine property: check the parent node */
+	if (!engine) {
+		pdev = of_find_device_by_node(dev->of_node->parent);
+		if (pdev) {
+			engine = nand_ecc_match_hw_engine(&pdev->dev);
+			of_dev_put(pdev);
+		}
+	}
+
+	/* Support no DT or very old DTs: check the node itself */
+	if (!engine) {
+		pdev = of_find_device_by_node(dev->of_node);
+		if (pdev) {
+			engine = nand_ecc_match_hw_engine(&pdev->dev);
+			of_dev_put(pdev);
+		}
+	}
+
+	if (engine)
+		get_device(engine->dev);
+
+	return engine;
+}
+EXPORT_SYMBOL(nand_ecc_get_hw_engine);
+
+void nand_ecc_put_hw_engine(struct nand_device *nand)
+{
+	put_device(nand->ecc.engine->dev);
+}
+EXPORT_SYMBOL(nand_ecc_put_hw_engine);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Miquel Raynal <miquel.raynal@bootlin.com>");

@@ -232,7 +232,9 @@ static int nanddev_get_ecc_engine(struct nand_device *nand)
 		nand->ecc.engine = nand_ecc_get_ondie_engine(nand);
 		break;
 	case NAND_ECC_ENGINE_CONTROLLER:
-		pr_err("Hardware ECC engines not supported yet\n");
+		nand->ecc.engine = nand_ecc_get_hw_engine(nand);
+		if (PTR_ERR(nand->ecc.engine) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
 		break;
 	default:
 		pr_err("Missing ECC engine provider\n");
@@ -252,7 +254,7 @@ static int nanddev_put_ecc_engine(struct nand_device *nand)
 {
 	switch (nand->ecc.ctx.conf.provider) {
 	case NAND_ECC_ENGINE_CONTROLLER:
-		pr_err("Hardware ECC engines not supported yet\n");
+		nand_ecc_put_hw_engine(nand);
 		break;
 	case NAND_ECC_ENGINE_NONE:
 	case NAND_ECC_ENGINE_SOFT:
@@ -296,8 +298,12 @@ int nanddev_ecc_engine_init(struct nand_device *nand)
 
 	/* Look for the ECC engine to use */
 	ret = nanddev_get_ecc_engine(nand);
-	if (ret)
+	if (ret) {
+		if (ret != -EPROBE_DEFER)
+			pr_err("No ECC engine found\n");
+
 		return ret;
+	}
 
 	/* No ECC engine requested */
 	if (!nand->ecc.engine)
