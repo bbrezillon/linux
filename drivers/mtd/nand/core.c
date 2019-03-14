@@ -296,10 +296,8 @@ int nanddev_ecc_engine_init(struct nand_device *nand)
 
 	/* Look for the ECC engine to use */
 	ret = nanddev_get_ecc_engine(nand);
-	if (ret) {
-		pr_err("No ECC engine found\n");
+	if (ret)
 		return ret;
-	}
 
 	/* No ECC engine requested */
 	if (!nand->ecc.engine)

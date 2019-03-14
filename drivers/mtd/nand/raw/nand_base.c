@@ -5344,6 +5344,18 @@ static int nand_scan_tail(struct nand_chip *chip)
 				ecc->read_subpage = nand_read_subpage;
 			if (!ecc->write_subpage && ecc->hwctl && ecc->calculate)
 				ecc->write_subpage = nand_write_subpage_hwecc;
+
+			/*
+			 * External engine support: if no engine is found, we
+			 * suppose it will be handled by the controller itself.
+			 *
+			 * Before more integration in the raw NAND subsystem,
+			 * NAND controller drivers using such external engine
+			 * are supposed to call the prepare/finish_io_req()
+			 * helpers themselves.
+			 */
+			nanddev_ecc_engine_init(nanddev);
+
 			/* fall through */
 
 		case NAND_ECC_PLACEMENT_INTERLEAVED:
