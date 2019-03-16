@@ -562,8 +562,8 @@ static int gsc_m2m_s_selection(struct file *file, void *fh,
 
 static const struct v4l2_ioctl_ops gsc_m2m_ioctl_ops = {
 	.vidioc_querycap		= gsc_m2m_querycap,
-	.vidioc_enum_fmt_vid_cap_mplane	= gsc_m2m_enum_fmt_mplane,
-	.vidioc_enum_fmt_vid_out_mplane	= gsc_m2m_enum_fmt_mplane,
+	.vidioc_enum_fmt_vid_cap	= gsc_m2m_enum_fmt_mplane,
+	.vidioc_enum_fmt_vid_out	= gsc_m2m_enum_fmt_mplane,
 	.vidioc_g_fmt_vid_cap_mplane	= gsc_m2m_g_fmt_mplane,
 	.vidioc_g_fmt_vid_out_mplane	= gsc_m2m_g_fmt_mplane,
 	.vidioc_try_fmt_vid_cap_mplane	= gsc_m2m_try_fmt_mplane,

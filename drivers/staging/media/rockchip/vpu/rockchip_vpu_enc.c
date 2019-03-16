@@ -493,8 +493,8 @@ const struct v4l2_ioctl_ops rockchip_vpu_enc_ioctl_ops = {
 	.vidioc_s_fmt_vid_cap_mplane = vidioc_s_fmt_cap_mplane,
 	.vidioc_g_fmt_vid_out_mplane = vidioc_g_fmt_out_mplane,
 	.vidioc_g_fmt_vid_cap_mplane = vidioc_g_fmt_cap_mplane,
-	.vidioc_enum_fmt_vid_out_mplane = vidioc_enum_fmt_vid_out_mplane,
-	.vidioc_enum_fmt_vid_cap_mplane = vidioc_enum_fmt_vid_cap_mplane,
+	.vidioc_enum_fmt_vid_out = vidioc_enum_fmt_vid_out_mplane,
+	.vidioc_enum_fmt_vid_cap = vidioc_enum_fmt_vid_cap_mplane,
 
 	.vidioc_reqbufs = v4l2_m2m_ioctl_reqbufs,
 	.vidioc_querybuf = v4l2_m2m_ioctl_querybuf,
