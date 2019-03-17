@@ -2172,6 +2172,55 @@ struct v4l2_pix_format_mplane {
 } __attribute__ ((packed));
 
 /**
+ * struct v4l2_plane_ext_pix_format - additional, per-plane format definition
+ * @sizeimage:		maximum size in bytes required for data, for which
+ *			this plane will be used
+ * @bytesperline:	distance in bytes between the leftmost pixels in two
+ *			adjacent lines
+ */
+struct v4l2_plane_ext_pix_format {
+	__u32 sizeimage;
+	__u32 bytesperline;
+};
+
+/**
+ * struct v4l2_ext_pix_format - extended single/multiplanar format definition
+ * @width: image width in pixels
+ * @height: image height in pixels
+ * @field: enum v4l2_field; field order (for interlaced video)
+ * @pixelformat: little endian four character code (fourcc)
+ * @modifier: modifier applied to the format (used for tiled formats and other
+ *	      kind of HW-specific formats, like compressed formats)
+ * @colorspace: enum v4l2_colorspace; supplemental to pixelformat
+ * @num_planes: number of planes for this format. Should be equal to 1
+ *		for single-planar formats and greater than 1 for
+ *		multiplanar ones
+ * @plane_fmt: per-plane information
+ * @flags: format flags (V4L2_PIX_FMT_FLAG_*)
+ * @ycbcr_enc: enum v4l2_ycbcr_encoding, Y'CbCr encoding
+ * @hsv_enc: enum v4l2_hsv_encoding, HSV encoding
+ * @quantization: enum v4l2_quantization, colorspace quantization
+ * @xfer_func: enum v4l2_xfer_func, colorspace transfer function
+ */
+struct v4l2_ext_pix_format {
+	__u32 width;
+	__u32 height;
+	__u32 field;
+	__u32 pixelformat;
+	__u64 modifier;
+	__u32 colorspace;
+	__u32 num_planes;
+	struct v4l2_plane_ext_pix_format plane_fmt[VIDEO_MAX_PLANES];
+	__u8 flags;
+	union {
+		__u8 ycbcr_enc;
+		__u8 hsv_enc;
+	};
+	__u8 quantization;
+	__u8 xfer_func;
+};
+
+/**
  * struct v4l2_sdr_format - SDR format definition
  * @pixelformat:	little endian four character code (fourcc)
  * @buffersize:		maximum size in bytes required for data
@@ -2213,6 +2262,35 @@ struct v4l2_format {
 		struct v4l2_sdr_format		sdr;     /* V4L2_BUF_TYPE_SDR_CAPTURE */
 		struct v4l2_meta_format		meta;    /* V4L2_BUF_TYPE_META_CAPTURE */
 		__u8	raw_data[200];                   /* user-defined */
+	} fmt;
+};
+
+/**
+ * struct v4l2_ext_format - extended stream data format
+ * @type: enum v4l2_buf_type; type of the data stream.
+ *	  V4L2_BUF_TYPE_VIDEO[_OUTPUT]_OVERLAY and
+ *	  V4L2_BUF_TYPE_VIDEO_{CAPTURE,OUTPUT}_MPLANE are not supported
+ * @pix: definition of an image format. Used for
+ *	 V4L2_BUF_TYPE_VIDEO_{CAPTURE,OUTPUT} types
+ * @vbi: raw VBI capture or output parameters. Used for
+ *	 V4L2_BUF_TYPE_VBI_{CAPTURE,OUTPUT} types
+ * @sliced: sliced VBI capture or output parameters. Used for
+ *	    V4L2_BUF_TYPE_SLICED_VBI_{CAPTURE,OUTPUT} types.
+ * @sdr: SDR capture or output parameters. Used for
+ *	 V4L2_BUF_TYPE_SDR_{CAPTURE,OUTPUT} types
+ * @meta: meta capture or output parameters. Used for
+ *	  V4L2_BUF_TYPE_META_{CAPTURE,OUTPUT} types
+ * @raw_data: placeholder for future extensions and custom formats
+ */
+struct v4l2_ext_format {
+	__u32 type;
+	union {
+		struct v4l2_ext_pix_format pix;
+		struct v4l2_vbi_format vbi;
+		struct v4l2_sliced_vbi_format sliced;
+		struct v4l2_sdr_format sdr;
+		struct v4l2_meta_format meta;
+		__u8 raw_data[200];
 	} fmt;
 };
 
@@ -2480,6 +2558,9 @@ struct v4l2_create_buffers {
 
 #define VIDIOC_QUERY_EXT_CTRL	_IOWR('V', 103, struct v4l2_query_ext_ctrl)
 
+#define VIDIOC_G_EXT_FMT	_IOWR('V', 104, struct v4l2_ext_format)
+#define VIDIOC_S_EXT_FMT	_IOWR('V', 105, struct v4l2_ext_format)
+#define VIDIOC_TRY_EXT_FMT	_IOWR('V', 106, struct v4l2_ext_format)
 /* Reminder: when adding new ioctls please add support for them to
    drivers/media/v4l2-core/v4l2-compat-ioctl32.c as well! */
 
