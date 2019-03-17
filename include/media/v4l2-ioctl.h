@@ -48,11 +48,16 @@ struct v4l2_fh;
  * @vidioc_g_fmt_vid_cap: pointer to the function that implements
  *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for video capture
  *	in single plane mode
+ * @vidioc_g_ext_fmt_vid_cap: pointer to the function that implements
+ *	:ref:`VIDIOC_G_EXT_FMT <vidioc_g_ext_fmt>` ioctl logic for video
+ *	capture
  * @vidioc_g_fmt_vid_overlay: pointer to the function that implements
  *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for video overlay
  * @vidioc_g_fmt_vid_out: pointer to the function that implements
  *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for video out
  *	in single plane mode
+ * @vidioc_g_ext_fmt_vid_out: pointer to the function that implements
+ *	:ref:`VIDIOC_G_EXT_FMT <vidioc_g_ext_fmt>` ioctl logic for video out
  * @vidioc_g_fmt_vid_out_overlay: pointer to the function that implements
  *	:ref:`VIDIOC_G_FMT <vidioc_g_fmt>` ioctl logic for video overlay output
  * @vidioc_g_fmt_vbi_cap: pointer to the function that implements
@@ -82,11 +87,16 @@ struct v4l2_fh;
  * @vidioc_s_fmt_vid_cap: pointer to the function that implements
  *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for video capture
  *	in single plane mode
+ * @vidioc_s_ext_fmt_vid_cap: pointer to the function that implements
+ *	:ref:`VIDIOC_S_EXT_FMT <vidioc_s_ext_fmt>` ioctl logic for video
+ *	capture
  * @vidioc_s_fmt_vid_overlay: pointer to the function that implements
  *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for video overlay
  * @vidioc_s_fmt_vid_out: pointer to the function that implements
  *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for video out
  *	in single plane mode
+ * @vidioc_s_ext_fmt_vid_out: pointer to the function that implements
+ *	:ref:`VIDIOC_S_EXT_FMT <vidioc_g_fmt>` ioctl logic for video out
  * @vidioc_s_fmt_vid_out_overlay: pointer to the function that implements
  *	:ref:`VIDIOC_S_FMT <vidioc_g_fmt>` ioctl logic for video overlay output
  * @vidioc_s_fmt_vbi_cap: pointer to the function that implements
@@ -116,11 +126,16 @@ struct v4l2_fh;
  * @vidioc_try_fmt_vid_cap: pointer to the function that implements
  *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for video capture
  *	in single plane mode
+ * @vidioc_try_ext_fmt_vid_cap: pointer to the function that implements
+ *	:ref:`VIDIOC_TRY_EXT_FMT <vidioc_try_ext_fmt>` ioctl logic for video
+	capture
  * @vidioc_try_fmt_vid_overlay: pointer to the function that implements
  *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for video overlay
  * @vidioc_try_fmt_vid_out: pointer to the function that implements
  *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for video out
  *	in single plane mode
+ * @vidioc_try_ext_fmt_vid_out: pointer to the function that implements
+ *	:ref:`VIDIOC_TRY_EXT_FMT <vidioc_g_fmt>` ioctl logic for video out
  * @vidioc_try_fmt_vid_out_overlay: pointer to the function that implements
  *	:ref:`VIDIOC_TRY_FMT <vidioc_g_fmt>` ioctl logic for video overlay
  *	output
@@ -319,10 +334,14 @@ struct v4l2_ioctl_ops {
 	/* VIDIOC_G_FMT handlers */
 	int (*vidioc_g_fmt_vid_cap)(struct file *file, void *fh,
 				    struct v4l2_format *f);
+	int (*vidioc_g_ext_fmt_vid_cap)(struct file *file, void *fh,
+					struct v4l2_ext_pix_format *f);
 	int (*vidioc_g_fmt_vid_overlay)(struct file *file, void *fh,
 					struct v4l2_format *f);
 	int (*vidioc_g_fmt_vid_out)(struct file *file, void *fh,
 				    struct v4l2_format *f);
+	int (*vidioc_g_ext_fmt_vid_out)(struct file *file, void *fh,
+					struct v4l2_ext_pix_format *f);
 	int (*vidioc_g_fmt_vid_out_overlay)(struct file *file, void *fh,
 					    struct v4l2_format *f);
 	int (*vidioc_g_fmt_vbi_cap)(struct file *file, void *fh,
@@ -349,10 +368,14 @@ struct v4l2_ioctl_ops {
 	/* VIDIOC_S_FMT handlers */
 	int (*vidioc_s_fmt_vid_cap)(struct file *file, void *fh,
 				    struct v4l2_format *f);
+	int (*vidioc_s_ext_fmt_vid_cap)(struct file *file, void *fh,
+					struct v4l2_ext_pix_format *f);
 	int (*vidioc_s_fmt_vid_overlay)(struct file *file, void *fh,
 					struct v4l2_format *f);
 	int (*vidioc_s_fmt_vid_out)(struct file *file, void *fh,
 				    struct v4l2_format *f);
+	int (*vidioc_s_ext_fmt_vid_out)(struct file *file, void *fh,
+					struct v4l2_ext_pix_format *f);
 	int (*vidioc_s_fmt_vid_out_overlay)(struct file *file, void *fh,
 					    struct v4l2_format *f);
 	int (*vidioc_s_fmt_vbi_cap)(struct file *file, void *fh,
@@ -379,10 +402,14 @@ struct v4l2_ioctl_ops {
 	/* VIDIOC_TRY_FMT handlers */
 	int (*vidioc_try_fmt_vid_cap)(struct file *file, void *fh,
 				      struct v4l2_format *f);
+	int (*vidioc_try_ext_fmt_vid_cap)(struct file *file, void *fh,
+					  struct v4l2_ext_pix_format *f);
 	int (*vidioc_try_fmt_vid_overlay)(struct file *file, void *fh,
 					  struct v4l2_format *f);
 	int (*vidioc_try_fmt_vid_out)(struct file *file, void *fh,
 				      struct v4l2_format *f);
+	int (*vidioc_try_ext_fmt_vid_out)(struct file *file, void *fh,
+					  struct v4l2_ext_pix_format *f);
 	int (*vidioc_try_fmt_vid_out_overlay)(struct file *file, void *fh,
 					     struct v4l2_format *f);
 	int (*vidioc_try_fmt_vbi_cap)(struct file *file, void *fh,
@@ -721,5 +748,11 @@ long int video_usercopy(struct file *file, unsigned int cmd,
  */
 long int video_ioctl2(struct file *file,
 		      unsigned int cmd, unsigned long int arg);
+
+int v4l2_format_to_ext_format(const struct v4l2_format *f,
+			      struct v4l2_ext_format *e, bool strict);
+int v4l2_ext_format_to_format(const struct v4l2_ext_format *e,
+			      struct v4l2_format *f,
+			      bool mplane_cap, bool strict);
 
 #endif /* _V4L2_IOCTL_H */

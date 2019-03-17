@@ -599,32 +599,44 @@ static void determine_valid_ioctls(struct video_device *vdev)
 			       ops->vidioc_enum_fmt_meta_out)))
 			set_bit(_IOC_NR(VIDIOC_ENUM_FMT), valid_ioctls);
 		if ((is_rx && (ops->vidioc_g_fmt_vid_cap ||
+			       ops->vidioc_g_ext_fmt_vid_cap ||
 			       ops->vidioc_g_fmt_vid_cap_mplane ||
 			       ops->vidioc_g_fmt_vid_overlay ||
 			       ops->vidioc_g_fmt_meta_cap)) ||
 		    (is_tx && (ops->vidioc_g_fmt_vid_out ||
+			       ops->vidioc_g_ext_fmt_vid_out ||
 			       ops->vidioc_g_fmt_vid_out_mplane ||
 			       ops->vidioc_g_fmt_vid_out_overlay ||
-			       ops->vidioc_g_fmt_meta_out)))
-			 set_bit(_IOC_NR(VIDIOC_G_FMT), valid_ioctls);
+			       ops->vidioc_g_fmt_meta_out))) {
+			set_bit(_IOC_NR(VIDIOC_G_FMT), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_G_EXT_FMT), valid_ioctls);
+		}
 		if ((is_rx && (ops->vidioc_s_fmt_vid_cap ||
+			       ops->vidioc_s_ext_fmt_vid_cap ||
 			       ops->vidioc_s_fmt_vid_cap_mplane ||
 			       ops->vidioc_s_fmt_vid_overlay ||
 			       ops->vidioc_s_fmt_meta_cap)) ||
 		    (is_tx && (ops->vidioc_s_fmt_vid_out ||
+			       ops->vidioc_s_ext_fmt_vid_out ||
 			       ops->vidioc_s_fmt_vid_out_mplane ||
 			       ops->vidioc_s_fmt_vid_out_overlay ||
-			       ops->vidioc_s_fmt_meta_out)))
-			 set_bit(_IOC_NR(VIDIOC_S_FMT), valid_ioctls);
+			       ops->vidioc_s_fmt_meta_out))) {
+			set_bit(_IOC_NR(VIDIOC_S_FMT), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_S_EXT_FMT), valid_ioctls);
+		}
 		if ((is_rx && (ops->vidioc_try_fmt_vid_cap ||
+			       ops->vidioc_try_ext_fmt_vid_cap ||
 			       ops->vidioc_try_fmt_vid_cap_mplane ||
 			       ops->vidioc_try_fmt_vid_overlay ||
 			       ops->vidioc_try_fmt_meta_cap)) ||
 		    (is_tx && (ops->vidioc_try_fmt_vid_out ||
+			       ops->vidioc_try_ext_fmt_vid_out ||
 			       ops->vidioc_try_fmt_vid_out_mplane ||
 			       ops->vidioc_try_fmt_vid_out_overlay ||
-			       ops->vidioc_try_fmt_meta_out)))
-			 set_bit(_IOC_NR(VIDIOC_TRY_FMT), valid_ioctls);
+			       ops->vidioc_try_fmt_meta_out))) {
+			set_bit(_IOC_NR(VIDIOC_TRY_FMT), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_TRY_EXT_FMT), valid_ioctls);
+		}
 		SET_VALID_IOCTL(ops, VIDIOC_OVERLAY, vidioc_overlay);
 		SET_VALID_IOCTL(ops, VIDIOC_G_FBUF, vidioc_g_fbuf);
 		SET_VALID_IOCTL(ops, VIDIOC_S_FBUF, vidioc_s_fbuf);
