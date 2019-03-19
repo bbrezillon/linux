@@ -929,6 +929,49 @@ struct v4l2_plane {
 };
 
 /**
+ * struct v4l2_ext_plane - extended plane buffer info
+ * @bytesused: number of bytes occupied by data in the plane (payload)
+ * @length: size of this plane (NOT the payload) in bytes
+ * @mem_offset: when memory in the associated struct v4l2_ext_buffer is
+ *		V4L2_MEMORY_MMAP, equals the offset from the start of the
+ *		device memory for this plane (or is a "cookie" that should be
+ *		passed to mmap() called on the video node)
+ * @userptr: when memory is V4L2_MEMORY_USERPTR, a userspace pointer pointing
+ *	     to this plane
+ * @dmabuf.fd: when memory is V4L2_MEMORY_DMABUF, a userspace file descriptor
+ *	       associated with this plane
+ * @dmabuf.offset: where the plane starts inside the DMABUF buffer. All planes
+ *		   might share the same buffer object. In this case we need to
+ *		   know where the plane start inside this buffer.
+ * @data_offset: offset in the plane to the start of data; usually 0, unless
+ *		 there is a header in front of the data. data_offset is
+ *		 relative to start_offset, so absolute data_offset is actually
+ *		 start_offset + data_offset
+ *
+ *
+ * Multi-planar buffers consist of one or more planes, e.g. an YCbCr buffer
+ * with two planes can have one plane for Y, and another for interleaved CbCr
+ * components. Each plane can reside in a separate memory buffer, or even in
+ * a completely separate memory node (e.g. in embedded devices).
+ * Note that this struct is also used for uni-planar buffers, but in that case
+ * you'll only have one plane defined.
+ */
+struct v4l2_ext_plane {
+	__u32 bytesused;
+	__u32 length;
+	union {
+		__u32 mem_offset;
+		__u64 userptr;
+		struct {
+			__s32 fd;
+			__u32 offset;
+		} dmabuf;
+	} m;
+	__u32 data_offset;
+	__u32 reserved[10];
+};
+
+/**
  * struct v4l2_buffer - video buffer info
  * @index:	id number of the buffer
  * @type:	enum v4l2_buf_type; buffer type (type == *_MPLANE for
@@ -983,6 +1026,40 @@ struct v4l2_buffer {
 		__s32		request_fd;
 		__u32		reserved;
 	};
+};
+
+/**
+ * struct v4l2_ext_buffer - extended video buffer info
+ * @index: id number of the buffer
+ * @type: enum v4l2_buf_type; buffer type. _MPLANE and _OVERLAY formats are
+ *	  invalid
+ * @flags: buffer informational flags
+ * @field: enum v4l2_field; field order of the image in the buffer
+ * @timestamp: frame timestamp
+ * @sequence: sequence count of this frame
+ * @memory: enum v4l2_memory; the method, in which the actual video data is
+ *          passed
+ * @planes: per-plane buffer information
+ * @num_planes: number of plane buffers
+ * @request_fd: fd of the request that this buffer should use
+ * @reserved: some extra space reserved to add future fields (like timecode).
+ *	      Must be set to 0
+ *
+ * Contains data exchanged by application and driver using one of the Streaming
+ * I/O methods.
+ */
+struct v4l2_ext_buffer {
+	__u32 index;
+	__u32 type;
+	__u32 flags;
+	__u32 field;
+	__u64 timestamp;
+	__u32 sequence;
+	__u32 memory;
+	struct v4l2_ext_plane planes[VIDEO_MAX_PLANES];
+	__u32 num_planes;
+	__u32 request_fd;
+	__u32 reserved[10];
 };
 
 /**
@@ -1060,6 +1137,35 @@ struct v4l2_exportbuffer {
 	__u32		flags;
 	__s32		fd;
 	__u32		reserved[11];
+};
+
+/**
+ * struct v4l2_ext_exportbuffer - export of video buffer as DMABUF file
+ *				  descriptor using extended format
+ *
+ * @index: id number of the buffer
+ * @type: enum v4l2_buf_type; buffer type
+ * @flags: flags for newly created file(s), currently only O_CLOEXEC is
+ *	   supported, refer to manual of open syscall for more details
+ * @first_plane: first plane to export. Most likely set to 0
+ * @num_planes: number of planes to export. Most set to the number of planes
+ *		attached to the buffer
+ * @fds: file descriptors associated with DMABUF (set by driver). Note that all
+ *	 planes might share the same buffer and then be returned the same FD
+ *
+ * Contains data used for exporting a video buffer as DMABUF file descriptor.
+ * The buffer is identified by a 'cookie' returned by VIDIOC_QUERYBUF
+ * (identical to the cookie used to mmap() the buffer to userspace). All
+ * reserved fields must be set to zero.
+ */
+struct v4l2_ext_exportbuffer {
+	__u32 type; /* enum v4l2_buf_type */
+	__u32 index;
+	__u32 flags;
+	__u32 first_plane;
+	__u32 num_planes;
+	__s32 fds[VIDEO_MAX_PLANES];
+	__u32 reserved;
 };
 
 /*
@@ -2458,6 +2564,23 @@ struct v4l2_create_buffers {
 	__u32			reserved[7];
 };
 
+/**
+ * struct v4l2_ext_create_buffers - VIDIOC_EXT_CREATE_BUFS argument
+ * @index:	on return, index of the first created buffer
+ * @count:	entry: number of requested buffers,
+ *		return: number of created buffers
+ * @memory:	enum v4l2_memory; buffer memory type
+ * @capabilities: capabilities of this buffer type.
+ * @format:	frame format, for which buffers are requested
+ */
+struct v4l2_ext_create_buffers {
+	__u32			index;
+	__u32			count;
+	__u32			memory;
+	__u32			capabilities;
+	struct v4l2_ext_format	format;
+};
+
 /*
  *	I O C T L   C O D E S   F O R   V I D E O   D E V I C E S
  *
@@ -2561,6 +2684,13 @@ struct v4l2_create_buffers {
 #define VIDIOC_G_EXT_FMT	_IOWR('V', 104, struct v4l2_ext_format)
 #define VIDIOC_S_EXT_FMT	_IOWR('V', 105, struct v4l2_ext_format)
 #define VIDIOC_TRY_EXT_FMT	_IOWR('V', 106, struct v4l2_ext_format)
+#define VIDIOC_EXT_CREATE_BUFS	_IOWR('V', 107, struct v4l2_ext_create_buffers)
+#define VIDIOC_EXT_QUERYBUF	_IOWR('V', 108, struct v4l2_ext_buffer)
+#define VIDIOC_EXT_QBUF		_IOWR('V', 109, struct v4l2_ext_buffer)
+#define VIDIOC_EXT_DQBUF	_IOWR('V', 110, struct v4l2_ext_buffer)
+#define VIDIOC_EXT_PREPARE_BUF	_IOWR('V', 111, struct v4l2_ext_buffer)
+#define VIDIOC_EXT_EXPBUF	_IOWR('V', 112, struct v4l2_ext_exportbuffer)
+
 /* Reminder: when adding new ioctls please add support for them to
    drivers/media/v4l2-core/v4l2-compat-ioctl32.c as well! */
 
