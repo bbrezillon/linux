@@ -700,12 +700,30 @@ static void determine_valid_ioctls(struct video_device *vdev)
 	if (is_vid || is_vbi || is_sdr || is_tch) {
 		/* ioctls valid for video, metadata, vbi or sdr */
 		SET_VALID_IOCTL(ops, VIDIOC_REQBUFS, vidioc_reqbufs);
-		SET_VALID_IOCTL(ops, VIDIOC_QUERYBUF, vidioc_querybuf);
-		SET_VALID_IOCTL(ops, VIDIOC_QBUF, vidioc_qbuf);
-		SET_VALID_IOCTL(ops, VIDIOC_EXPBUF, vidioc_expbuf);
-		SET_VALID_IOCTL(ops, VIDIOC_DQBUF, vidioc_dqbuf);
-		SET_VALID_IOCTL(ops, VIDIOC_CREATE_BUFS, vidioc_create_bufs);
-		SET_VALID_IOCTL(ops, VIDIOC_PREPARE_BUF, vidioc_prepare_buf);
+		if (ops->vidioc_querybuf || ops->vidioc_ext_querybuf) {
+			set_bit(_IOC_NR(VIDIOC_QUERYBUF), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_EXT_QUERYBUF), valid_ioctls);
+		}
+		if (ops->vidioc_qbuf || ops->vidioc_ext_qbuf) {
+			set_bit(_IOC_NR(VIDIOC_QBUF), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_EXT_QBUF), valid_ioctls);
+		}
+		if (ops->vidioc_expbuf || ops->vidioc_ext_expbuf) {
+			set_bit(_IOC_NR(VIDIOC_EXPBUF), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_EXT_EXPBUF), valid_ioctls);
+		}
+		if (ops->vidioc_dqbuf || ops->vidioc_ext_dqbuf) {
+			set_bit(_IOC_NR(VIDIOC_DQBUF), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_EXT_DQBUF), valid_ioctls);
+		}
+		if (ops->vidioc_create_bufs || ops->vidioc_ext_create_bufs) {
+			set_bit(_IOC_NR(VIDIOC_CREATE_BUFS), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_EXT_CREATE_BUFS), valid_ioctls);
+		}
+		if (ops->vidioc_prepare_buf || ops->vidioc_ext_prepare_buf) {
+			set_bit(_IOC_NR(VIDIOC_PREPARE_BUF), valid_ioctls);
+			set_bit(_IOC_NR(VIDIOC_EXT_PREPARE_BUF), valid_ioctls);
+		}
 		SET_VALID_IOCTL(ops, VIDIOC_STREAMON, vidioc_streamon);
 		SET_VALID_IOCTL(ops, VIDIOC_STREAMOFF, vidioc_streamoff);
 	}
