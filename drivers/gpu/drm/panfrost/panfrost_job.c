@@ -369,7 +369,7 @@ static void panfrost_job_timedout(struct drm_sched_job *sched_job)
 	/* For now, just say we're done. No reset and retry. */
 //	job_write(pfdev, JS_COMMAND(js), JS_COMMAND_HARD_STOP);
 	dma_fence_signal(job->done_fence);
-	panfrost_perfcnt_finish_job(job);
+//	panfrost_perfcnt_finish_job(job, true);
 }
 
 static const struct drm_sched_backend_ops panfrost_sched_ops = {
@@ -444,8 +444,7 @@ static irqreturn_t panfrost_job_irq_handler(int irq, void *data)
 
 		if (status & JOB_INT_MASK_DONE(j)) {
 			dma_fence_signal(pfdev->jobs[j]->done_fence);
-			panfrost_perfcnt_finish_job(pfdev->jobs[j]);
-			pfdev->jobs[j]->perfcnt_ctx = NULL;
+			panfrost_perfcnt_finish_job(pfdev->jobs[j], false);
 		}
 
 		status &= ~mask;

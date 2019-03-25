@@ -36,7 +36,8 @@ void panfrost_perfcnt_sample_done(struct panfrost_device *pfdev);
 void panfrost_perfcnt_clean_cache_done(struct panfrost_device *pfdev);
 int panfrost_perfcnt_push_job(struct panfrost_job *job);
 void panfrost_perfcnt_run_job(struct panfrost_job *job);
-void panfrost_perfcnt_finish_job(struct panfrost_job *job);
+void panfrost_perfcnt_finish_job(struct panfrost_job *job,
+				 bool skip_dump);
 void panfrost_perfcnt_clean_job_ctx(struct panfrost_job *job);
 int panfrost_perfcnt_create_job_ctx(struct panfrost_job *job,
 				    struct drm_file *file_priv,

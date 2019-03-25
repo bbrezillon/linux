@@ -201,8 +201,7 @@ int panfrost_ioctl_create_perfmon(struct drm_device *dev, void *data,
 			continue;
 
 		perfmon->counters[i] = req->counters[i];
-		perfmon->values[i] = kcalloc(ncounters, sizeof(*perfmon->values),
-					     GFP_KERNEL);
+		perfmon->values[i] = kcalloc(ncounters, sizeof(u32), GFP_KERNEL);
 		if (!perfmon->values)
 			goto err_free_perfmon;
 	}
@@ -334,9 +333,10 @@ static u32 counters_u64_to_u32(u64 in)
 	return out;
 }
 
-void panfrost_perfcnt_run_job(struct panfrost_perfcnt_job_ctx *ctx)
+void panfrost_perfcnt_run_job(struct panfrost_job *job)
 {
-	struct panfrost_device *pfdev = ctx->pfdev;
+	struct panfrost_perfcnt_job_ctx *ctx = job->perfcnt_ctx;
+	struct panfrost_device *pfdev = job->pfdev;
 	u32 perfcnt_en[PANFROST_NUM_BLOCKS] = { };
 	bool disable_perfcnt = true, config_changed = false;
 	unsigned int i, j;
@@ -512,7 +512,7 @@ panfrost_perfcnt_get_counter_vals(struct panfrost_device *pfdev,
 		 * TODO: define a macro to extract the number of l2 caches from
 		 * mem_features.
 		 */
-		nl2c = (pfdev->features.mem_features >> 8) & GENMASK(3, 0);
+		nl2c = ((pfdev->features.mem_features >> 8) & GENMASK(3, 0)) + 1;
 
 		/*
 		 * The ARM driver is grouping cores per core group and then
@@ -617,7 +617,7 @@ static void panfrost_perfcnt_dump_work(struct work_struct *w)
 			instances |= perfmon->counters[block].instances;
 		}
 
-		for (instance = 0; instance < 64; instance++) {
+		for (instance = 0, num = 0; instance < 64; instance++) {
 			if (!(instances & BIT_ULL(instance)))
 				continue;
 
@@ -629,9 +629,10 @@ static void panfrost_perfcnt_dump_work(struct work_struct *w)
 				perfmon = ctx->perfmons[pmonidx];
 				panfrost_perfmon_upd_counter_vals(perfmon,
 								  block,
-								  instance,
+								  num,
 								  vals);
 			}
+			num++;
 		}
 	}
 
@@ -721,7 +722,7 @@ err_put_ctx:
 	return ret;
 }
 
-void panfrost_perfcnt_finish_job(struct panfrost_job *job)
+void panfrost_perfcnt_finish_job(struct panfrost_job *job, bool skip_dump)
 {
 	struct panfrost_perfcnt_job_ctx *ctx = job->perfcnt_ctx;
 
@@ -730,7 +731,7 @@ void panfrost_perfcnt_finish_job(struct panfrost_job *job)
 	if (!refcount_dec_and_test(&ctx->refcount))
 		return;
 
-	if (!ctx->perfmon_count) {
+	if (!ctx->perfmon_count || skip_dump) {
 		panfrost_perfcnt_dump_done(ctx);
 		return;
 	}
@@ -747,7 +748,7 @@ static bool panfrost_perfcnt_try_reuse_last_job_ctx(struct panfrost_job *job)
 
 	new_ctx = job->perfcnt_ctx;
 	prev_ctx = pfdev->perfcnt->last_ctx;
-	if (prev_ctx)
+	if (!prev_ctx)
 		return false;
 
 	if (!refcount_inc_not_zero(&prev_ctx->refcount))
@@ -812,6 +813,7 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	struct drm_gem_shmem_object *bo;
 	size_t size;
 	u32 status;
+	u64 gpuva;
 	int ret;
 
 	if (panfrost_has_hw_feature(pfdev, HW_FEATURE_V4)) {
@@ -827,7 +829,7 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 		 * TODO: define a macro to extract the number of l2 caches from
 		 * mem_features.
 		 */
-		nl2c = (pfdev->features.mem_features >> 8) & GENMASK(3, 0);
+		nl2c = ((pfdev->features.mem_features >> 8) & GENMASK(3, 0)) + 1;
 
 		/*
 		 * The ARM driver is grouping cores per core group and then
@@ -866,8 +868,9 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	if (ret)
 		goto err_put_bo;
 
-	gpu_write(pfdev, GPU_PERFCNT_BASE_LO, perfcnt->bo->node.start);
-	gpu_write(pfdev, GPU_PERFCNT_BASE_HI, perfcnt->bo->node.start >> 32);
+	gpuva = perfcnt->bo->node.start << PAGE_SHIFT;
+	gpu_write(pfdev, GPU_PERFCNT_BASE_LO, gpuva);
+	gpu_write(pfdev, GPU_PERFCNT_BASE_HI, gpuva >> 32);
 
 	/* Disable everything. */
 	gpu_write(pfdev, GPU_PERFCNT_CFG,

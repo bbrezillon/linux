@@ -284,24 +284,29 @@ static void panfrost_gpu_init_features(struct panfrost_device *pfdev)
 	}
 
 	/* Only one Job Manager. */
-	perfcnt_layout[PANFROST_JM_BLOCK].instances = BIT(1);
+	perfcnt_layout[PANFROST_JM_BLOCK].instances = BIT(0);
 
 	num = hweight64(pfdev->features.shader_present);
 	mask = GENMASK(num - 1, 0);
 	perfcnt_layout[PANFROST_SHADER_BLOCK].instances = mask;
-	num = hweight64(pfdev->features.l2_present);
-	mask = GENMASK(num - 1, 0);
-	perfcnt_layout[PANFROST_MMU_L2_BLOCK].instances = mask;
 
 	/*
 	 * In v4 HW we have one tiler per core group, with the number
 	 * of core groups being equal to the number of L2 caches. Other
-	 * HW versions just have one tiler.
+	 * HW versions just have one tiler and the number of L2 caches
+	 * can be extracted from the mem_features field.
 	 */
-	if (hw_feat & HW_FEATURE_V4)
+	if (hw_feat & HW_FEATURE_V4) {
+		num = hweight64(pfdev->features.l2_present);
+		mask = GENMASK(num - 1, 0);
+		perfcnt_layout[PANFROST_MMU_L2_BLOCK].instances = mask;
 		perfcnt_layout[PANFROST_TILER_BLOCK].instances = mask;
-	else
-		perfcnt_layout[PANFROST_TILER_BLOCK].instances = BIT(1);
+	} else {
+		perfcnt_layout[PANFROST_TILER_BLOCK].instances = BIT(0);
+		num = ((pfdev->features.mem_features >> 8) & GENMASK(3, 0)) + 1;
+		mask = GENMASK(num - 1, 0);
+		perfcnt_layout[PANFROST_MMU_L2_BLOCK].instances = mask;
+	}
 
 	bitmap_from_u64(pfdev->features.hw_features, hw_feat);
 	bitmap_from_u64(pfdev->features.hw_issues, hw_issues);
