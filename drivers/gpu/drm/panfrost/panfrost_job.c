@@ -219,14 +219,18 @@ int panfrost_job_push(struct panfrost_job *job)
 		goto unlock;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = panfrost_perfcnt_push_job(job);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (ret) {
 		mutex_unlock(&pfdev->sched_lock);
 		goto unlock;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	job->render_done_fence = dma_fence_get(&job->base.s_fence->finished);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	kref_get(&job->refcount); /* put by scheduler job completion */
 
 	drm_sched_entity_push_job(&job->base, entity);
@@ -293,6 +297,7 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 	struct dma_fence *fence;
 	unsigned int i;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Explicit fences */
 	for (i = 0; i < job->in_fence_count; i++) {
 		if (job->in_fences[i]) {
@@ -302,6 +307,7 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 		}
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Implicit fences, max. one per BO */
 	for (i = 0; i < job->bo_count; i++) {
 		if (job->implicit_fences[i]) {
@@ -311,13 +317,16 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 		}
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Return the perfmon wait fence if any. */
 	if (job->perfcnt_fence) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		fence = job->perfcnt_fence;
 		job->perfcnt_fence = NULL;
 		return fence;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	return NULL;
 }
 

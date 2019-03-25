@@ -279,6 +279,7 @@ int panfrost_ioctl_get_perfmon_values(struct drm_device *dev, void *data,
 		if (!ncounters)
 			continue;
 
+		pr_info("%s:%i block %d ncounters %d size %ld\n", __func__, __LINE__, i, ncounters, ncounters * sizeof(u32));
 		if (copy_to_user(u64_to_user_ptr(req->values_ptrs[i]),
 				 perfmon->values[i],
 				 ncounters * sizeof(u32))) {
@@ -342,12 +343,17 @@ void panfrost_perfcnt_run_job(struct panfrost_job *job)
 	unsigned int i, j;
 	u32 cfg;
 
+	pr_info("%s:%i ctx = %px ctx->pfdev %px\n", __func__, __LINE__, ctx, ctx->pfdev);
+	pr_info("%s:%i perfcnt = %px\n", __func__, __LINE__, pfdev->perfcnt);
 	mutex_lock(&pfdev->perfcnt->cfg_lock);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
+		pr_info("%s:%i\n", __func__, __LINE__);
 		for (j = 0; j < ctx->perfmon_count; j++) {
 			u64 counters = ctx->perfmons[j]->counters[i].counters;
 			perfcnt_en[i] |= counters_u64_to_u32(counters);
 		}
+		pr_info("%s:%i\n", __func__, __LINE__);
 
 		if (perfcnt_en[i])
 			disable_perfcnt = false;
@@ -359,9 +365,11 @@ void panfrost_perfcnt_run_job(struct panfrost_job *job)
 	}
 	mutex_unlock(&pfdev->perfcnt->cfg_lock);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (!config_changed)
 		return;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/*
 	 * Always use address space 0 for now.
 	 * FIXME: this needs to be updated when we start using different
@@ -374,9 +382,11 @@ void panfrost_perfcnt_run_job(struct panfrost_job *job)
 	gpu_write(pfdev, GPU_PERFCNT_CFG,
 		  cfg | GPU_PERFCNT_CFG_MODE(GPU_PERFCNT_CFG_MODE_OFF));
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (disable_perfcnt)
 		return;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	gpu_write(pfdev, GPU_PRFCNT_JM_EN, perfcnt_en[PANFROST_JM_BLOCK]);
 	gpu_write(pfdev, GPU_PRFCNT_SHADER_EN,
 		  perfcnt_en[PANFROST_SHADER_BLOCK]);
@@ -399,6 +409,7 @@ void panfrost_perfcnt_run_job(struct panfrost_job *job)
 	if (panfrost_has_hw_issue(pfdev, HW_ISSUE_8186))
 		gpu_write(pfdev, GPU_PRFCNT_TILER_EN,
 			  perfcnt_en[PANFROST_TILER_BLOCK]);
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 static void
@@ -435,17 +446,23 @@ panfrost_perfcnt_get_job_ctx(struct panfrost_perfcnt_job_ctx *ctx)
 
 static void panfrost_perfcnt_dump_done(struct panfrost_perfcnt_job_ctx *ctx)
 {
-	struct panfrost_device *pfdev = ctx->pfdev;
+	struct panfrost_device *pfdev;
 	unsigned long flags;
 
+	pr_info("%s:%i ctx %px\n", __func__, __LINE__, ctx);
+	pfdev = ctx->pfdev;
+	pr_info("%s:%i pfdev %px\n", __func__, __LINE__, pfdev);
 	spin_lock_irqsave(&pfdev->perfcnt->ctx_lock, flags);
 	pfdev->perfcnt->dump_ctx = NULL;
 	if (pfdev->perfcnt->last_ctx == ctx)
 		pfdev->perfcnt->last_ctx = NULL;
 	spin_unlock_irqrestore(&pfdev->perfcnt->ctx_lock, flags);
 
+	pr_info("%s:%i done_fence %px\n", __func__, __LINE__, ctx->done_fence);
 	dma_fence_signal(ctx->done_fence);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	panfrost_perfcnt_release_job_ctx(ctx);
+	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 static void
@@ -525,6 +542,7 @@ panfrost_perfcnt_get_counter_vals(struct panfrost_device *pfdev,
 
 		switch (block) {
 		case PANFROST_SHADER_BLOCK:
+			pr_info("%s:%i instance %d shader_present %llx\n", __func__, __LINE__, instance, shader_present);
 			for (shaderid = 0, shadernum = 0; shaderid < 64;
 			     shaderid++) {
 				if (!(BIT_ULL(shaderid) & shader_present))
@@ -536,7 +554,8 @@ panfrost_perfcnt_get_counter_vals(struct panfrost_device *pfdev,
 				shadernum++;
 			}
 
-			if (WARN_ON(shaderid) == 64)
+			pr_info("%s:%i instance %d shader_present %llx shaderid %d shadernum %d\n", __func__, __LINE__, instance, shader_present, shaderid, shadernum);
+			if (WARN_ON(shaderid == 64))
 				return;
 
 			/* 4 shaders per core group. */
@@ -550,8 +569,10 @@ panfrost_perfcnt_get_counter_vals(struct panfrost_device *pfdev,
 			bufoffs = 256;
 			break;
 		case PANFROST_MMU_L2_BLOCK:
-			if (WARN_ON(instance >= nl2c))
+			if (WARN_ON(instance >= nl2c)) {
+				pr_info("%s:%i instance %d nl2c %d\n", __func__, __LINE__, instance, nl2c);
 				return;
+			}
 
 			bufoffs = 512 + (instance * 256);
 			break;
@@ -577,8 +598,10 @@ panfrost_perfmon_upd_counter_vals(struct panfrost_perfmon *perfmon,
 	u32 *outvals = perfmon->values[block];
 	unsigned int inidx, outidx;
 
-	if (WARN_ON(instance) >= hweight64(perfmon->counters[block].instances))
+	if (WARN_ON(instance >= hweight64(perfmon->counters[block].instances))) {
+		pr_info("%s:%i block %d instance %d instances %llx\n", __func__, __LINE__, block, instance, perfmon->counters[block].instances);
 		return;
+	}
 
 	if (!(perfmon->counters[block].instances & BIT_ULL(instance)))
 		return;
@@ -602,9 +625,9 @@ static void panfrost_perfcnt_dump_work(struct work_struct *w)
 						struct panfrost_perfcnt,
 						dumpwork);
 	struct panfrost_perfcnt_job_ctx *ctx = perfcnt->dump_ctx;
-	unsigned int block, instance, pmonidx;
+	unsigned int block, instance, pmonidx, num;
 
-	if (WARN_ON(!ctx))
+	if (!ctx)
 		return;
 
 	for (block = 0; block < PANFROST_NUM_BLOCKS; block++) {
@@ -635,7 +658,6 @@ static void panfrost_perfcnt_dump_work(struct work_struct *w)
 			num++;
 		}
 	}
-
 
 	panfrost_perfcnt_dump_done(ctx);
 }
@@ -671,6 +693,7 @@ int panfrost_perfcnt_create_job_ctx(struct panfrost_job *job,
 		return -ENOMEM;
 
 	ctx->pfdev = pfdev;
+	pr_info("%s:%i perfcnt = %px\n", __func__, __LINE__, ctx->pfdev->perfcnt);
 	refcount_set(&ctx->refcount, 1);
 
 	ctx->perfmon_count = args->perfmon_handle_count;
@@ -712,6 +735,7 @@ int panfrost_perfcnt_create_job_ctx(struct panfrost_job *job,
 
 	job->perfcnt_ctx = ctx;
 	kfree(handles);
+	pr_info("%s:%i perfcnt = %px\n", __func__, __LINE__, ctx->pfdev->perfcnt);
 	return 0;
 
 err_free_handles:
@@ -726,6 +750,10 @@ void panfrost_perfcnt_finish_job(struct panfrost_job *job, bool skip_dump)
 {
 	struct panfrost_perfcnt_job_ctx *ctx = job->perfcnt_ctx;
 
+	if (WARN_ON(!ctx))
+		return;
+
+	pr_info("%s:%i job->perfcnt_ctx %px\n", __func__, __LINE__, ctx);
 
 	job->perfcnt_ctx = NULL;
 	if (!refcount_dec_and_test(&ctx->refcount))
@@ -779,18 +807,24 @@ int panfrost_perfcnt_push_job(struct panfrost_job *job)
 	unsigned long flags;
 	int ret = 0;
 
+	pr_info("%s:%i perfcnt = %px\n", __func__, __LINE__, pfdev->perfcnt);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	spin_lock_irqsave(&pfdev->perfcnt->ctx_lock, flags);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	new_ctx = job->perfcnt_ctx;
 	prev_ctx = pfdev->perfcnt->last_ctx;
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (panfrost_perfcnt_try_reuse_last_job_ctx(job))
 		goto out;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	new_ctx->done_fence = panfrost_perfcnt_fence_create(pfdev);
 	if (IS_ERR(new_ctx->done_fence)) {
 		ret = PTR_ERR(new_ctx->done_fence);
 		goto out;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/*
 	 * The previous job has a different perfmon ctx, so we must wait for it
 	 * to be done dumping the counters before we can schedule this new job,
@@ -799,10 +833,13 @@ int panfrost_perfcnt_push_job(struct panfrost_job *job)
 	if (prev_ctx)
 		new_ctx->wait_fence = dma_fence_get(prev_ctx->done_fence);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	job->perfcnt_fence = new_ctx->wait_fence;
 	pfdev->perfcnt->last_ctx = new_ctx;
 
 out:
+	pr_info("%s:%i job %px ctx = %px ctx->pfdev %px\n", __func__, __LINE__, job, job->perfcnt_ctx, job->perfcnt_ctx->pfdev);
+	pr_info("%s:%i perfcnt = %px\n", __func__, __LINE__, job->perfcnt_ctx->pfdev->perfcnt);
 	spin_unlock_irqrestore(&pfdev->perfcnt->ctx_lock, flags);
 	return ret;
 }
@@ -816,6 +853,7 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	u64 gpuva;
 	int ret;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	if (panfrost_has_hw_feature(pfdev, HW_FEATURE_V4)) {
 		unsigned int ncoregroups;
 
@@ -848,14 +886,17 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 		       COUNTERS_PER_BLOCK * BYTES_PER_COUNTER;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	perfcnt = devm_kzalloc(pfdev->dev, sizeof(*perfcnt), GFP_KERNEL);
 	if (!perfcnt)
 		return -ENOMEM;
 
+	pr_info("%s:%i size %ld\n", __func__, __LINE__, size);
 	bo = drm_gem_shmem_create(pfdev->ddev, size);
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	perfcnt->bo = to_panfrost_bo(&bo->base);
 
 	/*
@@ -869,8 +910,13 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 		goto err_put_bo;
 
 	gpuva = perfcnt->bo->node.start << PAGE_SHIFT;
+	pr_info("%s:%i pfdev->iomem %px perfcnt %px\n", __func__, __LINE__, pfdev->iomem, perfcnt);
+	pr_info("%s:%i perfcnt->bo %px\n", __func__, __LINE__, perfcnt->bo);
 	gpu_write(pfdev, GPU_PERFCNT_BASE_LO, gpuva);
+	pr_info("%s:%i pfdev->iomem %px perfcnt %px\n", __func__, __LINE__, pfdev->iomem, perfcnt);
+	pr_info("%s:%i perfcnt->bo %px GPU VA %16llx\n", __func__, __LINE__, perfcnt->bo, gpuva);
 	gpu_write(pfdev, GPU_PERFCNT_BASE_HI, gpuva >> 32);
+	pr_info("%s:%i\n", __func__, __LINE__);
 
 	/* Disable everything. */
 	gpu_write(pfdev, GPU_PERFCNT_CFG,
@@ -883,18 +929,21 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	gpu_write(pfdev, GPU_PRFCNT_MMU_L2_EN, 0);
 	gpu_write(pfdev, GPU_PRFCNT_TILER_EN, 0);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	perfcnt->buf = drm_gem_vmap(&bo->base);
 	if (IS_ERR(perfcnt->buf)) {
 		ret = PTR_ERR(perfcnt->buf);
 		goto err_put_bo;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	INIT_WORK(&perfcnt->dumpwork, panfrost_perfcnt_dump_work);
 	mutex_init(&perfcnt->cfg_lock);
 	spin_lock_init(&perfcnt->fence_lock);
 	spin_lock_init(&perfcnt->ctx_lock);
 	perfcnt->fence_context = dma_fence_context_alloc(1);
 	pfdev->perfcnt = perfcnt;
+	pr_info("%s:%i perfcnt = %px\n", __func__, __LINE__, perfcnt);
 
 	/*
 	 * Invalidate the cache and clear the counters to start from a fresh
@@ -902,8 +951,11 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	 */
 	gpu_write(pfdev, GPU_INT_MASK, 0);
 	gpu_write(pfdev, GPU_INT_CLEAR, GPU_IRQ_CLEAN_CACHES_COMPLETED);
+
 	gpu_write(pfdev, GPU_CMD, GPU_CMD_PERFCNT_CLEAR);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	gpu_write(pfdev, GPU_CMD, GPU_CMD_CLEAN_INV_CACHES);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	ret = readl_relaxed_poll_timeout(pfdev->iomem + GPU_INT_RAWSTAT,
 					 status,
 					 status &
@@ -911,7 +963,9 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 					 100, 10000);
 	if (ret)
 		goto err_gem_vunmap;
+
 	gpu_write(pfdev, GPU_INT_MASK, GPU_IRQ_MASK_ALL);
+
 	return 0;
 
 err_gem_vunmap:
@@ -924,6 +978,8 @@ err_put_bo:
 
 void panfrost_perfcnt_fini(struct panfrost_device *pfdev)
 {
+	pr_info("%s:%i\n", __func__, __LINE__);
 	drm_gem_vunmap(&pfdev->perfcnt->bo->base.base, pfdev->perfcnt->buf);
+	pr_info("%s:%i\n", __func__, __LINE__);
 	drm_gem_object_put_unlocked(&pfdev->perfcnt->bo->base.base);
 }
