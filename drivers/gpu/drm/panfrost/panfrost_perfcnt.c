@@ -4,6 +4,7 @@
 #include <drm/drm_file.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/panfrost_drm.h>
+#include <linux/iopoll.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
@@ -53,6 +54,7 @@ struct panfrost_perfcnt_fence {
 struct panfrost_perfmon {
 	refcount_t refcnt;
 	atomic_t busycnt;
+	struct wait_queue_head wq;
 	struct drm_panfrost_block_perfcounters counters[PANFROST_NUM_BLOCKS];
 	u32 *values[PANFROST_NUM_BLOCKS];
 };
@@ -206,6 +208,7 @@ int panfrost_ioctl_create_perfmon(struct drm_device *dev, void *data,
 	}
 
 	refcount_set(&perfmon->refcnt, 1);
+	init_waitqueue_head(&perfmon->wq);
 
 	mutex_lock(&pfile->perfmon.lock);
 	ret = idr_alloc(&pfile->perfmon.idr, perfmon, 1, U32_MAX, GFP_KERNEL);
@@ -260,10 +263,14 @@ int panfrost_ioctl_get_perfmon_values(struct drm_device *dev, void *data,
 	if (!perfmon)
 		return -EINVAL;
 
-	if (atomic_read(&perfmon->busycnt)) {
+	if (!(req->flags & DRM_PANFROST_GET_PERFMON_VALS_DONT_WAIT))
+		ret = wait_event_interruptible(perfmon->wq,
+					       !atomic_read(&perfmon->busycnt));
+	else if (atomic_read(&perfmon->busycnt))
 		ret = -EBUSY;
+
+	if (ret)
 		goto out;
-	}
 
 	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
 		unsigned int ncounters;
@@ -279,6 +286,9 @@ int panfrost_ioctl_get_perfmon_values(struct drm_device *dev, void *data,
 			ret = -EFAULT;
 			break;
 		}
+
+		if (req->flags & DRM_PANFROST_GET_PERFMON_VALS_RESET)
+			memset(perfmon->values[i], 0, ncounters * sizeof(u32));
 	}
 
 out:
@@ -311,6 +321,19 @@ static bool panfrost_perfcnt_job_ctx_eq(struct panfrost_perfcnt_job_ctx *a,
 	return true;
 }
 
+static u32 counters_u64_to_u32(u64 in)
+{
+	unsigned int i;
+	u32 out = 0;
+
+	for (i = 0; i < 64; i += 4) {
+		if (GENMASK(i + 3, i) & in)
+			out |= BIT(i / 4);
+	}
+
+	return out;
+}
+
 void panfrost_perfcnt_run_job(struct panfrost_perfcnt_job_ctx *ctx)
 {
 	struct panfrost_device *pfdev = ctx->pfdev;
@@ -321,8 +344,10 @@ void panfrost_perfcnt_run_job(struct panfrost_perfcnt_job_ctx *ctx)
 
 	mutex_lock(&pfdev->perfcnt->cfg_lock);
 	for (i = 0; i < PANFROST_NUM_BLOCKS; i++) {
-		for (j = 0; j < ctx->perfmon_count; j++)
-			perfcnt_en[i] |= ctx->perfmons[j]->counters[i].counters;
+		for (j = 0; j < ctx->perfmon_count; j++) {
+			u64 counters = ctx->perfmons[j]->counters[i].counters;
+			perfcnt_en[i] |= counters_u64_to_u32(counters);
+		}
 
 		if (perfcnt_en[i])
 			disable_perfcnt = false;
@@ -382,7 +407,8 @@ panfrost_perfcnt_release_job_ctx(struct panfrost_perfcnt_job_ctx *ctx)
 	unsigned int i;
 
 	for (i = 0; i < ctx->perfmon_count; i++) {
-		atomic_dec(&ctx->perfmons[i]->busycnt);
+		if (atomic_dec_and_test(&ctx->perfmons[i]->busycnt))
+			wake_up(&ctx->perfmons[i]->wq);
 		panfrost_perfmon_put(ctx->perfmons[i]);
 	}
 
@@ -785,6 +811,7 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	struct panfrost_perfcnt *perfcnt;
 	struct drm_gem_shmem_object *bo;
 	size_t size;
+	u32 status;
 	int ret;
 
 	if (panfrost_has_hw_feature(pfdev, HW_FEATURE_V4)) {
@@ -824,8 +851,8 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 		return -ENOMEM;
 
 	bo = drm_gem_shmem_create(pfdev->ddev, size);
-	if (!bo)
-		return -ENOMEM;
+	if (IS_ERR(bo))
+		return PTR_ERR(bo);
 
 	perfcnt->bo = to_panfrost_bo(&bo->base);
 
@@ -839,16 +866,8 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	if (ret)
 		goto err_put_bo;
 
-	gpu_write(pfdev, GPU_PERFCNT_BASE_LO, pfdev->perfcnt->bo->node.start);
-	gpu_write(pfdev, GPU_PERFCNT_BASE_HI,
-		  pfdev->perfcnt->bo->node.start >> 32);
-
-	/*
-	 * Invalidate the cache and clear the counters to start from a fresh
-	 * state.
-	 */
-	gpu_write(pfdev, GPU_CMD, GPU_CMD_CLEAN_INV_CACHES);
-	gpu_write(pfdev, GPU_CMD, GPU_CMD_PERFCNT_CLEAR);
+	gpu_write(pfdev, GPU_PERFCNT_BASE_LO, perfcnt->bo->node.start);
+	gpu_write(pfdev, GPU_PERFCNT_BASE_HI, perfcnt->bo->node.start >> 32);
 
 	/* Disable everything. */
 	gpu_write(pfdev, GPU_PERFCNT_CFG,
@@ -862,9 +881,9 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	gpu_write(pfdev, GPU_PRFCNT_TILER_EN, 0);
 
 	perfcnt->buf = drm_gem_vmap(&bo->base);
-	if (IS_ERR(pfdev->perfcnt->buf)) {
-		ret = PTR_ERR(pfdev->perfcnt->buf);
-		goto err_mmu_unmap;
+	if (IS_ERR(perfcnt->buf)) {
+		ret = PTR_ERR(perfcnt->buf);
+		goto err_put_bo;
 	}
 
 	INIT_WORK(&perfcnt->dumpwork, panfrost_perfcnt_dump_work);
@@ -874,10 +893,26 @@ int panfrost_perfcnt_init(struct panfrost_device *pfdev)
 	perfcnt->fence_context = dma_fence_context_alloc(1);
 	pfdev->perfcnt = perfcnt;
 
+	/*
+	 * Invalidate the cache and clear the counters to start from a fresh
+	 * state.
+	 */
+	gpu_write(pfdev, GPU_INT_MASK, 0);
+	gpu_write(pfdev, GPU_INT_CLEAR, GPU_IRQ_CLEAN_CACHES_COMPLETED);
+	gpu_write(pfdev, GPU_CMD, GPU_CMD_PERFCNT_CLEAR);
+	gpu_write(pfdev, GPU_CMD, GPU_CMD_CLEAN_INV_CACHES);
+	ret = readl_relaxed_poll_timeout(pfdev->iomem + GPU_INT_RAWSTAT,
+					 status,
+					 status &
+					 GPU_IRQ_CLEAN_CACHES_COMPLETED,
+					 100, 10000);
+	if (ret)
+		goto err_gem_vunmap;
+	gpu_write(pfdev, GPU_INT_MASK, GPU_IRQ_MASK_ALL);
 	return 0;
 
-err_mmu_unmap:
-	panfrost_mmu_unmap(to_panfrost_bo(&bo->base));
+err_gem_vunmap:
+	drm_gem_vunmap(&pfdev->perfcnt->bo->base.base, pfdev->perfcnt->buf);
 
 err_put_bo:
 	drm_gem_object_put_unlocked(&bo->base);
@@ -887,6 +922,5 @@ err_put_bo:
 void panfrost_perfcnt_fini(struct panfrost_device *pfdev)
 {
 	drm_gem_vunmap(&pfdev->perfcnt->bo->base.base, pfdev->perfcnt->buf);
-	panfrost_mmu_unmap(pfdev->perfcnt->bo);
 	drm_gem_object_put_unlocked(&pfdev->perfcnt->bo->base.base);
 }

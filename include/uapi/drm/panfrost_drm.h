@@ -182,8 +182,12 @@ struct drm_panfrost_destroy_perfmon {
 	__u32 id;
 };
 
+#define DRM_PANFROST_GET_PERFMON_VALS_DONT_WAIT		0x1
+#define DRM_PANFROST_GET_PERFMON_VALS_RESET		0x2
+
 struct drm_panfrost_get_perfmon_values {
 	__u32 id;
+	__u32 flags;
 	__u64 values_ptrs[PANFROST_NUM_BLOCKS];
 };
 
