@@ -457,7 +457,7 @@ static int rk3399_dmcfreq_probe(struct platform_device *pdev)
 
 	data->devfreq = devm_devfreq_add_device(dev,
 					   &rk3399_devfreq_dmc_profile,
-					   DEVFREQ_GOV_SIMPLE_ONDEMAND,
+					   DEVFREQ_GOV_USERSPACE,
 					   &data->ondemand_data);
 	if (IS_ERR(data->devfreq)) {
 		ret = PTR_ERR(data->devfreq);
