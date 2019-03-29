@@ -247,6 +247,9 @@ static int vimc_comp_compare(struct device *comp, void *data)
 	const struct platform_device *pdev = to_platform_device(comp);
 	const char *name = data;
 
+	if (!pdev->dev.platform_data)
+		return 0;
+
 	return !strcmp(pdev->dev.platform_data, name);
 }
 
