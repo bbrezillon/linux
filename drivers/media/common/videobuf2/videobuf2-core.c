@@ -1176,6 +1176,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		vb->planes[plane].length = 0;
 		vb->planes[plane].m.fd = 0;
 		vb->planes[plane].data_offset = 0;
+		vb->planes[plane].dbuf_offset = 0;
 
 		/* Acquire each plane's memory */
 		mem_priv = call_ptr_memop(vb, attach_dmabuf,
@@ -1219,6 +1220,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		vb->planes[plane].length = planes[plane].length;
 		vb->planes[plane].m.fd = planes[plane].m.fd;
 		vb->planes[plane].data_offset = planes[plane].data_offset;
+		vb->planes[plane].dbuf_offset = planes[plane].dbuf_offset;
 	}
 
 	if (reacquired) {

@@ -36,7 +36,7 @@
  * @planes:	plane information (userptr/fd, length, bytesused, data_offset).
  *
  * Should contain enough information to be able to cover all the fields
- * of &struct v4l2_buffer at ``videodev2.h``.
+ * of &struct v4l2_buffer and &struct v4l2_ext_buffer at ``videodev2.h``.
  */
 struct vb2_v4l2_buffer {
 	struct vb2_buffer	vb2_buf;
@@ -72,6 +72,7 @@ int vb2_find_timestamp(const struct vb2_queue *q, u64 timestamp,
 		       unsigned int start_idx);
 
 int vb2_querybuf(struct vb2_queue *q, struct v4l2_buffer *b);
+int vb2_ext_querybuf(struct vb2_queue *q, struct v4l2_ext_buffer *b);
 
 /**
  * vb2_reqbufs() - Wrapper for vb2_core_reqbufs() that also verifies
@@ -92,6 +93,8 @@ int vb2_reqbufs(struct vb2_queue *q, struct v4l2_requestbuffers *req);
  *		&v4l2_ioctl_ops->vidioc_create_bufs handler in driver
  */
 int vb2_create_bufs(struct vb2_queue *q, struct v4l2_create_buffers *create);
+int vb2_ext_create_bufs(struct vb2_queue *q,
+			struct v4l2_ext_create_buffers *create);
 
 /**
  * vb2_prepare_buf() - Pass ownership of a buffer from userspace to the kernel
@@ -117,6 +120,8 @@ int vb2_create_bufs(struct vb2_queue *q, struct v4l2_create_buffers *create);
  */
 int vb2_prepare_buf(struct vb2_queue *q, struct media_device *mdev,
 		    struct v4l2_buffer *b);
+int vb2_ext_prepare_buf(struct vb2_queue *q, struct media_device *mdev,
+			struct v4l2_ext_buffer *b);
 
 /**
  * vb2_qbuf() - Queue a buffer from userspace
@@ -143,6 +148,8 @@ int vb2_prepare_buf(struct vb2_queue *q, struct media_device *mdev,
  */
 int vb2_qbuf(struct vb2_queue *q, struct media_device *mdev,
 	     struct v4l2_buffer *b);
+int vb2_ext_qbuf(struct vb2_queue *q, struct media_device *mdev,
+		 struct v4l2_ext_buffer *b);
 
 /**
  * vb2_expbuf() - Export a buffer as a file descriptor
@@ -154,6 +161,7 @@ int vb2_qbuf(struct vb2_queue *q, struct media_device *mdev,
  * from &v4l2_ioctl_ops->vidioc_expbuf handler in driver.
  */
 int vb2_expbuf(struct vb2_queue *q, struct v4l2_exportbuffer *eb);
+int vb2_ext_expbuf(struct vb2_queue *q, struct v4l2_ext_exportbuffer *eb);
 
 /**
  * vb2_dqbuf() - Dequeue a buffer to the userspace
@@ -180,6 +188,8 @@ int vb2_expbuf(struct vb2_queue *q, struct v4l2_exportbuffer *eb);
  * from &v4l2_ioctl_ops->vidioc_dqbuf handler in driver.
  */
 int vb2_dqbuf(struct vb2_queue *q, struct v4l2_buffer *b, bool nonblocking);
+int vb2_ext_dqbuf(struct vb2_queue *q, struct v4l2_ext_buffer *b,
+		  bool nonblocking);
 
 /**
  * vb2_streamon - start streaming
@@ -276,15 +286,27 @@ int vb2_ioctl_reqbufs(struct file *file, void *priv,
 			  struct v4l2_requestbuffers *p);
 int vb2_ioctl_create_bufs(struct file *file, void *priv,
 			  struct v4l2_create_buffers *p);
+int vb2_ioctl_ext_create_bufs(struct file *file, void *priv,
+			      struct v4l2_ext_create_buffers *p);
 int vb2_ioctl_prepare_buf(struct file *file, void *priv,
 			  struct v4l2_buffer *p);
+int vb2_ioctl_ext_prepare_buf(struct file *file, void *priv,
+			      struct v4l2_ext_buffer *p);
 int vb2_ioctl_querybuf(struct file *file, void *priv, struct v4l2_buffer *p);
+int vb2_ioctl_ext_querybuf(struct file *file, void *priv,
+			   struct v4l2_ext_buffer *p);
 int vb2_ioctl_qbuf(struct file *file, void *priv, struct v4l2_buffer *p);
+int vb2_ioctl_ext_qbuf(struct file *file, void *priv,
+		       struct v4l2_ext_buffer *p);
 int vb2_ioctl_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p);
+int vb2_ioctl_ext_dqbuf(struct file *file, void *priv,
+			struct v4l2_ext_buffer *p);
 int vb2_ioctl_streamon(struct file *file, void *priv, enum v4l2_buf_type i);
 int vb2_ioctl_streamoff(struct file *file, void *priv, enum v4l2_buf_type i);
 int vb2_ioctl_expbuf(struct file *file, void *priv,
-	struct v4l2_exportbuffer *p);
+		     struct v4l2_exportbuffer *p);
+int vb2_ioctl_ext_expbuf(struct file *file, void *priv,
+			 struct v4l2_ext_exportbuffer *p);
 
 /* struct v4l2_file_operations helpers */
 
