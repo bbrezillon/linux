@@ -164,6 +164,9 @@ struct vb2_mem_ops {
  *		pointing to this plane.
  * @m.fd:	when memory is %VB2_MEMORY_DMABUF, a userspace file
  *		descriptor associated with this plane.
+ * @start_offset: offset in the buffer where the plane starts. Usually 0,
+ *		  unless the buffer is shared by all planes of a multi-planar
+ *		  format.
  * @data_offset:	offset in the plane to the start of data; usually 0,
  *		unless there is a header in front of the data.
  *
@@ -174,6 +177,7 @@ struct vb2_plane {
 	void			*mem_priv;
 	struct dma_buf		*dbuf;
 	unsigned int		dbuf_mapped;
+	unsigned int		dbuf_attachcnt;
 	unsigned int		bytesused;
 	unsigned int		length;
 	unsigned int		min_length;
@@ -182,6 +186,7 @@ struct vb2_plane {
 		unsigned long	userptr;
 		int		fd;
 	} m;
+	unsigned int		start_offset;
 	unsigned int		data_offset;
 };
 
@@ -441,7 +446,8 @@ struct vb2_ops {
  *			struct vb2_buffer.
  *			For V4L2 this is a &struct vb2_v4l2_buffer.
  * @fill_user_buffer:	given a &vb2_buffer fill in the userspace structure.
- *			For V4L2 this is a &struct v4l2_buffer.
+ *			For V4L2 this is a &struct v4l2_buffer or
+ *			&struct v4l2_ext_buffer.
  * @fill_vb2_buffer:	given a userspace structure, fill in the &vb2_buffer.
  *			If the userspace structure is invalid, then this op
  *			will return an error.

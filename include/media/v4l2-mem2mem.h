@@ -204,6 +204,8 @@ int v4l2_m2m_reqbufs(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
  */
 int v4l2_m2m_querybuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 		      struct v4l2_buffer *buf);
+int v4l2_m2m_ext_querybuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+			  struct v4l2_ext_buffer *buf);
 
 /**
  * v4l2_m2m_qbuf() - enqueue a source or destination buffer, depending on
@@ -215,6 +217,8 @@ int v4l2_m2m_querybuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
  */
 int v4l2_m2m_qbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 		  struct v4l2_buffer *buf);
+int v4l2_m2m_ext_qbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+		      struct v4l2_ext_buffer *buf);
 
 /**
  * v4l2_m2m_dqbuf() - dequeue a source or destination buffer, depending on
@@ -226,6 +230,8 @@ int v4l2_m2m_qbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
  */
 int v4l2_m2m_dqbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 		   struct v4l2_buffer *buf);
+int v4l2_m2m_ext_dqbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+		       struct v4l2_ext_buffer *buf);
 
 /**
  * v4l2_m2m_prepare_buf() - prepare a source or destination buffer, depending on
@@ -237,6 +243,8 @@ int v4l2_m2m_dqbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
  */
 int v4l2_m2m_prepare_buf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 			 struct v4l2_buffer *buf);
+int v4l2_m2m_ext_prepare_buf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+			     struct v4l2_ext_buffer *buf);
 
 /**
  * v4l2_m2m_create_bufs() - create a source or destination buffer, depending
@@ -248,6 +256,8 @@ int v4l2_m2m_prepare_buf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
  */
 int v4l2_m2m_create_bufs(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 			 struct v4l2_create_buffers *create);
+int v4l2_m2m_ext_create_bufs(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+			     struct v4l2_ext_create_buffers *create);
 
 /**
  * v4l2_m2m_expbuf() - export a source or destination buffer, depending on
@@ -259,6 +269,8 @@ int v4l2_m2m_create_bufs(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
  */
 int v4l2_m2m_expbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 		   struct v4l2_exportbuffer *eb);
+int v4l2_m2m_ext_expbuf(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+			struct v4l2_ext_exportbuffer *eb);
 
 /**
  * v4l2_m2m_streamon() - turn on streaming for a video queue
@@ -658,16 +670,28 @@ int v4l2_m2m_ioctl_reqbufs(struct file *file, void *priv,
 				struct v4l2_requestbuffers *rb);
 int v4l2_m2m_ioctl_create_bufs(struct file *file, void *fh,
 				struct v4l2_create_buffers *create);
+int v4l2_m2m_ioctl_ext_create_bufs(struct file *file, void *fh,
+				   struct v4l2_ext_create_buffers *create);
 int v4l2_m2m_ioctl_querybuf(struct file *file, void *fh,
 				struct v4l2_buffer *buf);
+int v4l2_m2m_ioctl_ext_querybuf(struct file *file, void *fh,
+				struct v4l2_ext_buffer *buf);
 int v4l2_m2m_ioctl_expbuf(struct file *file, void *fh,
 				struct v4l2_exportbuffer *eb);
+int v4l2_m2m_ioctl_ext_expbuf(struct file *file, void *fh,
+			      struct v4l2_ext_exportbuffer *eb);
 int v4l2_m2m_ioctl_qbuf(struct file *file, void *fh,
 				struct v4l2_buffer *buf);
+int v4l2_m2m_ioctl_ext_qbuf(struct file *file, void *fh,
+			    struct v4l2_ext_buffer *buf);
 int v4l2_m2m_ioctl_dqbuf(struct file *file, void *fh,
 				struct v4l2_buffer *buf);
+int v4l2_m2m_ioctl_ext_dqbuf(struct file *file, void *fh,
+			     struct v4l2_ext_buffer *buf);
 int v4l2_m2m_ioctl_prepare_buf(struct file *file, void *fh,
 			       struct v4l2_buffer *buf);
+int v4l2_m2m_ioctl_ext_prepare_buf(struct file *file, void *fh,
+				   struct v4l2_ext_buffer *buf);
 int v4l2_m2m_ioctl_streamon(struct file *file, void *fh,
 				enum v4l2_buf_type type);
 int v4l2_m2m_ioctl_streamoff(struct file *file, void *fh,
