@@ -620,7 +620,8 @@ static void v4l_print_ext_exportbuffer(const void *arg, bool write_only)
 		prt_names(p->type, v4l2_type_names), p->index, p->first_plane,
 		p->num_planes, p->flags);
 	for (i = p->first_plane; i < p->first_plane + p->num_planes; ++i)
-		pr_debug("plane %u: fd=%d\n", i, p->fds[i]);
+		pr_debug("plane %u: fd=%d offset=%u\n", i, p->dmabufs[i].fd,
+			 p->dmabufs[i].offset);
 }
 
 static void v4l_print_create_buffers(const void *arg, bool write_only)
@@ -3445,7 +3446,16 @@ static int v4l_expbuf(const struct v4l2_ioctl_ops *ops, struct file *file,
 	if (ret)
 		return ret;
 
-	b->fd = eb.fds[b->plane];
+	if (eb.dmabufs[b->plane].offset) {
+		struct dma_buf *dmabuf;
+
+		dmabuf = dma_buf_get(eb.dmabufs[b->plane].fd);
+		dma_buf_put(dmabuf);
+		dma_buf_put(dmabuf);
+		return -EINVAL;
+	}
+
+	b->fd = eb.dmabufs[b->plane].fd;
 	return 0;
 }
 
@@ -3476,7 +3486,8 @@ static int v4l_ext_expbuf(const struct v4l2_ioctl_ops *ops,
 		if (ret)
 			goto err_put_dmabufs;
 
-		eb->fds[i] = b.fd;
+		eb->dmabufs[i].offset = 0;
+		eb->dmabufs[i].fd = b.fd;
 	}
 
 	return 0;
@@ -3485,7 +3496,7 @@ err_put_dmabufs:
 	for (i = eb->first_plane; i < eb->first_plane + eb->num_planes; i++) {
 		struct dma_buf *dmabuf;
 
-		if (eb->fds[i] <= 0)
+		if (eb->dmabufs[i].fd <= 0)
 			break;
 
 		/*
@@ -3494,7 +3505,7 @@ err_put_dmabufs:
 		 * calling dma_buf_get().
 		 * FIXME: not entirely sure this works correctly.
 		 */
-		dmabuf = dma_buf_get(eb->fds[i]);
+		dmabuf = dma_buf_get(eb->dmabufs[i].fd);
 		dma_buf_put(dmabuf);
 		dma_buf_put(dmabuf);
 	}

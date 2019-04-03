@@ -821,7 +821,8 @@ int vb2_ext_expbuf(struct vb2_queue *q, struct v4l2_ext_exportbuffer *eb)
 	int ret;
 
 	for (i = eb->first_plane; i < eb->first_plane + eb->num_planes; i++) {
-		ret = vb2_core_expbuf(q, &eb->fds[i], eb->type, eb->index,
+		eb->dmabufs[i].offset = 0;
+		ret = vb2_core_expbuf(q, &eb->dmabufs[i].fd, eb->type, eb->index,
 				      i, eb->flags);
 		if (ret)
 			goto err_put_dmabufs;
@@ -837,7 +838,7 @@ err_put_dmabufs:
 		 * FIXME: Find a better way to close the FD returned by
 		 * dma_buf_fb().
 		 */
-		dmabuf = dma_buf_get(eb->fds[i - 1]);
+		dmabuf = dma_buf_get(eb->dmabufs[i - 1].fd);
 		dma_buf_put(dmabuf);
 		dma_buf_put(dmabuf);
 	}

@@ -901,11 +901,16 @@ EXPORT_SYMBOL_GPL(vb2_core_create_bufs);
 
 void *vb2_plane_vaddr(struct vb2_buffer *vb, unsigned int plane_no)
 {
+	void *vaddr;
+
 	if (plane_no >= vb->num_planes || !vb->planes[plane_no].mem_priv)
 		return NULL;
 
-	return call_ptr_memop(vb, vaddr, vb->planes[plane_no].mem_priv);
+	vaddr = call_ptr_memop(vb, vaddr, vb->planes[plane_no].mem_priv);
+	if (vb->planes[plane_no].dbuf)
+		vaddr += vb->planes[plane_no].dbuf_offset;
 
+	return vaddr;
 }
 EXPORT_SYMBOL_GPL(vb2_plane_vaddr);
 
