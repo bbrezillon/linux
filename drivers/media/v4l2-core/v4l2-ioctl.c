@@ -596,10 +596,9 @@ static void v4l_print_ext_buffer(const void *arg, bool write_only)
 
 	for (i = 0; i < p->num_planes; ++i) {
 		plane = &p->planes[i];
-		pr_debug("plane %d: bytesused=%d, start_offset=0x%08x, data_offset=0x%08x, offset/userptr=0x%llx, length=%d\n",
-			 i, plane->bytesused, plane->start_offset,
-			 plane->data_offset, plane->m.userptr,
-			 plane->length);
+		pr_debug("plane %d: bytesused=%d, data_offset=0x%08x, offset/userptr=0x%llx, length=%d\n",
+			 i, plane->bytesused, plane->data_offset,
+			 plane->m.userptr, plane->length);
 	}
 }
 
@@ -1392,9 +1391,16 @@ int v4l2_ext_buffer_to_buffer(const struct v4l2_ext_buffer *e,
 
 		b->length = e->num_planes;
 		for (i = 0; i < e->num_planes; i++) {
+			if (b->memory == V4L2_MEMORY_DMABUF) {
+				if (e->planes[i].m.dmabuf.offset)
+					return -EINVAL;
+
+				b->m.planes[i].m.fd = e->planes[i].m.dmabuf.fd;
+			} else {
+				b->m.planes[i].m.userptr = e->planes[i].m.userptr;
+			}
 			b->m.planes[i].length = e->planes[i].length;
 			b->m.planes[i].bytesused = e->planes[i].bytesused;
-			b->m.planes[i].m.userptr = e->planes[i].m.userptr;
 			b->m.planes[i].data_offset = e->planes[i].data_offset;
 			memset(b->m.planes[i].reserved, 0,
 			       sizeof(b->m.planes[i].reserved));
@@ -1403,7 +1409,14 @@ int v4l2_ext_buffer_to_buffer(const struct v4l2_ext_buffer *e,
 		b->type = e->type;
 		b->bytesused = e->planes[0].bytesused;
 		b->length = e->planes[0].length;
-		b->m.userptr = e->planes[0].m.userptr;
+		if (b->memory == V4L2_MEMORY_DMABUF) {
+			if (e->planes[0].m.dmabuf.offset)
+				return -EINVAL;
+
+			b->m.fd = e->planes[0].m.dmabuf.fd;
+		} else {
+			b->m.userptr = e->planes[0].m.userptr;
+		}
 	}
 
 	return 0;
@@ -1436,9 +1449,14 @@ int v4l2_buffer_to_ext_buffer(const struct v4l2_buffer *b,
 
 		e->num_planes = b->length;
 		for (i = 0; i < e->num_planes; i++) {
+			if (b->memory == V4L2_MEMORY_DMABUF) {
+				e->planes[i].m.dmabuf.fd = b->m.planes[i].m.fd;
+				e->planes[i].m.dmabuf.offset = 0;
+			} else {
+				e->planes[i].m.userptr = b->m.planes[i].m.userptr;
+			}
 			e->planes[i].length = b->m.planes[i].length;
 			e->planes[i].bytesused = b->m.planes[i].bytesused;
-			e->planes[i].m.userptr = b->m.planes[i].m.userptr;
 			e->planes[i].data_offset = b->m.planes[i].data_offset;
 			memset(e->planes[i].reserved, 0,
 			       sizeof(e->planes[i].reserved));
@@ -1448,6 +1466,12 @@ int v4l2_buffer_to_ext_buffer(const struct v4l2_buffer *b,
 		e->num_planes = 1;
 		e->planes[0].bytesused = b->bytesused;
 		e->planes[0].length = b->length;
+		if (b->memory == V4L2_MEMORY_DMABUF) {
+			e->planes[0].m.dmabuf.fd = b->m.fd;
+			e->planes[0].m.dmabuf.offset = 0;
+		} else {
+			e->planes[0].m.userptr = b->m.userptr;
+		}
 		e->planes[0].m.userptr = b->m.userptr;
 		e->planes[0].data_offset = 0;
 	}

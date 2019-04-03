@@ -938,11 +938,11 @@ struct v4l2_plane {
  *		passed to mmap() called on the video node)
  * @userptr: when memory is V4L2_MEMORY_USERPTR, a userspace pointer pointing
  *	     to this plane
- * @fd: when memory is V4L2_MEMORY_DMABUF, a userspace file descriptor
- *	associated with this plane
- * @start_offset: where the plane starts inside a buffer. All planes might
- *		  share the same buffer object. In this case we need to know
- *		  where the plane start inside this buffer.
+ * @dmabuf.fd: when memory is V4L2_MEMORY_DMABUF, a userspace file descriptor
+ *	       associated with this plane
+ * @dmabuf.offset: where the plane starts inside the DMABUF buffer. All planes
+ *		   might share the same buffer object. In this case we need to
+ *		   know where the plane start inside this buffer.
  * @data_offset: offset in the plane to the start of data; usually 0, unless
  *		 there is a header in front of the data. data_offset is
  *		 relative to start_offset, so absolute data_offset is actually
@@ -962,9 +962,11 @@ struct v4l2_ext_plane {
 	union {
 		__u32 mem_offset;
 		__u64 userptr;
-		__s32 fd;
+		struct {
+			__s32 fd;
+			__u32 offset;
+		} dmabuf;
 	} m;
-	__u32 start_offset;
 	__u32 data_offset;
 	__u32 reserved[10];
 };
