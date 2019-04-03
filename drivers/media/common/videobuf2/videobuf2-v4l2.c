@@ -184,6 +184,7 @@ static int vb2_fill_vb2_v4l2_buffer(struct vb2_buffer *vb,
 		for (plane = 0; plane < vb->num_planes; ++plane) {
 			planes[plane].m.fd = b->planes[plane].m.fd;
 			planes[plane].length = b->planes[plane].length;
+			planes[plane].start_offset = b->planes[plane].start_offset;
 		}
 		break;
 	default:
@@ -226,7 +227,6 @@ static int vb2_fill_vb2_v4l2_buffer(struct vb2_buffer *vb,
 						  psrc->bytesused :
 						  pdst->length;
 			pdst->data_offset = psrc->data_offset;
-			pdst->start_offset = psrc->start_offset;
 		}
 	}
 
