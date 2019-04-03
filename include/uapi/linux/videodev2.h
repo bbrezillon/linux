@@ -1150,8 +1150,11 @@ struct v4l2_exportbuffer {
  * @first_plane: first plane to export. Most likely set to 0
  * @num_planes: number of planes to export. Most set to the number of planes
  *		attached to the buffer
- * @fds: file descriptors associated with DMABUF (set by driver). Note that all
- *	 planes might share the same buffer and then be returned the same FD
+ * @dmabufs: DMABUF array (one entry per plane)
+ * @dmabufs.fd: FD pointing to the DMABUF attached to a plane. Note that all
+ *		planes might share the same buffer and then be returned the
+ *		same FD
+ * @dmabufs.offset: offset in the DMABUF where the plane starts
  *
  * Contains data used for exporting a video buffer as DMABUF file descriptor.
  * The buffer is identified by a 'cookie' returned by VIDIOC_QUERYBUF
@@ -1164,7 +1167,10 @@ struct v4l2_ext_exportbuffer {
 	__u32 flags;
 	__u32 first_plane;
 	__u32 num_planes;
-	__s32 fds[VIDEO_MAX_PLANES];
+	struct {
+		__s32 fd;
+		__u32 offset;
+	} dmabufs[VIDEO_MAX_PLANES];
 	__u32 reserved;
 };
 
