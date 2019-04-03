@@ -106,6 +106,20 @@ static void kunmap_udmabuf(struct dma_buf *buf, unsigned long page_num,
 	kunmap(vaddr);
 }
 
+static void *vmap_udmabuf(struct dma_buf *buf)
+{
+	struct udmabuf *ubuf = buf->priv;
+
+	return vm_map_ram(ubuf->pages, ubuf->pagecount, -1, PAGE_KERNEL);
+}
+
+static void vunmap_udmabuf(struct dma_buf *buf, void *vaddr)
+{
+	struct udmabuf *ubuf = buf->priv;
+
+	vm_unmap_ram(vaddr, ubuf->pagecount);
+}
+
 static const struct dma_buf_ops udmabuf_ops = {
 	.map_dma_buf	  = map_udmabuf,
 	.unmap_dma_buf	  = unmap_udmabuf,
@@ -113,6 +127,8 @@ static const struct dma_buf_ops udmabuf_ops = {
 	.map		  = kmap_udmabuf,
 	.unmap		  = kunmap_udmabuf,
 	.mmap		  = mmap_udmabuf,
+	.vmap		  = vmap_udmabuf,
+	.vunmap		  = vunmap_udmabuf,
 };
 
 #define SEALS_WANTED (F_SEAL_SHRINK)
