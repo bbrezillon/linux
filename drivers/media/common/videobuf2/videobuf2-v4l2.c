@@ -182,9 +182,9 @@ static int vb2_fill_vb2_v4l2_buffer(struct vb2_buffer *vb,
 		break;
 	case VB2_MEMORY_DMABUF:
 		for (plane = 0; plane < vb->num_planes; ++plane) {
-			planes[plane].m.fd = b->planes[plane].m.fd;
+			planes[plane].m.fd = b->planes[plane].m.dmabuf.fd;
+			planes[plane].dbuf_offset = b->planes[plane].m.dmabuf.offset;
 			planes[plane].length = b->planes[plane].length;
-			planes[plane].start_offset = b->planes[plane].start_offset;
 		}
 		break;
 	default:
@@ -428,14 +428,15 @@ static void __fill_v4l2_buffer(struct vb2_buffer *vb, void *pb)
 
 		pdst->bytesused = psrc->bytesused;
 		pdst->length = psrc->length;
-		if (q->memory == VB2_MEMORY_MMAP)
+		if (q->memory == VB2_MEMORY_MMAP) {
 			pdst->m.mem_offset = psrc->m.offset;
-		else if (q->memory == VB2_MEMORY_USERPTR)
+		} else if (q->memory == VB2_MEMORY_USERPTR) {
 			pdst->m.userptr = psrc->m.userptr;
-		else if (q->memory == VB2_MEMORY_DMABUF)
-			pdst->m.fd = psrc->m.fd;
+		} else if (q->memory == VB2_MEMORY_DMABUF) {
+			pdst->m.dmabuf.fd = psrc->m.fd;
+			pdst->m.dmabuf.offset = psrc->dbuf_offset;
+		}
 		pdst->data_offset = psrc->data_offset;
-		pdst->start_offset = psrc->start_offset;
 		memset(pdst->reserved, 0, sizeof(pdst->reserved));
 	}
 
@@ -512,7 +513,6 @@ static int __fill_vb2_buffer(struct vb2_buffer *vb, struct vb2_plane *planes)
 		}
 		planes[plane].bytesused = vbuf->planes[plane].bytesused;
 		planes[plane].data_offset = vbuf->planes[plane].data_offset;
-		planes[plane].start_offset = vbuf->planes[plane].start_offset;
 	}
 	return 0;
 }

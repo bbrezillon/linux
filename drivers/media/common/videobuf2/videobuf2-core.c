@@ -1165,19 +1165,19 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		dbdevs[plane] = q->alloc_devs[plane] ? : q->dev;
 		/* use DMABUF size if length is not provided */
 		if (planes[plane].length == 0) {
-			if (planes[plane].start_offset >= dbuf->size) {
-				dprintk(1, "invalid dmabuf length %u or start_offset %u for plane %d\n",
+			if (planes[plane].dbuf_offset >= dbuf->size) {
+				dprintk(1, "invalid dmabuf length %u or dbuf_offset %u for plane %d\n",
 					planes[plane].length,
-					planes[plane].start_offset, plane);
+					planes[plane].dbuf_offset, plane);
 				ret = -EINVAL;
 				goto err;
 			}
 
 			dbufsz[plane] = dbuf->size -
-					planes[plane].start_offset;
+					planes[plane].dbuf_offset;
 		}
 
-		dbufsz[plane] += planes[plane].start_offset;
+		dbufsz[plane] += planes[plane].dbuf_offset;
 
 		for (i = 0; i < plane; ++i) {
 			if (dbuf != dbufs[i] || dbdevs[plane] != dbdevs[i])
@@ -1196,7 +1196,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		/* use DMABUF size if length is not provided */
 		if (planes[plane].length == 0)
 			planes[plane].length = dbufs[plane]->size -
-					       planes[plane].start_offset;
+					       planes[plane].dbuf_offset;
 
 		if (planes[plane].length < vb->planes[plane].min_length) {
 			dprintk(1, "invalid dmabuf length %u for plane %d, minimum length %u\n",
@@ -1209,7 +1209,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		/* Skip the plane if already verified */
 		if (dbufs[plane] == vb->planes[plane].dbuf &&
 			vb->planes[plane].length == planes[plane].length &&
-			vb->planes[plane].start_offset == planes[plane].start_offset) {
+			vb->planes[plane].dbuf_offset == planes[plane].dbuf_offset) {
 			dma_buf_put(dbufs[plane]);
 			dbufs[plane] = NULL;
 			continue;
@@ -1229,7 +1229,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		vb->planes[plane].length = 0;
 		vb->planes[plane].m.fd = 0;
 		vb->planes[plane].data_offset = 0;
-		vb->planes[plane].start_offset = 0;
+		vb->planes[plane].dbuf_offset = 0;
 
 		if (share_mem_priv[plane] != -1) {
 			mem_priv = vb->planes[share_mem_priv[plane]].mem_priv;
@@ -1284,7 +1284,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		vb->planes[plane].length = planes[plane].length;
 		vb->planes[plane].m.fd = planes[plane].m.fd;
 		vb->planes[plane].data_offset = planes[plane].data_offset;
-		vb->planes[plane].start_offset = planes[plane].start_offset;
+		vb->planes[plane].dbuf_offset = planes[plane].dbuf_offset;
 	}
 
 	if (reacquired) {
