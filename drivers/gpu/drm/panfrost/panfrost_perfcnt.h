@@ -18,7 +18,12 @@ struct panfrost_perfcnt_job_ctx;
 #define hw_perfcnt_t760	NO_PERFCNT
 #define hw_perfcnt_t820	NO_PERFCNT
 #define hw_perfcnt_t830	NO_PERFCNT
-#define hw_perfcnt_t860	NO_PERFCNT
+#define hw_perfcnt_t860	PERFCNT(GENMASK_ULL(63, 4),				\
+				GENMASK_ULL(63, 59) | GENMASK_ULL(53, 3),	\
+				GENMASK_ULL(63, 46) | GENMASK_ULL(44, 30) |	\
+				GENMASK_ULL(16, 12) | GENMASK_ULL(9, 4),	\
+				GENMASK_ULL(31, 28) | GENMASK_ULL(26, 20) |	\
+				GENMASK_ULL(18, 12) | GENMASK_ULL(10, 4))
 #define hw_perfcnt_t880	NO_PERFCNT
 #define hw_perfcnt_g76	NO_PERFCNT
 #define hw_perfcnt_g71	NO_PERFCNT
