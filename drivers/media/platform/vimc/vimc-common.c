@@ -278,14 +278,14 @@ static int vimc_get_mbus_format(struct media_pad *pad,
 							 entity);
 		struct vimc_ent_device *ved = video_get_drvdata(vdev);
 		const struct vimc_pix_map *vpix;
-		struct v4l2_pix_format vdev_fmt;
+		struct v4l2_ext_pix_format vdev_fmt;
 
 		if (!ved->vdev_get_format)
 			return -ENOIOCTLCMD;
 
 		ved->vdev_get_format(ved, &vdev_fmt);
 		vpix = vimc_pix_map_by_pixelformat(vdev_fmt.pixelformat);
-		v4l2_fill_mbus_format(&fmt->format, &vdev_fmt, vpix->code);
+		v4l2_fill_mbus_format_ext(&fmt->format, &vdev_fmt, vpix->code);
 	} else {
 		return -EINVAL;
 	}
