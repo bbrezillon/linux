@@ -318,59 +318,57 @@ static enum tpg_pixel_aspect vivid_get_pixel_aspect(const struct vivid_dev *dev)
 }
 
 int vivid_g_fmt_vid_out(struct file *file, void *priv,
-					struct v4l2_format *f)
+			struct v4l2_ext_pix_format *f)
 {
 	struct vivid_dev *dev = video_drvdata(file);
-	struct v4l2_pix_format_mplane *mp = &f->fmt.pix_mp;
 	const struct vivid_fmt *fmt = dev->fmt_out;
 	unsigned p;
 
-	mp->width        = dev->fmt_out_rect.width;
-	mp->height       = dev->fmt_out_rect.height;
-	mp->field        = dev->field_out;
-	mp->pixelformat  = fmt->fourcc;
-	mp->colorspace   = dev->colorspace_out;
-	mp->xfer_func    = dev->xfer_func_out;
-	mp->ycbcr_enc    = dev->ycbcr_enc_out;
-	mp->quantization = dev->quantization_out;
-	mp->num_planes = fmt->buffers;
-	for (p = 0; p < mp->num_planes; p++) {
-		mp->plane_fmt[p].bytesperline = dev->bytesperline_out[p];
-		mp->plane_fmt[p].sizeimage =
-			mp->plane_fmt[p].bytesperline * mp->height +
+	f->width        = dev->fmt_out_rect.width;
+	f->height       = dev->fmt_out_rect.height;
+	f->field        = dev->field_out;
+	f->pixelformat  = fmt->fourcc;
+	f->colorspace   = dev->colorspace_out;
+	f->xfer_func    = dev->xfer_func_out;
+	f->ycbcr_enc    = dev->ycbcr_enc_out;
+	f->quantization = dev->quantization_out;
+	f->num_planes = fmt->buffers;
+	for (p = 0; p < f->num_planes; p++) {
+		f->plane_fmt[p].bytesperline = dev->bytesperline_out[p];
+		f->plane_fmt[p].sizeimage =
+			f->plane_fmt[p].bytesperline * f->height +
 			fmt->data_offset[p];
 	}
 	for (p = fmt->buffers; p < fmt->planes; p++) {
 		unsigned stride = dev->bytesperline_out[p];
 
-		mp->plane_fmt[0].sizeimage +=
-			(stride * mp->height) / fmt->vdownsampling[p];
+		f->plane_fmt[0].sizeimage +=
+			(stride * f->height) / fmt->vdownsampling[p];
 	}
 	return 0;
 }
 
 int vivid_try_fmt_vid_out(struct file *file, void *priv,
-			struct v4l2_format *f)
+			  struct v4l2_ext_pix_format *f)
 {
 	struct vivid_dev *dev = video_drvdata(file);
+	struct v4l2_plane_ext_pix_format *pfmt = f->plane_fmt;
 	struct v4l2_bt_timings *bt = &dev->dv_timings_out.bt;
-	struct v4l2_pix_format_mplane *mp = &f->fmt.pix_mp;
-	struct v4l2_plane_pix_format *pfmt = mp->plane_fmt;
 	const struct vivid_fmt *fmt;
 	unsigned bytesperline, max_bpl;
 	unsigned factor = 1;
 	unsigned w, h;
 	unsigned p;
 
-	fmt = vivid_get_format(dev, mp->pixelformat);
+	fmt = vivid_get_format(dev, f->pixelformat);
 	if (!fmt) {
 		dprintk(dev, 1, "Fourcc format (0x%08x) unknown.\n",
-			mp->pixelformat);
-		mp->pixelformat = V4L2_PIX_FMT_YUYV;
-		fmt = vivid_get_format(dev, mp->pixelformat);
+			f->pixelformat);
+		f->pixelformat = V4L2_PIX_FMT_YUYV;
+		fmt = vivid_get_format(dev, f->pixelformat);
 	}
 
-	mp->field = vivid_field_out(dev, mp->field);
+	f->field = vivid_field_out(dev, f->field);
 	if (vivid_is_svid_out(dev)) {
 		w = 720;
 		h = (dev->std_out & V4L2_STD_525_60) ? 480 : 576;
@@ -378,13 +376,13 @@ int vivid_try_fmt_vid_out(struct file *file, void *priv,
 		w = dev->sink_rect.width;
 		h = dev->sink_rect.height;
 	}
-	if (V4L2_FIELD_HAS_T_OR_B(mp->field))
+	if (V4L2_FIELD_HAS_T_OR_B(f->field))
 		factor = 2;
 	if (!dev->has_scaler_out && !dev->has_crop_out && !dev->has_compose_out) {
-		mp->width = w;
-		mp->height = h / factor;
+		f->width = w;
+		f->height = h / factor;
 	} else {
-		struct v4l2_rect r = { 0, 0, mp->width, mp->height * factor };
+		struct v4l2_rect r = { 0, 0, f->width, f->height * factor };
 
 		v4l2_rect_set_min_size(&r, &vivid_min_rect);
 		v4l2_rect_set_max_size(&r, &vivid_max_rect);
@@ -397,16 +395,16 @@ int vivid_try_fmt_vid_out(struct file *file, void *priv,
 		} else if (!dev->has_scaler_out && !dev->has_compose_out) {
 			v4l2_rect_set_min_size(&r, &dev->sink_rect);
 		}
-		mp->width = r.width;
-		mp->height = r.height / factor;
+		f->width = r.width;
+		f->height = r.height / factor;
 	}
 
 	/* This driver supports custom bytesperline values */
 
-	mp->num_planes = fmt->buffers;
+	f->num_planes = fmt->buffers;
 	for (p = 0; p < fmt->buffers; p++) {
 		/* Calculate the minimum supported bytesperline value */
-		bytesperline = (mp->width * fmt->bit_depth[p]) >> 3;
+		bytesperline = (f->width * fmt->bit_depth[p]) >> 3;
 		/* Calculate the maximum supported bytesperline value */
 		max_bpl = (MAX_ZOOM * MAX_WIDTH * fmt->bit_depth[p]) >> 3;
 
@@ -415,42 +413,39 @@ int vivid_try_fmt_vid_out(struct file *file, void *priv,
 		if (pfmt[p].bytesperline < bytesperline)
 			pfmt[p].bytesperline = bytesperline;
 
-		pfmt[p].sizeimage = (pfmt[p].bytesperline * mp->height) /
+		pfmt[p].sizeimage = (pfmt[p].bytesperline * f->height) /
 				fmt->vdownsampling[p] + fmt->data_offset[p];
 
-		memset(pfmt[p].reserved, 0, sizeof(pfmt[p].reserved));
 	}
 	for (p = fmt->buffers; p < fmt->planes; p++)
-		pfmt[0].sizeimage += (pfmt[0].bytesperline * mp->height *
+		pfmt[0].sizeimage += (pfmt[0].bytesperline * f->height *
 			(fmt->bit_depth[p] / fmt->vdownsampling[p])) /
 			(fmt->bit_depth[0] / fmt->vdownsampling[0]);
 
-	mp->xfer_func = V4L2_XFER_FUNC_DEFAULT;
-	mp->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-	mp->quantization = V4L2_QUANTIZATION_DEFAULT;
+	f->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	f->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	f->quantization = V4L2_QUANTIZATION_DEFAULT;
 	if (vivid_is_svid_out(dev)) {
-		mp->colorspace = V4L2_COLORSPACE_SMPTE170M;
+		f->colorspace = V4L2_COLORSPACE_SMPTE170M;
 	} else if (dev->dvi_d_out || !(bt->flags & V4L2_DV_FL_IS_CE_VIDEO)) {
-		mp->colorspace = V4L2_COLORSPACE_SRGB;
+		f->colorspace = V4L2_COLORSPACE_SRGB;
 		if (dev->dvi_d_out)
-			mp->quantization = V4L2_QUANTIZATION_LIM_RANGE;
+			f->quantization = V4L2_QUANTIZATION_LIM_RANGE;
 	} else if (bt->width == 720 && bt->height <= 576) {
-		mp->colorspace = V4L2_COLORSPACE_SMPTE170M;
-	} else if (mp->colorspace != V4L2_COLORSPACE_SMPTE170M &&
-		   mp->colorspace != V4L2_COLORSPACE_REC709 &&
-		   mp->colorspace != V4L2_COLORSPACE_OPRGB &&
-		   mp->colorspace != V4L2_COLORSPACE_BT2020 &&
-		   mp->colorspace != V4L2_COLORSPACE_SRGB) {
-		mp->colorspace = V4L2_COLORSPACE_REC709;
+		f->colorspace = V4L2_COLORSPACE_SMPTE170M;
+	} else if (f->colorspace != V4L2_COLORSPACE_SMPTE170M &&
+		   f->colorspace != V4L2_COLORSPACE_REC709 &&
+		   f->colorspace != V4L2_COLORSPACE_OPRGB &&
+		   f->colorspace != V4L2_COLORSPACE_BT2020 &&
+		   f->colorspace != V4L2_COLORSPACE_SRGB) {
+		f->colorspace = V4L2_COLORSPACE_REC709;
 	}
-	memset(mp->reserved, 0, sizeof(mp->reserved));
 	return 0;
 }
 
 int vivid_s_fmt_vid_out(struct file *file, void *priv,
-					struct v4l2_format *f)
+			struct v4l2_ext_pix_format *f)
 {
-	struct v4l2_pix_format_mplane *mp = &f->fmt.pix_mp;
 	struct vivid_dev *dev = video_drvdata(file);
 	struct v4l2_rect *crop = &dev->crop_out;
 	struct v4l2_rect *compose = &dev->compose_out;
@@ -464,10 +459,10 @@ int vivid_s_fmt_vid_out(struct file *file, void *priv,
 
 	if (vb2_is_busy(q) &&
 	    (vivid_is_svid_out(dev) ||
-	     mp->width != dev->fmt_out_rect.width ||
-	     mp->height != dev->fmt_out_rect.height ||
-	     mp->pixelformat != dev->fmt_out->fourcc ||
-	     mp->field != dev->field_out)) {
+	     f->width != dev->fmt_out_rect.width ||
+	     f->height != dev->fmt_out_rect.height ||
+	     f->pixelformat != dev->fmt_out->fourcc ||
+	     f->field != dev->field_out)) {
 		dprintk(dev, 1, "%s device busy\n", __func__);
 		return -EBUSY;
 	}
@@ -480,12 +475,12 @@ int vivid_s_fmt_vid_out(struct file *file, void *priv,
 	if (vb2_is_busy(q))
 		goto set_colorspace;
 
-	dev->fmt_out = vivid_get_format(dev, mp->pixelformat);
-	if (V4L2_FIELD_HAS_T_OR_B(mp->field))
+	dev->fmt_out = vivid_get_format(dev, f->pixelformat);
+	if (V4L2_FIELD_HAS_T_OR_B(f->field))
 		factor = 2;
 
 	if (dev->has_scaler_out || dev->has_crop_out || dev->has_compose_out) {
-		struct v4l2_rect r = { 0, 0, mp->width, mp->height };
+		struct v4l2_rect r = { 0, 0, f->width, f->height };
 
 		if (dev->has_scaler_out) {
 			if (dev->has_crop_out)
@@ -544,95 +539,35 @@ int vivid_s_fmt_vid_out(struct file *file, void *priv,
 			crop->height /= factor;
 		}
 	} else {
-		struct v4l2_rect r = { 0, 0, mp->width, mp->height };
+		struct v4l2_rect r = { 0, 0, f->width, f->height };
 
 		v4l2_rect_set_size_to(crop, &r);
 		r.height /= factor;
 		v4l2_rect_set_size_to(compose, &r);
 	}
 
-	dev->fmt_out_rect.width = mp->width;
-	dev->fmt_out_rect.height = mp->height;
-	for (p = 0; p < mp->num_planes; p++)
-		dev->bytesperline_out[p] = mp->plane_fmt[p].bytesperline;
+	dev->fmt_out_rect.width = f->width;
+	dev->fmt_out_rect.height = f->height;
+	for (p = 0; p < f->num_planes; p++)
+		dev->bytesperline_out[p] = f->plane_fmt[p].bytesperline;
 	for (p = dev->fmt_out->buffers; p < dev->fmt_out->planes; p++)
 		dev->bytesperline_out[p] =
 			(dev->bytesperline_out[0] * dev->fmt_out->bit_depth[p]) /
 			dev->fmt_out->bit_depth[0];
-	dev->field_out = mp->field;
+	dev->field_out = f->field;
 	if (vivid_is_svid_out(dev))
-		dev->tv_field_out = mp->field;
+		dev->tv_field_out = f->field;
 
 set_colorspace:
-	dev->colorspace_out = mp->colorspace;
-	dev->xfer_func_out = mp->xfer_func;
-	dev->ycbcr_enc_out = mp->ycbcr_enc;
-	dev->quantization_out = mp->quantization;
+	dev->colorspace_out = f->colorspace;
+	dev->xfer_func_out = f->xfer_func;
+	dev->ycbcr_enc_out = f->ycbcr_enc;
+	dev->quantization_out = f->quantization;
 	if (dev->loop_video) {
 		vivid_send_source_change(dev, SVID);
 		vivid_send_source_change(dev, HDMI);
 	}
 	return 0;
-}
-
-int vidioc_g_fmt_vid_out_mplane(struct file *file, void *priv,
-					struct v4l2_format *f)
-{
-	struct vivid_dev *dev = video_drvdata(file);
-
-	if (!dev->multiplanar)
-		return -ENOTTY;
-	return vivid_g_fmt_vid_out(file, priv, f);
-}
-
-int vidioc_try_fmt_vid_out_mplane(struct file *file, void *priv,
-			struct v4l2_format *f)
-{
-	struct vivid_dev *dev = video_drvdata(file);
-
-	if (!dev->multiplanar)
-		return -ENOTTY;
-	return vivid_try_fmt_vid_out(file, priv, f);
-}
-
-int vidioc_s_fmt_vid_out_mplane(struct file *file, void *priv,
-			struct v4l2_format *f)
-{
-	struct vivid_dev *dev = video_drvdata(file);
-
-	if (!dev->multiplanar)
-		return -ENOTTY;
-	return vivid_s_fmt_vid_out(file, priv, f);
-}
-
-int vidioc_g_fmt_vid_out(struct file *file, void *priv,
-					struct v4l2_format *f)
-{
-	struct vivid_dev *dev = video_drvdata(file);
-
-	if (dev->multiplanar)
-		return -ENOTTY;
-	return fmt_sp2mp_func(file, priv, f, vivid_g_fmt_vid_out);
-}
-
-int vidioc_try_fmt_vid_out(struct file *file, void *priv,
-			struct v4l2_format *f)
-{
-	struct vivid_dev *dev = video_drvdata(file);
-
-	if (dev->multiplanar)
-		return -ENOTTY;
-	return fmt_sp2mp_func(file, priv, f, vivid_try_fmt_vid_out);
-}
-
-int vidioc_s_fmt_vid_out(struct file *file, void *priv,
-			struct v4l2_format *f)
-{
-	struct vivid_dev *dev = video_drvdata(file);
-
-	if (dev->multiplanar)
-		return -ENOTTY;
-	return fmt_sp2mp_func(file, priv, f, vivid_s_fmt_vid_out);
 }
 
 int vivid_vid_out_g_selection(struct file *file, void *priv,
