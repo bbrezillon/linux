@@ -190,6 +190,114 @@ module_param(debug, int, 0644);
 static void __vb2_queue_cancel(struct vb2_queue *q);
 static void __enqueue_in_driver(struct vb2_buffer *vb);
 
+int vb2_attach_dmabuf(struct vb2_dma_buf *buf)
+{
+	if (!buf->dba) {
+		buf->dba = dma_buf_attach(buf->dbuf, buf->dev);
+		if (IS_ERR(buf->dba)) {
+			pr_err("failed to attach dmabuf\n");
+			return PTR_ERR(buf->dba);
+		}
+
+		refcount_set(&buf->attachcnt, 1);
+	} else {
+		refcount_inc(&buf->attachcnt);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(vb2_attach_dmabuf);
+
+void vb2_detach_dmabuf(struct vb2_dma_buf *buf)
+{
+	if (WARN_ON(!buf->dba))
+		return;
+
+	if (refcount_dec_and_test(&buf->attachcnt)) {
+		dma_buf_detach(buf->dbuf, buf->dba);
+		buf->dba = NULL;
+	}
+
+	return;
+}
+EXPORT_SYMBOL(vb2_detach_dmabuf);
+
+int vb2_map_dmabuf(struct vb2_dma_buf *buf)
+{
+	if (WARN_ON(!buf->dba)) {
+		pr_err("trying to pin a non attached buffer\n");
+		return -EINVAL;
+	}
+
+	if (!buf->sgt) {
+		/* get the associated scatterlist for this buffer */
+		buf->sgt = dma_buf_map_attachment(buf->dba, buf->ddir);
+		if (IS_ERR(buf->sgt)) {
+			pr_err("Error getting dmabuf scatterlist\n");
+			return -EINVAL;
+		}
+		refcount_set(&buf->mapcnt, 1);
+	} else {
+		refcount_inc(&buf->mapcnt);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(vb2_map_dmabuf);
+
+void vb2_unmap_dmabuf(struct vb2_dma_buf *buf)
+{
+	if (WARN_ON(!buf->sgt))
+		return;
+
+	if (refcount_dec_and_test(&buf->mapcnt)) {
+		/* get the associated scatterlist for this buffer */
+		dma_buf_unmap_attachment(buf->dba, buf->sgt, buf->ddir);
+		buf->sgt = NULL;
+	}
+}
+EXPORT_SYMBOL(vb2_unmap_dmabuf);
+
+static struct vb2_dma_buf *vb2_create_dmabuf(struct device *dev,
+					     struct dma_buf *dbuf,
+					     enum dma_data_direction ddir)
+{
+	struct vb2_dma_buf *buf;
+
+	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+	if (!buf)
+		return NULL;
+
+	get_dma_buf(dbuf);
+	buf->dbuf = dbuf;
+	buf->dev = dev;
+	buf->ddir = ddir;
+	refcount_set(&buf->refcnt, 1);
+	return buf;
+}
+
+static struct vb2_dma_buf *vb2_get_dmabuf(struct vb2_dma_buf *buf)
+{
+	if (!buf)
+		return NULL;
+
+	refcount_inc(&buf->refcnt);
+	return buf;
+}
+
+static void vb2_put_dmabuf(struct vb2_dma_buf *buf)
+{
+	if (!buf)
+		return;
+
+	if (refcount_dec_and_test(&buf->refcnt)) {
+		WARN_ON(refcount_read(&buf->mapcnt) ||
+			refcount_read(&buf->attachcnt));
+		dma_buf_put(buf->dbuf);
+		kfree(buf);
+	}
+}
+
 /*
  * __vb2_buf_mem_alloc() - allocate video memory for the given buffer
  */
@@ -266,30 +374,17 @@ static void __vb2_buf_userptr_put(struct vb2_buffer *vb)
  */
 static void __vb2_plane_dmabuf_put(struct vb2_buffer *vb, struct vb2_plane *p)
 {
-	unsigned int plane, mapcnt = 0, attachcnt = 0;
-
 	if (!p->mem_priv)
 		return;
 
-	for (plane = 0; plane < vb->num_planes; ++plane) {
-		if (&vb->planes[plane] == p)
-			continue;
-
-		if (vb->planes[plane].dbuf_mapped)
-			mapcnt++;
-		if (vb->planes[plane].mem_priv == p->mem_priv)
-			attachcnt++;
-	}
-
-	if (p->dbuf_mapped && !mapcnt)
+	if (p->dbuf_mapped)
 		call_void_memop(vb, unmap_dmabuf, p->mem_priv);
 
-	if (!attachcnt)
-		call_void_memop(vb, detach_dmabuf, p->mem_priv);
+	call_void_memop(vb, detach_dmabuf, p->mem_priv);
 
-	dma_buf_put(p->dbuf);
+	vb2_put_dmabuf(p->vdbuf);
 	p->mem_priv = NULL;
-	p->dbuf = NULL;
+	p->vdbuf = NULL;
 	p->dbuf_mapped = 0;
 }
 
@@ -901,16 +996,10 @@ EXPORT_SYMBOL_GPL(vb2_core_create_bufs);
 
 void *vb2_plane_vaddr(struct vb2_buffer *vb, unsigned int plane_no)
 {
-	void *vaddr;
-
 	if (plane_no >= vb->num_planes || !vb->planes[plane_no].mem_priv)
 		return NULL;
 
-	vaddr = call_ptr_memop(vb, vaddr, vb->planes[plane_no].mem_priv);
-	if (vb->planes[plane_no].dbuf)
-		vaddr += vb->planes[plane_no].dbuf_offset;
-
-	return vaddr;
+	return call_ptr_memop(vb, vaddr, vb->planes[plane_no].mem_priv);
 }
 EXPORT_SYMBOL_GPL(vb2_plane_vaddr);
 
@@ -1138,10 +1227,6 @@ err:
 static int __prepare_dmabuf(struct vb2_buffer *vb)
 {
 	struct vb2_plane planes[VB2_MAX_PLANES];
-	struct dma_buf *dbufs[VB2_MAX_PLANES] = { };
-	unsigned long dbufsz[VB2_MAX_PLANES] = { };
-	struct device *dbdevs[VB2_MAX_PLANES] = { };
-	int share_mem_priv[VB2_MAX_PLANES] = { };
 	struct vb2_queue *q = vb->vb2_queue;
 	void *mem_priv;
 	unsigned int plane, i;
@@ -1157,6 +1242,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 
 	for (plane = 0; plane < vb->num_planes; ++plane) {
 		struct dma_buf *dbuf = dma_buf_get(planes[plane].m.fd);
+		struct device *dev = q->alloc_devs[plane] ? : q->dev;
 
 		if (IS_ERR_OR_NULL(dbuf)) {
 			dprintk(1, "invalid dmabuf fd for plane %d\n",
@@ -1165,9 +1251,6 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 			goto err;
 		}
 
-		share_mem_priv[plane] = -1;
-		dbufs[plane] = dbuf;
-		dbdevs[plane] = q->alloc_devs[plane] ? : q->dev;
 		/* use DMABUF size if length is not provided */
 		if (planes[plane].length == 0) {
 			if (planes[plane].dbuf_offset >= dbuf->size) {
@@ -1177,31 +1260,9 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 				ret = -EINVAL;
 				goto err;
 			}
-
-			dbufsz[plane] = dbuf->size -
-					planes[plane].dbuf_offset;
-		}
-
-		dbufsz[plane] += planes[plane].dbuf_offset;
-
-		for (i = 0; i < plane; ++i) {
-			if (dbuf != dbufs[i] || dbdevs[plane] != dbdevs[i])
-				continue;
-
-			if (dbufsz[plane] < dbufsz[i])
-				break;
-
-			dbufsz[i] = dbufsz[plane];
-			if (share_mem_priv[plane] == -1)
-				share_mem_priv[plane] = i;
-		}
-	}
-
-	for (plane = 0; plane < vb->num_planes; ++plane) {
-		/* use DMABUF size if length is not provided */
-		if (planes[plane].length == 0)
-			planes[plane].length = dbufs[plane]->size -
+			planes[plane].length = dbuf->size -
 					       planes[plane].dbuf_offset;
+		}
 
 		if (planes[plane].length < vb->planes[plane].min_length) {
 			dprintk(1, "invalid dmabuf length %u for plane %d, minimum length %u\n",
@@ -1212,15 +1273,33 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		}
 
 		/* Skip the plane if already verified */
-		if (dbufs[plane] == vb->planes[plane].dbuf &&
-			vb->planes[plane].length == planes[plane].length &&
-			vb->planes[plane].dbuf_offset == planes[plane].dbuf_offset) {
-			dma_buf_put(dbufs[plane]);
-			dbufs[plane] = NULL;
+		if (vb->planes[plane].vdbuf &&
+		    dbuf == vb->planes[plane].vdbuf->dbuf &&
+		    vb->planes[plane].length == planes[plane].length &&
+		    vb->planes[plane].dbuf_offset == planes[plane].dbuf_offset) {
+			dma_buf_put(dbuf);
 			continue;
 		}
 
 		dprintk(3, "buffer for plane %d changed\n", plane);
+
+		for (i = 0; i < plane; ++i) {
+			struct vb2_dma_buf *vdbuf = vb->planes[i].vdbuf;
+
+			if (dbuf != vdbuf->dbuf || dev != vdbuf->dev)
+				continue;
+
+			vb->planes[plane].vdbuf = vb2_get_dmabuf(vdbuf);
+			break;
+		}
+
+		if (!vb->planes[plane].vdbuf)
+			vb->planes[plane].vdbuf = vb2_create_dmabuf(dev, dbuf,
+								    q->dma_dir);
+		if (!vb->planes[plane].vdbuf) {
+			ret = -ENOMEM;
+			goto err;
+		}
 
 		if (!reacquired) {
 			reacquired = true;
@@ -1236,24 +1315,17 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		vb->planes[plane].data_offset = 0;
 		vb->planes[plane].dbuf_offset = 0;
 
-		if (share_mem_priv[plane] != -1) {
-			mem_priv = vb->planes[share_mem_priv[plane]].mem_priv;
-		} else {
-			/* Acquire each plane's memory */
-			mem_priv = call_ptr_memop(vb, attach_dmabuf,
-						  dbdevs[plane],
-						  dbufs[plane],
-						  dbufsz[plane],
-						  q->dma_dir);
-			if (IS_ERR(mem_priv)) {
-				dprintk(1, "failed to attach dmabuf\n");
-				ret = PTR_ERR(mem_priv);
-				goto err;
-			}
+		/* Acquire each plane's memory */
+		mem_priv = call_ptr_memop(vb, attach_dmabuf,
+					  vb->planes[plane].vdbuf,
+					  vb->planes[plane].dbuf_offset,
+					  vb->planes[plane].length);
+		if (IS_ERR(mem_priv)) {
+			dprintk(1, "failed to attach dmabuf\n");
+			ret = PTR_ERR(mem_priv);
+			goto err;
 		}
 
-		vb->planes[plane].dbuf = dbufs[plane];
-		dbufs[plane] = NULL;
 		vb->planes[plane].mem_priv = mem_priv;
 	}
 
@@ -1265,11 +1337,6 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 	for (plane = 0; plane < vb->num_planes; ++plane) {
 		if (vb->planes[plane].dbuf_mapped)
 			continue;
-
-		if (share_mem_priv[plane] != -1) {
-			vb->planes[plane].dbuf_mapped = 1;
-			continue;
-		}
 
 		ret = call_memop(vb, map_dmabuf, vb->planes[plane].mem_priv);
 		if (ret) {
@@ -1315,11 +1382,6 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 err:
 	/* In case of errors, release planes that were already acquired */
 	__vb2_buf_dmabuf_put(vb);
-
-	for (plane = 0; plane < vb->num_planes; ++plane) {
-		if (dbufs[plane])
-			dma_buf_put(dbufs[plane]);
-	}
 
 	return ret;
 }

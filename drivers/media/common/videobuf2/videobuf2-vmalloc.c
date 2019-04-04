@@ -29,7 +29,8 @@ struct vb2_vmalloc_buf {
 	unsigned long			size;
 	refcount_t			refcount;
 	struct vb2_vmarea_handler	handler;
-	struct dma_buf			*dbuf;
+	struct vb2_dma_buf		*vdbuf;
+	unsigned int			dbufoffs;
 };
 
 static void vb2_vmalloc_put(void *buf_priv);
@@ -158,7 +159,7 @@ static void *vb2_vmalloc_vaddr(void *buf_priv)
 		return NULL;
 	}
 
-	return buf->vaddr;
+	return buf->vaddr + buf->dbufoffs;
 }
 
 static unsigned int vb2_vmalloc_num_users(void *buf_priv)
@@ -385,7 +386,7 @@ static int vb2_vmalloc_map_dmabuf(void *mem_priv)
 {
 	struct vb2_vmalloc_buf *buf = mem_priv;
 
-	buf->vaddr = dma_buf_vmap(buf->dbuf);
+	buf->vaddr = dma_buf_vmap(buf->vdbuf->dbuf);
 
 	return buf->vaddr ? 0 : -EFAULT;
 }
@@ -394,7 +395,7 @@ static void vb2_vmalloc_unmap_dmabuf(void *mem_priv)
 {
 	struct vb2_vmalloc_buf *buf = mem_priv;
 
-	dma_buf_vunmap(buf->dbuf, buf->vaddr);
+	dma_buf_vunmap(buf->vdbuf->dbuf, buf->vaddr);
 	buf->vaddr = NULL;
 }
 
@@ -403,25 +404,26 @@ static void vb2_vmalloc_detach_dmabuf(void *mem_priv)
 	struct vb2_vmalloc_buf *buf = mem_priv;
 
 	if (buf->vaddr)
-		dma_buf_vunmap(buf->dbuf, buf->vaddr);
+		dma_buf_vunmap(buf->vdbuf->dbuf, buf->vaddr);
 
 	kfree(buf);
 }
 
-static void *vb2_vmalloc_attach_dmabuf(struct device *dev, struct dma_buf *dbuf,
-	unsigned long size, enum dma_data_direction dma_dir)
+static void *vb2_vmalloc_attach_dmabuf(struct vb2_dma_buf *vdbuf,
+				       unsigned long offset,
+				       unsigned long size)
 {
 	struct vb2_vmalloc_buf *buf;
 
-	if (dbuf->size < size)
+	if (vdbuf->dbuf->size < size + offset)
 		return ERR_PTR(-EFAULT);
 
 	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
 
-	buf->dbuf = dbuf;
-	buf->dma_dir = dma_dir;
+	buf->vdbuf = vdbuf;
+	buf->dbufoffs = offset;
 	buf->size = size;
 
 	return buf;

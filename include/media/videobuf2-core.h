@@ -46,6 +46,17 @@ enum vb2_memory {
 struct vb2_fileio_data;
 struct vb2_threadio_data;
 
+struct vb2_dma_buf {
+	refcount_t refcnt;
+	struct device *dev;
+	struct dma_buf *dbuf;
+	struct dma_buf_attachment *dba;
+	enum dma_data_direction ddir;
+	refcount_t attachcnt;
+	refcount_t mapcnt;
+	struct sg_table *sgt;
+};
+
 /**
  * struct vb2_mem_ops - memory handling/memory allocator operations.
  * @alloc:	allocate video memory and, optionally, allocator private data,
@@ -130,10 +141,9 @@ struct vb2_mem_ops {
 	void		(*prepare)(void *buf_priv);
 	void		(*finish)(void *buf_priv);
 
-	void		*(*attach_dmabuf)(struct device *dev,
-					  struct dma_buf *dbuf,
-					  unsigned long size,
-					  enum dma_data_direction dma_dir);
+	void		*(*attach_dmabuf)(struct vb2_dma_buf *vdbuf,
+					  unsigned long offs,
+					  unsigned long size);
 	void		(*detach_dmabuf)(void *buf_priv);
 	int		(*map_dmabuf)(void *buf_priv);
 	void		(*unmap_dmabuf)(void *buf_priv);
@@ -149,7 +159,7 @@ struct vb2_mem_ops {
 /**
  * struct vb2_plane - plane information.
  * @mem_priv:	private data with this plane.
- * @dbuf:	dma_buf - shared buffer object.
+ * @vdbuf:	dma_buf - shared buffer object.
  * @dbuf_mapped:	flag to show whether dbuf is mapped or not
  * @dbuf_offset: offset where the plane starts. Usually 0, unless the buffer
  *		 is shared by all planes of a multi-planar format.
@@ -174,7 +184,7 @@ struct vb2_mem_ops {
  */
 struct vb2_plane {
 	void			*mem_priv;
-	struct dma_buf		*dbuf;
+	struct vb2_dma_buf	*vdbuf;
 	unsigned int		dbuf_mapped;
 	unsigned int		dbuf_offset;
 	unsigned int		bytesused;
@@ -1211,5 +1221,10 @@ bool vb2_request_object_is_buffer(struct media_request_object *obj);
  * @req:	the request.
  */
 unsigned int vb2_request_buffer_cnt(struct media_request *req);
+
+int vb2_attach_dmabuf(struct vb2_dma_buf *buf);
+void vb2_detach_dmabuf(struct vb2_dma_buf *buf);
+int vb2_map_dmabuf(struct vb2_dma_buf *buf);
+void vb2_unmap_dmabuf(struct vb2_dma_buf *buf);
 
 #endif /* _MEDIA_VIDEOBUF2_CORE_H */

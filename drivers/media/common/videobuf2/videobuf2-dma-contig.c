@@ -39,7 +39,8 @@ struct vb2_dc_buf {
 	struct sg_table			*sgt_base;
 
 	/* DMABUF related */
-	struct dma_buf_attachment	*db_attach;
+	struct vb2_dma_buf		*vdbuf;
+	unsigned long			dbufoffs;
 };
 
 /*********************************************/
@@ -77,10 +78,10 @@ static void *vb2_dc_vaddr(void *buf_priv)
 {
 	struct vb2_dc_buf *buf = buf_priv;
 
-	if (!buf->vaddr && buf->db_attach)
-		buf->vaddr = dma_buf_vmap(buf->db_attach->dmabuf);
+	if (!buf->vaddr && buf->vdbuf)
+		buf->vaddr = dma_buf_vmap(buf->vdbuf->dbuf);
 
-	return buf->vaddr;
+	return buf->vaddr + buf->dbufoffs;
 }
 
 static unsigned int vb2_dc_num_users(void *buf_priv)
@@ -96,7 +97,7 @@ static void vb2_dc_prepare(void *buf_priv)
 	struct sg_table *sgt = buf->dma_sgt;
 
 	/* DMABUF exporter will flush the cache for us */
-	if (!sgt || buf->db_attach)
+	if (!sgt || buf->vdbuf)
 		return;
 
 	dma_sync_sg_for_device(buf->dev, sgt->sgl, sgt->orig_nents,
@@ -109,7 +110,7 @@ static void vb2_dc_finish(void *buf_priv)
 	struct sg_table *sgt = buf->dma_sgt;
 
 	/* DMABUF exporter will flush the cache for us */
-	if (!sgt || buf->db_attach)
+	if (!sgt || buf->vdbuf)
 		return;
 
 	dma_sync_sg_for_cpu(buf->dev, sgt->sgl, sgt->orig_nents, buf->dma_dir);
@@ -578,8 +579,9 @@ static int vb2_dc_map_dmabuf(void *mem_priv)
 	struct vb2_dc_buf *buf = mem_priv;
 	struct sg_table *sgt;
 	unsigned long contig_size;
+	int ret;
 
-	if (WARN_ON(!buf->db_attach)) {
+	if (WARN_ON(!buf->vdbuf->dba)) {
 		pr_err("trying to pin a non attached buffer\n");
 		return -EINVAL;
 	}
@@ -590,22 +592,24 @@ static int vb2_dc_map_dmabuf(void *mem_priv)
 	}
 
 	/* get the associated scatterlist for this buffer */
-	sgt = dma_buf_map_attachment(buf->db_attach, buf->dma_dir);
-	if (IS_ERR(sgt)) {
+	ret = vb2_map_dmabuf(buf->vdbuf);
+	if (ret) {
 		pr_err("Error getting dmabuf scatterlist\n");
 		return -EINVAL;
 	}
 
+	sgt = buf->vdbuf->sgt;
+
 	/* checking if dmabuf is big enough to store contiguous chunk */
 	contig_size = vb2_dc_get_contiguous_size(sgt);
-	if (contig_size < buf->size) {
+	if (contig_size < buf->dbufoffs + buf->size) {
 		pr_err("contiguous chunk is too small %lu/%lu b\n",
-			contig_size, buf->size);
-		dma_buf_unmap_attachment(buf->db_attach, sgt, buf->dma_dir);
+			contig_size, buf->dbufoffs + buf->size);
+		vb2_unmap_dmabuf(buf->vdbuf);
 		return -EFAULT;
 	}
 
-	buf->dma_addr = sg_dma_address(sgt->sgl);
+	buf->dma_addr = sg_dma_address(sgt->sgl) + buf->dbufoffs;
 	buf->dma_sgt = sgt;
 	buf->vaddr = NULL;
 
@@ -617,21 +621,16 @@ static void vb2_dc_unmap_dmabuf(void *mem_priv)
 	struct vb2_dc_buf *buf = mem_priv;
 	struct sg_table *sgt = buf->dma_sgt;
 
-	if (WARN_ON(!buf->db_attach)) {
-		pr_err("trying to unpin a not attached buffer\n");
-		return;
-	}
-
 	if (WARN_ON(!sgt)) {
 		pr_err("dmabuf buffer is already unpinned\n");
 		return;
 	}
 
 	if (buf->vaddr) {
-		dma_buf_vunmap(buf->db_attach->dmabuf, buf->vaddr);
+		dma_buf_vunmap(buf->vdbuf->dbuf, buf->vaddr);
 		buf->vaddr = NULL;
 	}
-	dma_buf_unmap_attachment(buf->db_attach, sgt, buf->dma_dir);
+	vb2_unmap_dmabuf(buf->vdbuf);
 
 	buf->dma_addr = 0;
 	buf->dma_sgt = NULL;
@@ -646,38 +645,39 @@ static void vb2_dc_detach_dmabuf(void *mem_priv)
 		vb2_dc_unmap_dmabuf(buf);
 
 	/* detach this attachment */
-	dma_buf_detach(buf->db_attach->dmabuf, buf->db_attach);
+	vb2_detach_dmabuf(buf->vdbuf);
 	kfree(buf);
 }
 
-static void *vb2_dc_attach_dmabuf(struct device *dev, struct dma_buf *dbuf,
-	unsigned long size, enum dma_data_direction dma_dir)
+static void *vb2_dc_attach_dmabuf(struct vb2_dma_buf *vdbuf,
+				  unsigned long offset,
+				  unsigned long size)
 {
 	struct vb2_dc_buf *buf;
-	struct dma_buf_attachment *dba;
+	int ret;
 
-	if (dbuf->size < size)
+	if (vdbuf->dbuf->size < offset + size)
 		return ERR_PTR(-EFAULT);
 
-	if (WARN_ON(!dev))
+	if (WARN_ON(!vdbuf->dev))
 		return ERR_PTR(-EINVAL);
 
 	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
 
-	buf->dev = dev;
+	buf->dev = vdbuf->dev;
 	/* create attachment for the dmabuf with the user device */
-	dba = dma_buf_attach(dbuf, buf->dev);
-	if (IS_ERR(dba)) {
+	ret = vb2_attach_dmabuf(vdbuf);
+	if (ret) {
 		pr_err("failed to attach dmabuf\n");
 		kfree(buf);
-		return dba;
+		return ERR_PTR(ret);
 	}
 
-	buf->dma_dir = dma_dir;
+	buf->dma_dir = vdbuf->ddir;
 	buf->size = size;
-	buf->db_attach = dba;
+	buf->dbufoffs = offset;
 
 	return buf;
 }
@@ -757,6 +757,15 @@ void vb2_dma_contig_clear_max_seg_size(struct device *dev)
 	dev->dma_parms = NULL;
 }
 EXPORT_SYMBOL_GPL(vb2_dma_contig_clear_max_seg_size);
+
+dma_addr_t
+vb2_dma_contig_plane_dma_addr(struct vb2_buffer *vb, unsigned int p)
+{
+	struct vb2_dc_buf *buf = vb->planes[p].mem_priv;
+
+	return buf->dma_addr + buf->dbufoffs;
+}
+EXPORT_SYMBOL_GPL(vb2_dma_contig_plane_dma_addr);
 
 MODULE_DESCRIPTION("DMA-contig memory handling routines for videobuf2");
 MODULE_AUTHOR("Pawel Osciak <pawel@osciak.com>");
