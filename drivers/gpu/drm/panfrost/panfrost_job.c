@@ -16,6 +16,7 @@
 #include "panfrost_features.h"
 #include "panfrost_issues.h"
 #include "panfrost_gem.h"
+#include "panfrost_perfcnt.h"
 #include "panfrost_regs.h"
 #include "panfrost_gpu.h"
 #include "panfrost_mmu.h"
@@ -155,6 +156,7 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 
 	panfrost_devfreq_record_transition(pfdev, js);
 	spin_lock_irqsave(&pfdev->hwaccess_lock, flags);
+	panfrost_perfcnt_run_job(job);
 
 	job_write(pfdev, JS_HEAD_NEXT_LO(js), jc_head & 0xFFFFFFFF);
 	job_write(pfdev, JS_HEAD_NEXT_HI(js), jc_head >> 32);
@@ -235,6 +237,12 @@ int panfrost_job_push(struct panfrost_job *job)
 		goto unlock;
 	}
 
+	ret = panfrost_perfcnt_push_job(job);
+	if (ret) {
+		mutex_unlock(&pfdev->sched_lock);
+		goto unlock;
+	}
+
 	job->render_done_fence = dma_fence_get(&job->base.s_fence->finished);
 
 	kref_get(&job->refcount); /* put by scheduler job completion */
@@ -280,6 +288,7 @@ static void panfrost_job_cleanup(struct kref *ref)
 		kvfree(job->bos);
 	}
 
+	panfrost_perfcnt_clean_job_ctx(job);
 	kfree(job);
 }
 
@@ -320,6 +329,13 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 			job->implicit_fences[i] = NULL;
 			return fence;
 		}
+	}
+
+	/* Return the perfmon wait fence if any. */
+	if (job->perfcnt_fence) {
+		fence = job->perfcnt_fence;
+		job->perfcnt_fence = NULL;
+		return fence;
 	}
 
 	return NULL;
@@ -455,6 +471,7 @@ static irqreturn_t panfrost_job_irq_handler(int irq, void *data)
 		if (status & JOB_INT_MASK_DONE(j)) {
 			panfrost_devfreq_record_transition(pfdev, j);
 			dma_fence_signal(pfdev->jobs[j]->done_fence);
+			panfrost_perfcnt_finish_job(pfdev->jobs[j], false);
 		}
 
 		status &= ~mask;

@@ -9,11 +9,13 @@
 #include <drm/drm_device.h>
 #include <drm/drm_mm.h>
 #include <drm/gpu_scheduler.h>
+#include <drm/panfrost_drm.h>
 
 struct panfrost_device;
 struct panfrost_mmu;
 struct panfrost_job_slot;
 struct panfrost_job;
+struct panfrost_perfcnt;
 
 #define NUM_JOB_SLOTS 3
 
@@ -45,6 +47,8 @@ struct panfrost_features {
 
 	unsigned long hw_features[64 / BITS_PER_LONG];
 	unsigned long hw_issues[64 / BITS_PER_LONG];
+
+	struct drm_panfrost_block_perfcounters perfcnt_layout[PANFROST_NUM_BLOCKS];
 };
 
 struct panfrost_devfreq_slot {
@@ -77,6 +81,8 @@ struct panfrost_device {
 	struct panfrost_job *jobs[NUM_JOB_SLOTS];
 	struct list_head scheduled_jobs;
 
+	struct panfrost_perfcnt *perfcnt;
+
 	struct mutex sched_lock;
 	struct mutex reset_lock;
 
@@ -93,6 +99,11 @@ struct panfrost_file_priv {
 	struct panfrost_device *pfdev;
 
 	struct drm_sched_entity sched_entity[NUM_JOB_SLOTS];
+
+	struct {
+		struct idr idr;
+		struct mutex lock;
+	} perfmon;
 };
 
 static inline struct panfrost_device *to_panfrost_device(struct drm_device *ddev)
