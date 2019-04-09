@@ -39,16 +39,30 @@ static int rockchip_ddrclk_sip_set_rate(struct clk_hw *hw, unsigned long drate,
 					unsigned long prate)
 {
 	struct rockchip_ddrclk *ddrclk = to_rockchip_ddrclk_hw(hw);
+	unsigned long timeout = jiffies + msecs_to_jiffies(500);
 	unsigned long flags;
-	struct arm_smccc_res res;
+	struct arm_smccc_res res = { };
 
-	spin_lock_irqsave(ddrclk->lock, flags);
-	arm_smccc_smc(ROCKCHIP_SIP_DRAM_FREQ, drate, 0,
-		      ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE,
-		      0, 0, 0, 0, &res);
-	spin_unlock_irqrestore(ddrclk->lock, flags);
+	/*
+	 * Nasty trick to poll the SET_RATE status: we call SET_RATE with
+	 * the same frequency over and over again until it stops returning
+	 * 0. We need to do that to keep things backward compatible: the old
+	 * implementation was synchronous and was always returning the
+	 * frequency that had just been set. The new async implementation
+	 * returns 0 until the new frequency is effective.
+	 */
+	while (!res.a0 && time_before(jiffies, timeout)) {
+		usleep_range(100, 1000);
+		spin_lock_irqsave(ddrclk->lock, flags);
+		arm_smccc_smc(ROCKCHIP_SIP_DRAM_FREQ, drate,
+			      ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE_F_ASYNC |
+			      ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE_F_WAIT_VBLANK,
+			      ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE,
+			      0, 0, 0, 0, &res);
+		spin_unlock_irqrestore(ddrclk->lock, flags);
+	}
 
-	return res.a0;
+	return res.a0 ? 0 : -ETIMEDOUT;
 }
 
 static unsigned long
