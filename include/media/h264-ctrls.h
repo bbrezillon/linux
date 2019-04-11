@@ -11,6 +11,11 @@
 #ifndef _H264_CTRLS_H_
 #define _H264_CTRLS_H_
 
+#include <linux/videodev2.h>
+
+/* Our pixel format isn't stable at the moment */
+#define V4L2_PIX_FMT_H264_SLICE_RAW v4l2_fourcc('S', '2', '6', '4') /* H264 parsed slices */
+
 /*
  * This is put insanely high to avoid conflicting with controls that
  * would be added during the phase where those controls are not
