@@ -43,4 +43,7 @@ int rockchip_vpu_dst_buf_prepare(struct vb2_buffer *vb);
 int rockchip_vpu_start(struct vb2_queue *q, unsigned int count);
 void rockchip_vpu_stop(struct vb2_queue *q);
 
+void *rockchip_vpu_get_ctrl(struct rockchip_vpu_ctx *ctx, u32 id);
+dma_addr_t rockchip_vpu_get_ref(struct vb2_queue *q, u64 ts);
+
 #endif /* ROCKCHIP_VPU_COMMON_H_ */
