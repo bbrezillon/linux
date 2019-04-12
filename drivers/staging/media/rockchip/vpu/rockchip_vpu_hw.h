@@ -39,6 +39,14 @@ struct rockchip_vpu_jpeg_enc_hw_ctx {
 };
 
 /**
+ * struct rockchip_vpu_mpeg2_dec_hw_ctx
+ * @qtable:		Quantization table
+ */
+struct rockchip_vpu_mpeg2_dec_hw_ctx {
+	struct rockchip_vpu_aux_buf qtable;
+};
+
+/**
  * struct rockchip_vpu_codec_ops - codec mode specific operations
  *
  * @init:	If needed, can be used for initialization.
@@ -82,5 +90,11 @@ void rk3288_vpu_jpeg_enc_run(struct rockchip_vpu_ctx *ctx);
 void rk3399_vpu_jpeg_enc_run(struct rockchip_vpu_ctx *ctx);
 int rockchip_vpu_jpeg_enc_init(struct rockchip_vpu_ctx *ctx);
 void rockchip_vpu_jpeg_enc_exit(struct rockchip_vpu_ctx *ctx);
+
+void rk3399_vpu_mpeg2_dec_run(struct rockchip_vpu_ctx *ctx);
+void rockchip_vpu_mpeg2_dec_copy_qtable(u8 *qtable,
+	const struct v4l2_ctrl_mpeg2_quantization *ctrl);
+int rockchip_vpu_mpeg2_dec_init(struct rockchip_vpu_ctx *ctx);
+void rockchip_vpu_mpeg2_dec_exit(struct rockchip_vpu_ctx *ctx);
 
 #endif /* ROCKCHIP_VPU_HW_H_ */
