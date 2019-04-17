@@ -35,13 +35,48 @@ module_param_named(debug, rockchip_vpu_debug, int, 0644);
 MODULE_PARM_DESC(debug,
 		 "Debug level - higher value produces more verbose messages");
 
+static int
+rockchip_vpu_enc_buf_finish(struct rockchip_vpu_ctx *ctx,
+			    struct vb2_buffer *buf,
+			    unsigned int bytesused)
+{
+	size_t avail_size;
+
+	avail_size = vb2_plane_size(buf, 0) - ctx->vpu_dst_fmt->header_size;
+	if (bytesused > avail_size)
+		return -EINVAL;
+	/*
+	 * The bounce buffer is only for the JPEG encoder.
+	 * TODO: Rework the JPEG encoder to eliminate the need
+	 * for a bounce buffer.
+	 */
+	if (ctx->jpeg_enc.bounce_buffer.cpu) {
+		memcpy(vb2_plane_vaddr(buf, 0) +
+		       ctx->vpu_dst_fmt->header_size,
+		       ctx->jpeg_enc.bounce_buffer.cpu, bytesused);
+	}
+	buf->planes[0].bytesused =
+		ctx->vpu_dst_fmt->header_size + bytesused;
+	return 0;
+}
+
+static int
+rockchip_vpu_dec_buf_finish(struct rockchip_vpu_ctx *ctx,
+			    struct vb2_buffer *buf,
+			    unsigned int bytesused)
+{
+	/* For decoders set bytesused as per the output picture. */
+	buf->planes[0].bytesused = ctx->dst_fmt.plane_fmt[0].sizeimage;
+	return 0;
+}
+
 static void rockchip_vpu_job_finish(struct rockchip_vpu_dev *vpu,
 				    struct rockchip_vpu_ctx *ctx,
 				    unsigned int bytesused,
 				    enum vb2_buffer_state result)
 {
 	struct vb2_v4l2_buffer *src, *dst;
-	size_t avail_size;
+	int ret;
 
 	pm_runtime_mark_last_busy(vpu->dev);
 	pm_runtime_put_autosuspend(vpu->dev);
@@ -60,24 +95,9 @@ static void rockchip_vpu_job_finish(struct rockchip_vpu_dev *vpu,
 
 	v4l2_m2m_buf_copy_metadata(src, dst, true);
 
-	avail_size = vb2_plane_size(&dst->vb2_buf, 0) -
-		     ctx->vpu_dst_fmt->header_size;
-	if (bytesused <= avail_size) {
-		/*
-		 * The bounce buffer is only for the JPEG encoder.
-		 * TODO: Rework the JPEG encoder to eliminate the need
-		 * for a bounce buffer.
-		 */
-		if (ctx->jpeg_enc.bounce_buffer.cpu) {
-			memcpy(vb2_plane_vaddr(&dst->vb2_buf, 0) +
-			       ctx->vpu_dst_fmt->header_size,
-			       ctx->jpeg_enc.bounce_buffer.cpu, bytesused);
-		}
-		dst->vb2_buf.planes[0].bytesused =
-			ctx->vpu_dst_fmt->header_size + bytesused;
-	} else {
+	ret = ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
+	if (ret)
 		result = VB2_BUF_STATE_ERROR;
-	}
 
 	v4l2_m2m_buf_done(src, result);
 	v4l2_m2m_buf_done(dst, result);
@@ -135,6 +155,11 @@ err_cancel_job:
 	rockchip_vpu_job_finish(ctx->dev, ctx, 0, VB2_BUF_STATE_ERROR);
 }
 
+bool rockchip_vpu_is_encoder_ctx(const struct rockchip_vpu_ctx *ctx)
+{
+	return ctx->buf_finish == rockchip_vpu_enc_buf_finish;
+}
+
 static struct v4l2_m2m_ops vpu_m2m_ops = {
 	.device_run = device_run,
 };
@@ -164,23 +189,33 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 	src_vq->dev = ctx->dev->v4l2_dev.dev;
 	src_vq->supports_requests = true;
 
+	if (!rockchip_vpu_is_encoder_ctx(ctx))
+		src_vq->requires_requests = true;
+
 	ret = vb2_queue_init(src_vq);
 	if (ret)
 		return ret;
 
 	/*
-	 * The CAPTURE queue doesn't need dma memory,
-	 * as the CPU needs to create the JPEG frames,
-	 * from the hardware-produced JPEG payload.
+	 * When encoding, the CAPTURE queue doesn't need dma memory,
+	 * as the CPU needs to create the JPEG frames, from the
+	 * hardware-produced JPEG payload.
 	 *
-	 * For the DMA destination buffer, we use
-	 * a bounce buffer.
+	 * For the DMA destination buffer, we use a bounce buffer.
 	 */
+	if (rockchip_vpu_is_encoder_ctx(ctx)) {
+		dst_vq->mem_ops = &vb2_vmalloc_memops;
+	} else {
+		dst_vq->bidirectional = true;
+		dst_vq->mem_ops = &vb2_dma_contig_memops;
+		dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
+				    DMA_ATTR_NO_KERNEL_MAPPING;
+	}
+
 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
 	dst_vq->drv_priv = ctx;
 	dst_vq->ops = &rockchip_vpu_queue_ops;
-	dst_vq->mem_ops = &vb2_vmalloc_memops;
 	dst_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->lock = &ctx->dev->vpu_mutex;
@@ -257,11 +292,17 @@ static int rockchip_vpu_open(struct file *filp)
 		return -ENOMEM;
 
 	ctx->dev = vpu;
-	if (vdev == vpu->vfd_enc)
+	if (vdev == vpu->vfd_enc) {
+		ctx->buf_finish = rockchip_vpu_enc_buf_finish;
 		ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vpu->m2m_dev, ctx,
 						    queue_init);
-	else
+	} else if (vdev == vpu->vfd_dec) {
+		ctx->buf_finish = rockchip_vpu_dec_buf_finish;
+		ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vpu->m2m_dev, ctx,
+						    queue_init);
+	} else {
 		ctx->fh.m2m_ctx = ERR_PTR(-ENODEV);
+	}
 	if (IS_ERR(ctx->fh.m2m_ctx)) {
 		ret = PTR_ERR(ctx->fh.m2m_ctx);
 		kfree(ctx);
@@ -329,7 +370,8 @@ static const struct media_device_ops rockchip_m2m_media_ops = {
 	.req_queue = v4l2_m2m_request_queue,
 };
 
-static int rockchip_vpu_video_device_register(struct rockchip_vpu_dev *vpu)
+static int rockchip_vpu_video_device_register(struct rockchip_vpu_dev *vpu,
+					      enum rockchip_vpu_type type)
 {
 	const struct of_device_id *match;
 	struct video_device *vfd;
@@ -349,8 +391,13 @@ static int rockchip_vpu_video_device_register(struct rockchip_vpu_dev *vpu)
 	vfd->vfl_dir = VFL_DIR_M2M;
 	vfd->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_M2M_MPLANE;
 	vfd->ioctl_ops = &rockchip_vpu_ioctl_ops;
-	snprintf(vfd->name, sizeof(vfd->name), "%s-enc", match->compatible);
-	vpu->vfd_enc = vfd;
+	snprintf(vfd->name, sizeof(vfd->name), "%s-%s", match->compatible,
+		(type == RK_VPU_ENCODER) ? "enc" : "dec");
+
+	if (type == RK_VPU_ENCODER)
+		vpu->vfd_enc = vfd;
+	else
+		vpu->vfd_dec = vfd;
 	video_set_drvdata(vfd, vpu);
 
 	ret = video_register_device(vfd, VFL_TYPE_GRABBER, 0);
@@ -519,6 +566,16 @@ static int rockchip_register_media_controller(struct rockchip_vpu_dev *vpu)
 			return ret;
 	}
 
+	if (vpu->vfd_dec) {
+		ret = rockchip_register_mc(&vpu->mdev, &vpu->mc[1],
+					   vpu->vfd_dec,
+					   MEDIA_ENT_F_PROC_VIDEO_DECODER);
+		if (ret) {
+			rockchip_unregister_mc(&vpu->mc[0]);
+			return ret;
+		}
+	}
+
 	return 0;
 }
 
@@ -555,11 +612,29 @@ static int rockchip_vpu_probe(struct platform_device *pdev)
 	if (IS_ERR(vpu->base))
 		return PTR_ERR(vpu->base);
 	vpu->enc_base = vpu->base + vpu->variant->enc_offset;
+	vpu->dec_base = vpu->base + vpu->variant->dec_offset;
 
 	ret = dma_set_coherent_mask(vpu->dev, DMA_BIT_MASK(32));
 	if (ret) {
 		dev_err(vpu->dev, "Could not set DMA coherent mask.\n");
 		return ret;
+	}
+
+	if (vpu->variant->vdpu_irq) {
+		int irq;
+
+		irq = platform_get_irq_byname(vpu->pdev, "vdpu");
+		if (irq <= 0) {
+			dev_err(vpu->dev, "Could not get vdpu IRQ.\n");
+			return -ENXIO;
+		}
+
+		ret = devm_request_irq(vpu->dev, irq, vpu->variant->vdpu_irq,
+				       0, dev_name(vpu->dev), vpu);
+		if (ret) {
+			dev_err(vpu->dev, "Could not request vdpu IRQ.\n");
+			return ret;
+		}
 	}
 
 	if (vpu->variant->vepu_irq) {
@@ -615,10 +690,20 @@ static int rockchip_vpu_probe(struct platform_device *pdev)
 	vpu->mdev.ops = &rockchip_m2m_media_ops;
 	vpu->v4l2_dev.mdev = &vpu->mdev;
 
-	ret = rockchip_vpu_video_device_register(vpu);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to register encoder\n");
-		goto err_m2m_rel;
+	if (vpu->variant->enc_fmts) {
+		ret = rockchip_vpu_video_device_register(vpu, RK_VPU_ENCODER);
+		if (ret) {
+			dev_err(&pdev->dev, "Failed to register encoder\n");
+			goto err_m2m_enc_rel;
+		}
+	}
+
+	if (vpu->variant->dec_fmts) {
+		ret = rockchip_vpu_video_device_register(vpu, RK_VPU_DECODER);
+		if (ret) {
+			dev_err(&pdev->dev, "Failed to register decoder\n");
+			goto err_video_dev_unreg;
+		}
 	}
 
 	ret = rockchip_register_media_controller(vpu);
@@ -634,14 +719,20 @@ static int rockchip_vpu_probe(struct platform_device *pdev)
 	}
 	return 0;
 err_mc_unreg:
+	if (vpu->vfd_dec)
+		rockchip_unregister_mc(&vpu->mc[1]);
 	if (vpu->vfd_enc)
 		rockchip_unregister_mc(&vpu->mc[0]);
 err_video_dev_unreg:
+	if (vpu->vfd_dec) {
+		video_unregister_device(vpu->vfd_dec);
+		video_device_release(vpu->vfd_dec);
+	}
 	if (vpu->vfd_enc) {
 		video_unregister_device(vpu->vfd_enc);
 		video_device_release(vpu->vfd_enc);
 	}
-err_m2m_rel:
+err_m2m_enc_rel:
 	v4l2_m2m_release(vpu->m2m_dev);
 err_v4l2_unreg:
 	v4l2_device_unregister(&vpu->v4l2_dev);
@@ -664,6 +755,11 @@ static int rockchip_vpu_remove(struct platform_device *pdev)
 		rockchip_unregister_mc(&vpu->mc[0]);
 		video_unregister_device(vpu->vfd_enc);
 		video_device_release(vpu->vfd_enc);
+	}
+	if (vpu->vfd_dec) {
+		rockchip_unregister_mc(&vpu->mc[1]);
+		video_unregister_device(vpu->vfd_dec);
+		video_device_release(vpu->vfd_dec);
 	}
 	v4l2_device_unregister(&vpu->v4l2_dev);
 	clk_bulk_unprepare(vpu->variant->num_clocks, vpu->clocks);

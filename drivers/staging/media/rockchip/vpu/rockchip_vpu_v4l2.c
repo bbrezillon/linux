@@ -36,8 +36,13 @@ rockchip_vpu_get_formats(const struct rockchip_vpu_ctx *ctx,
 {
 	const struct rockchip_vpu_fmt *formats;
 
-	formats = ctx->dev->variant->enc_fmts;
-	*num_fmts = ctx->dev->variant->num_enc_fmts;
+	if (rockchip_vpu_is_encoder_ctx(ctx)) {
+		formats = ctx->dev->variant->enc_fmts;
+		*num_fmts = ctx->dev->variant->num_enc_fmts;
+	} else {
+		formats = ctx->dev->variant->dec_fmts;
+		*num_fmts = ctx->dev->variant->num_dec_fmts;
+	}
 
 	return formats;
 }
