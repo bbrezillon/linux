@@ -15,6 +15,7 @@
 
 /* Our pixel format isn't stable at the moment */
 #define V4L2_PIX_FMT_H264_SLICE_RAW v4l2_fourcc('S', '2', '6', '4') /* H264 parsed slices */
+#define V4L2_PIX_FMT_H264_SLICE_ANNEXB v4l2_fourcc('B', '2', '6', '4') /* H264, annex B parsed slices */
 
 /*
  * This is put insanely high to avoid conflicting with controls that
