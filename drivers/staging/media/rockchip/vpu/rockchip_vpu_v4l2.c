@@ -385,3 +385,167 @@ int rockchip_vpu_vidioc_s_fmt_cap(struct file *file, void *priv,
 	rockchip_vpu_reset_src_fmt(vfd, ctx);
 	return 0;
 }
+
+static int
+rockchip_vpu_buf_plane_check(struct vb2_buffer *vb,
+			     const struct rockchip_vpu_fmt *vpu_fmt,
+			     struct v4l2_pix_format_mplane *pixfmt)
+{
+	unsigned int sz;
+	int i;
+
+	for (i = 0; i < pixfmt->num_planes; ++i) {
+		sz = pixfmt->plane_fmt[i].sizeimage;
+		vpu_debug(4, "plane %d size: %ld, sizeimage: %u\n",
+			  i, vb2_plane_size(vb, i), sz);
+		if (vb2_plane_size(vb, i) < sz) {
+			vpu_err("plane %d is too small for output\n", i);
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
+static int
+rockchip_vpu_queue_setup(struct v4l2_pix_format_mplane *pixfmt,
+			 unsigned int *num_planes,
+			 unsigned int sizes[])
+{
+	int i;
+
+	if (*num_planes) {
+		if (*num_planes != pixfmt->num_planes)
+			return -EINVAL;
+		for (i = 0; i < pixfmt->num_planes; ++i)
+			if (sizes[i] < pixfmt->plane_fmt[i].sizeimage)
+				return -EINVAL;
+		return 0;
+	}
+
+	*num_planes = pixfmt->num_planes;
+	for (i = 0; i < pixfmt->num_planes; ++i)
+		sizes[i] = pixfmt->plane_fmt[i].sizeimage;
+	return 0;
+}
+
+static void
+rockchip_vpu_return_bufs(struct vb2_queue *q,
+			 struct vb2_v4l2_buffer *(*buf_remove)(struct v4l2_m2m_ctx *m2m_ctx))
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(q);
+
+	for (;;) {
+		struct vb2_v4l2_buffer *vbuf;
+
+		vbuf = buf_remove(ctx->fh.m2m_ctx);
+		if (!vbuf)
+			break;
+		v4l2_ctrl_request_complete(vbuf->vb2_buf.req_obj.req, &ctx->ctrl_handler);
+		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+	}
+}
+
+void rockchip_vpu_buf_queue(struct vb2_buffer *vb)
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+
+	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
+}
+
+int rockchip_vpu_src_queue_setup(struct vb2_queue *vq,
+				 unsigned int *num_buffers,
+				 unsigned int *num_planes,
+				 unsigned int sizes[],
+				 struct device *alloc_devs[])
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
+
+	return rockchip_vpu_queue_setup(&ctx->src_fmt,
+					num_planes, sizes);
+}
+
+int rockchip_vpu_dst_queue_setup(struct vb2_queue *vq,
+				 unsigned int *num_buffers,
+				 unsigned int *num_planes,
+				 unsigned int sizes[],
+				 struct device *alloc_devs[])
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
+
+	return rockchip_vpu_queue_setup(&ctx->dst_fmt,
+					num_planes, sizes);
+}
+
+void rockchip_vpu_buf_request_complete(struct vb2_buffer *vb)
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+
+	v4l2_ctrl_request_complete(vb->req_obj.req, &ctx->ctrl_handler);
+}
+
+int rockchip_vpu_buf_out_validate(struct vb2_buffer *vb)
+{
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+
+	vbuf->field = V4L2_FIELD_NONE;
+	return 0;
+}
+
+int rockchip_vpu_src_buf_prepare(struct vb2_buffer *vb)
+{
+	struct vb2_queue *vq = vb->vb2_queue;
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
+
+	return rockchip_vpu_buf_plane_check(vb, ctx->vpu_src_fmt,
+					    &ctx->src_fmt);
+}
+
+int rockchip_vpu_dst_buf_prepare(struct vb2_buffer *vb)
+{
+	struct vb2_queue *vq = vb->vb2_queue;
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
+
+	return rockchip_vpu_buf_plane_check(vb, ctx->vpu_dst_fmt,
+					    &ctx->dst_fmt);
+}
+
+int rockchip_vpu_start(struct vb2_queue *q, unsigned int count)
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(q);
+	enum rockchip_vpu_codec_mode codec_mode;
+	int ret = 0;
+
+	if (q->ops == &rockchip_vpu_enc_dst_queue_ops) {
+		ctx->sequence_out = 0;
+		codec_mode = ctx->vpu_src_fmt->codec_mode;
+
+		vpu_debug(4, "Codec mode = %d\n", codec_mode);
+		ctx->codec_ops = &ctx->dev->variant->codec_ops[codec_mode];
+		if (ctx->codec_ops && ctx->codec_ops->init)
+			ret = ctx->codec_ops->init(ctx);
+	} else {
+		ctx->sequence_cap = 0;
+	}
+
+	return ret;
+}
+
+void rockchip_vpu_stop(struct vb2_queue *q)
+{
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(q);
+
+	if (q->ops == &rockchip_vpu_enc_dst_queue_ops) {
+		if (ctx->codec_ops && ctx->codec_ops->exit)
+			ctx->codec_ops->exit(ctx);
+
+		/*
+		 * The mem2mem framework calls v4l2_m2m_cancel_job before
+		 * .stop_streaming, so there isn't any job running and
+		 * it is safe to return all the buffers.
+		 */
+		rockchip_vpu_return_bufs(q, v4l2_m2m_src_buf_remove);
+	} else {
+		rockchip_vpu_return_bufs(q, v4l2_m2m_dst_buf_remove);
+	}
+}

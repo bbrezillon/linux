@@ -19,7 +19,8 @@
 #include "rockchip_vpu.h"
 
 extern const struct v4l2_ioctl_ops rockchip_vpu_enc_ioctl_ops;
-extern const struct vb2_ops rockchip_vpu_enc_queue_ops;
+extern const struct vb2_ops rockchip_vpu_enc_src_queue_ops;
+extern const struct vb2_ops rockchip_vpu_enc_dst_queue_ops;
 
 void rockchip_vpu_reset_dst_fmt(struct video_device *vfd,
 				struct rockchip_vpu_ctx *ctx);
@@ -45,5 +46,23 @@ int rockchip_vpu_vidioc_s_fmt_out(struct file *file, void *priv,
 				  struct v4l2_format *f);
 int rockchip_vpu_vidioc_s_fmt_cap(struct file *file, void *priv,
 				  struct v4l2_format *f);
+
+void rockchip_vpu_buf_queue(struct vb2_buffer *vb);
+int rockchip_vpu_src_queue_setup(struct vb2_queue *vq,
+				 unsigned int *num_buffers,
+				 unsigned int *num_planes,
+				 unsigned int sizes[],
+				 struct device *alloc_devs[]);
+int rockchip_vpu_dst_queue_setup(struct vb2_queue *vq,
+				 unsigned int *num_buffers,
+				 unsigned int *num_planes,
+				 unsigned int sizes[],
+				 struct device *alloc_devs[]);
+void rockchip_vpu_buf_request_complete(struct vb2_buffer *vb);
+int rockchip_vpu_buf_out_validate(struct vb2_buffer *vb);
+int rockchip_vpu_src_buf_prepare(struct vb2_buffer *vb);
+int rockchip_vpu_dst_buf_prepare(struct vb2_buffer *vb);
+int rockchip_vpu_start(struct vb2_queue *q, unsigned int count);
+void rockchip_vpu_stop(struct vb2_queue *q);
 
 #endif /* ROCKCHIP_VPU_V4L2_H_ */
