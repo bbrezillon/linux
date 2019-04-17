@@ -4,6 +4,7 @@ rockchip-vpu-y += \
 		rockchip_vpu_drv.o \
 		rockchip_vpu_v4l2.o \
 		rockchip_vpu_enc.o \
+		rockchip_vpu_dec.o \
 		rk3288_vpu_hw.o \
 		rk3288_vpu_hw_jpeg_enc.o \
 		rk3399_vpu_hw.o \

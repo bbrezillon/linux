@@ -13,6 +13,11 @@
 #include "rockchip_vpu_v4l2.h"
 #include "rockchip_vpu.h"
 
+static bool rockchip_vpu_vdev_is_encoder(struct video_device *vfd)
+{
+	return vfd->ioctl_ops == &rockchip_vpu_enc_ioctl_ops;
+}
+
 static const struct rockchip_vpu_fmt *
 rockchip_vpu_get_formats(struct video_device *vfd,
 		   struct rockchip_vpu_dev *dev,
@@ -20,8 +25,13 @@ rockchip_vpu_get_formats(struct video_device *vfd,
 {
 	const struct rockchip_vpu_fmt *formats;
 
-	formats = dev->variant->enc_fmts;
-	*num_fmts = dev->variant->num_enc_fmts;
+	if (rockchip_vpu_vdev_is_encoder(vfd)) {
+		formats = dev->variant->enc_fmts;
+		*num_fmts = dev->variant->num_enc_fmts;
+	} else {
+		formats = dev->variant->dec_fmts;
+		*num_fmts = dev->variant->num_dec_fmts;
+	}
 
 	return formats;
 }
@@ -84,25 +94,27 @@ static void rockchip_vpu_reset_fmt(struct v4l2_pix_format_mplane *fmt,
 void rockchip_vpu_reset_dst_fmt(struct video_device *vfd,
 				struct rockchip_vpu_ctx *ctx)
 {
+	bool coded = rockchip_vpu_vdev_is_encoder(vfd);
 	const struct rockchip_vpu_fmt *formats;
 	unsigned int num_fmts;
 
 	formats = rockchip_vpu_get_formats(vfd, ctx->dev, &num_fmts);
 	ctx->vpu_dst_fmt = rockchip_vpu_get_default_fmt(formats, num_fmts,
-							true);
-	rockchip_vpu_reset_fmt(&ctx->dst_fmt, ctx->vpu_dst_fmt, true);
+							coded);
+	rockchip_vpu_reset_fmt(&ctx->dst_fmt, ctx->vpu_dst_fmt, coded);
 }
 
 void rockchip_vpu_reset_src_fmt(struct video_device *vfd,
 			  struct rockchip_vpu_ctx *ctx)
 {
+	bool coded = !rockchip_vpu_vdev_is_encoder(vfd);
 	const struct rockchip_vpu_fmt *formats;
 	unsigned int num_fmts;
 
 	formats = rockchip_vpu_get_formats(vfd, ctx->dev, &num_fmts);
 	ctx->vpu_src_fmt = rockchip_vpu_get_default_fmt(formats, num_fmts,
-							false);
-	rockchip_vpu_reset_fmt(&ctx->src_fmt, ctx->vpu_src_fmt, false);
+							coded);
+	rockchip_vpu_reset_fmt(&ctx->src_fmt, ctx->vpu_src_fmt, coded);
 }
 
 int rockchip_vpu_vidioc_querycap(struct file *file, void *priv,
@@ -159,19 +171,25 @@ static int rockchip_vpu_vidioc_enum_fmt(struct file *file, void *priv,
 	struct video_device *vfd = video_devdata(file);
 	const struct rockchip_vpu_fmt *fmt, *formats;
 	unsigned int num_fmts, i, j = 0;
+	bool skip_mode_none;
+
+	/*
+	 * When dealing with an encoder:
+	 *  - on the capture side we want to filter out all MODE_NONE formats.
+	 *  - on the output side we want to filter out all formats that are
+	 *    not MODE_NONE.
+	 * When dealing with a decoder:
+	 *  - on the capture side we want to filter out all formats that are
+	 *    not MODE_NONE.
+	 *  - on the output side we want to filter out all MODE_NONE formats.
+	 */
+	skip_mode_none = capture != rockchip_vpu_vdev_is_encoder(vfd);
 
 	formats = rockchip_vpu_get_formats(vfd, dev, &num_fmts);
 	for (i = 0; i < num_fmts; i++) {
 		bool mode_none = formats[i].codec_mode == RK_VPU_MODE_NONE;
 
-		/*
-		 * When dealing with an encoder:
-		 *  - on the capture side we want to skip all MODE_NONE
-		 *    formats.
-		 *  - on the output side we want to skip all formats that are
-		 *    not MODE_NONE.
-		 */
-		if (capture != mode_none)
+		if (skip_mode_none == mode_none)
 			continue;
 		if (j == f->index) {
 			fmt = &formats[i];
@@ -309,6 +327,20 @@ int rockchip_vpu_vidioc_s_fmt_out(struct file *file, void *priv,
 	if (vb2_is_streaming(vq))
 		return -EBUSY;
 
+	if (rockchip_vpu_vdev_is_encoder(vfd)) {
+		struct vb2_queue *peer_vq;
+
+		/*
+		 * Since format change on the CAPTURE queue will reset
+		 * the OUTPUT queue, we can't allow doing so
+		 * when the OUTPUT queue has buffers allocated.
+		 */
+		peer_vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
+					  V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+		if (vb2_is_busy(peer_vq))
+			return -EBUSY;
+	}
+
 	ret = rockchip_vpu_vidioc_try_fmt_out(file, priv, f);
 	if (ret)
 		return ret;
@@ -318,13 +350,15 @@ int rockchip_vpu_vidioc_s_fmt_out(struct file *file, void *priv,
 					      pix_mp->pixelformat);
 	ctx->src_fmt = *pix_mp;
 
-	/* Propagate to the CAPTURE format */
-	ctx->dst_fmt.colorspace = pix_mp->colorspace;
-	ctx->dst_fmt.ycbcr_enc = pix_mp->ycbcr_enc;
-	ctx->dst_fmt.xfer_func = pix_mp->xfer_func;
-	ctx->dst_fmt.quantization = pix_mp->quantization;
-	ctx->dst_fmt.width = pix_mp->width;
-	ctx->dst_fmt.height = pix_mp->height;
+	if (rockchip_vpu_vdev_is_encoder(vfd)) {
+		/* Propagate to the CAPTURE format */
+		ctx->dst_fmt.colorspace = pix_mp->colorspace;
+		ctx->dst_fmt.ycbcr_enc = pix_mp->ycbcr_enc;
+		ctx->dst_fmt.xfer_func = pix_mp->xfer_func;
+		ctx->dst_fmt.quantization = pix_mp->quantization;
+		ctx->dst_fmt.width = pix_mp->width;
+		ctx->dst_fmt.height = pix_mp->height;
+	}
 
 	vpu_debug(0, "OUTPUT codec mode: %d\n", ctx->vpu_src_fmt->codec_mode);
 	vpu_debug(0, "fmt - w: %d, h: %d\n",
@@ -340,7 +374,7 @@ int rockchip_vpu_vidioc_s_fmt_cap(struct file *file, void *priv,
 	struct rockchip_vpu_ctx *ctx = fh_to_ctx(priv);
 	struct rockchip_vpu_dev *vpu = ctx->dev;
 	const struct rockchip_vpu_fmt *formats;
-	struct vb2_queue *vq, *peer_vq;
+	struct vb2_queue *vq;
 	unsigned int num_fmts;
 	int ret;
 
@@ -349,18 +383,22 @@ int rockchip_vpu_vidioc_s_fmt_cap(struct file *file, void *priv,
 	if (vb2_is_streaming(vq))
 		return -EBUSY;
 
-	/*
-	 * Since format change on the CAPTURE queue will reset
-	 * the OUTPUT queue, we can't allow doing so
-	 * when the OUTPUT queue has buffers allocated.
-	 */
-	peer_vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
-				  V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
-	if (vb2_is_busy(peer_vq) &&
-	    (pix_mp->pixelformat != ctx->dst_fmt.pixelformat ||
-	     pix_mp->height != ctx->dst_fmt.height ||
-	     pix_mp->width != ctx->dst_fmt.width))
-		return -EBUSY;
+	if (rockchip_vpu_vdev_is_encoder(vfd)) {
+		struct vb2_queue *peer_vq;
+
+		/*
+		 * Since format change on the CAPTURE queue will reset
+		 * the OUTPUT queue, we can't allow doing so
+		 * when the OUTPUT queue has buffers allocated.
+		 */
+		peer_vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
+					  V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
+		if (vb2_is_busy(peer_vq) &&
+		    (pix_mp->pixelformat != ctx->dst_fmt.pixelformat ||
+		     pix_mp->height != ctx->dst_fmt.height ||
+		     pix_mp->width != ctx->dst_fmt.width))
+			return -EBUSY;
+	}
 
 	ret = rockchip_vpu_vidioc_try_fmt_cap(file, priv, f);
 	if (ret)
@@ -382,7 +420,9 @@ int rockchip_vpu_vidioc_s_fmt_cap(struct file *file, void *priv,
 	 * the raw format again after we return, so we don't need
 	 * anything smarter.
 	 */
-	rockchip_vpu_reset_src_fmt(vfd, ctx);
+	if (rockchip_vpu_vdev_is_encoder(vfd))
+		rockchip_vpu_reset_src_fmt(vfd, ctx);
+
 	return 0;
 }
 
@@ -516,7 +556,8 @@ int rockchip_vpu_start(struct vb2_queue *q, unsigned int count)
 	enum rockchip_vpu_codec_mode codec_mode;
 	int ret = 0;
 
-	if (q->ops == &rockchip_vpu_enc_dst_queue_ops) {
+	if (q->ops == &rockchip_vpu_enc_dst_queue_ops ||
+	    q->ops == &rockchip_vpu_dec_src_queue_ops) {
 		ctx->sequence_out = 0;
 		codec_mode = ctx->vpu_src_fmt->codec_mode;
 
@@ -535,7 +576,8 @@ void rockchip_vpu_stop(struct vb2_queue *q)
 {
 	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(q);
 
-	if (q->ops == &rockchip_vpu_enc_dst_queue_ops) {
+	if (q->ops == &rockchip_vpu_enc_dst_queue_ops ||
+	    q->ops == &rockchip_vpu_dec_src_queue_ops) {
 		if (ctx->codec_ops && ctx->codec_ops->exit)
 			ctx->codec_ops->exit(ctx);
 
