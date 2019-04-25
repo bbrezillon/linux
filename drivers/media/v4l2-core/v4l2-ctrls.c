@@ -1511,6 +1511,67 @@ static void std_init(const struct v4l2_ctrl *ctrl, u32 idx,
 	}
 }
 
+static void mpeg2_slice_log(const struct v4l2_ctrl *ctrl)
+{
+	union v4l2_ctrl_ptr ptr = ctrl->p_cur;
+	const struct v4l2_ctrl_mpeg2_slice_params *p_mpeg2_slice_params = ptr.p;
+	const char *str;
+
+	switch (p_mpeg2_slice_params->sequence.chroma_format) {
+	case 1:
+		str = "4:2:0";
+		break;
+	case 2:
+		str = "4:2:2";
+		break;
+	case 3:
+		str = "4:4:2";
+		break;
+	default:
+		str = "invalid";
+		break;
+	}
+	pr_cont("chroma_format %s", str);
+
+	if (p_mpeg2_slice_params->picture.intra_dc_precision < 4)
+		pr_cont("intra_dc_precision %d",
+			p_mpeg2_slice_params->picture.intra_dc_precision + 8);
+	else
+		pr_cont("intra_dc_precision invalid");
+
+	switch (p_mpeg2_slice_params->picture.picture_structure) {
+	case 1:
+		str = "interlaced-top-field";
+		break;
+	case 2:
+		str = "interlaced-bottom-field";
+		break;
+	case 3:
+		str = "progressive";
+		break;
+	default:
+		str = "invalid";
+		break;
+	}
+	pr_cont("picture_structure %s", str);
+
+	switch (p_mpeg2_slice_params->picture.picture_coding_type) {
+	case V4L2_MPEG2_PICTURE_CODING_TYPE_I:
+		str = "I";
+		break;
+	case V4L2_MPEG2_PICTURE_CODING_TYPE_P:
+		str = "P";
+		break;
+	case V4L2_MPEG2_PICTURE_CODING_TYPE_B:
+		str = "B";
+		break;
+	default:
+		str = "invalid";
+		break;
+	}
+	pr_cont("picture_coding_type %s", str);
+}
+
 static void std_log(const struct v4l2_ctrl *ctrl)
 {
 	union v4l2_ctrl_ptr ptr = ctrl->p_cur;
@@ -1523,7 +1584,7 @@ static void std_log(const struct v4l2_ctrl *ctrl)
 		pr_cont(" ");
 	}
 
-	switch (ctrl->type) {
+	switch ((u32)ctrl->type) {
 	case V4L2_CTRL_TYPE_INTEGER:
 		pr_cont("%d", *ptr.p_s32);
 		break;
@@ -1553,6 +1614,9 @@ static void std_log(const struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CTRL_TYPE_U32:
 		pr_cont("%u", (unsigned)*ptr.p_u32);
+		break;
+	case V4L2_CTRL_TYPE_MPEG2_SLICE_PARAMS:
+		mpeg2_slice_log(ctrl);
 		break;
 	default:
 		pr_cont("unknown type %d", ctrl->type);
