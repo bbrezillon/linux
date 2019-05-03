@@ -9,4 +9,11 @@ source "drivers/mtd/nand/onenand/Kconfig"
 source "drivers/mtd/nand/raw/Kconfig"
 source "drivers/mtd/nand/spi/Kconfig"
 
+menu "ECC engine support"
+
+config MTD_NAND_ECC
+	bool
+
+endmenu
+
 endmenu
