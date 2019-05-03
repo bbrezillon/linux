@@ -2277,10 +2277,11 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 
 	if (chip->ecc.engine_type != NAND_ECC_ENGINE_NONE &&
 	    (!chip->ecc.size || !chip->ecc.strength)) {
-		if (chip->base.eccreq.step_size && chip->base.eccreq.strength) {
+		if (chip->base.ecc.requirements.step_size &&
+		    chip->base.ecc.requirements.strength) {
 			/* use detected ECC parameters */
-			chip->ecc.size = chip->base.eccreq.step_size;
-			chip->ecc.strength = chip->base.eccreq.strength;
+			chip->ecc.size = chip->base.ecc.requirements.step_size;
+			chip->ecc.strength = chip->base.ecc.requirements.strength;
 			dev_info(ctrl->dev, "Using ECC step-size %d, strength %d\n",
 				chip->ecc.size, chip->ecc.strength);
 		}

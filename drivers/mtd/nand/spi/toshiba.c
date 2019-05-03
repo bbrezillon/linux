@@ -77,12 +77,12 @@ static int tc58cxgxsx_ecc_get_status(struct spinand_device *spinand,
 		 * data around if it's not necessary.
 		 */
 		if (spi_mem_exec_op(spinand->spimem, &op))
-			return nand->eccreq.strength;
+			return nand->ecc.ctx.conf.strength;
 
 		mbf >>= 4;
 
-		if (WARN_ON(mbf > nand->eccreq.strength || !mbf))
-			return nand->eccreq.strength;
+		if (WARN_ON(mbf > nand->ecc.ctx.conf.strength || !mbf))
+			return nand->ecc.ctx.conf.strength;
 
 		return mbf;
 

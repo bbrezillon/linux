@@ -198,7 +198,7 @@ struct spinand_id {
  *	    match, 0 if the manufacturer ID does not match and a negative
  *	    error code otherwise. When true is returned, the core assumes
  *	    that properties of the NAND chip (spinand->base.memorg and
- *	    spinand->base.eccreq) have been filled
+ *	    spinand->base.ecc.ctx.conf) have been filled
  * @init: initialize a SPI NAND device
  * @cleanup: cleanup a SPI NAND device
  *

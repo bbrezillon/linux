@@ -1234,8 +1234,8 @@ static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 	/* if optional dt settings not present */
 	if (!nand->ecc.size || !nand->ecc.strength) {
 		/* use datasheet requirements */
-		nand->ecc.strength = nand->base.eccreq.strength;
-		nand->ecc.size = nand->base.eccreq.step_size;
+		nand->ecc.strength = nand->base.ecc.requirements.strength;
+		nand->ecc.size = nand->base.ecc.requirements.step_size;
 
 		/*
 		 * align eccstrength and eccsize
