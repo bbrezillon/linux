@@ -80,41 +80,6 @@ struct nand_chip;
 
 #define NAND_DATA_IFACE_CHECK_ONLY	-1
 
-/**
- * enum nand_ecc_engine_type - NAND ECC engine type/provider
- * @NAND_ECC_ENGINE_INVALID: Invalid value
- * @NAND_ECC_ENGINE_NONE: No ECC correction
- * @NAND_ECC_ENGINE_SOFT: Software ECC correction
- * @NAND_ECC_ENGINE_CONTROLLER: Hardware controller ECC correction
- * @NAND_ECC_ENGINE_ON_DIE: On chip hardware ECC correction
- */
-enum nand_ecc_engine_type {
-	NAND_ECC_ENGINE_INVALID,
-	NAND_ECC_ENGINE_NONE,
-	NAND_ECC_ENGINE_SOFT,
-	NAND_ECC_ENGINE_CONTROLLER,
-	NAND_ECC_ENGINE_ON_DIE,
-};
-
-/**
- * enum nand_ecc_placement - NAND ECC placement
- * @NAND_ECC_PLACEMENT_FREE: The driver can decide where to put ECC bytes.
- *                           Default behavior is to put them at the end of the
- *                           OOB area.
- * @NAND_ECC_PLACEMENT_INTERLEAVED: Syndrome layout: interleave data and OOB.
- */
-enum nand_ecc_placement {
-	NAND_ECC_PLACEMENT_FREE,
-	NAND_ECC_PLACEMENT_INTERLEAVED,
-};
-
-enum nand_ecc_algo {
-	NAND_ECC_UNKNOWN,
-	NAND_ECC_HAMMING,
-	NAND_ECC_BCH,
-	NAND_ECC_RS,
-};
-
 /*
  * Constants for Hardware ECC
  */
