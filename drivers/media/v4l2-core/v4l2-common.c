@@ -546,16 +546,41 @@ void v4l2_apply_frmsize_constraints(u32 *width, u32 *height,
 }
 EXPORT_SYMBOL_GPL(v4l2_apply_frmsize_constraints);
 
+#define MIN_H_W		4
+#define MAX_H_W		32768
+
+static int check_width_height(u32 width, u32 height)
+{
+	if (width < MIN_H_W || width > MAX_H_W ||
+	    height < MIN_H_W || height > MAX_H_W)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int check_bytesperline_sizeimage(u32 bytesperline, u32 sizeimage)
+{
+	if (bytesperline > INT_MAX || sizeimage > INT_MAX ||
+	    bytesperline > sizeimage)
+		return -EINVAL;
+
+	return 0;
+}
+
 int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 			u32 pixelformat, u32 width, u32 height)
 {
 	const struct v4l2_format_info *info;
 	struct v4l2_plane_pix_format *plane;
-	int i;
+	int i, ret;
 
 	info = v4l2_format_info(pixelformat);
 	if (!info)
 		return -EINVAL;
+
+	ret = check_width_height(width, height);
+	if (WARN_ON(ret))
+		return ret;
 
 	pixfmt->width = width;
 	pixfmt->height = height;
@@ -563,23 +588,21 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 	pixfmt->num_planes = info->mem_planes;
 
 	if (info->mem_planes == 1) {
-		u32 bytesperline, sizeimage = 0;
+		unsigned int aligned_width, aligned_height;
+		u32 sizeimage = 0;
 
 		plane = &pixfmt->plane_fmt[0];
-		bytesperline = ALIGN(width, v4l2_format_block_width(info, 0)) * info->bpp[0];
+		aligned_width = ALIGN(width, v4l2_format_block_width(info, 0));
+		aligned_height = ALIGN(height, v4l2_format_block_height(info, 0));
+		plane->bytesperline = max(aligned_width * info->bpp[0],
+					  plane->bytesperline);
 
 		for (i = 0; i < info->comp_planes; i++) {
 			unsigned int hdiv = (i == 0) ? 1 : info->hdiv;
 			unsigned int vdiv = (i == 0) ? 1 : info->vdiv;
-			unsigned int aligned_width;
-			unsigned int aligned_height;
 
-			aligned_width = ALIGN(width, v4l2_format_block_width(info, i));
-			aligned_height = ALIGN(height, v4l2_format_block_height(info, i));
-
-			sizeimage += info->bpp[i] *
-				     DIV_ROUND_UP(aligned_width, hdiv) *
-				     DIV_ROUND_UP(aligned_height, vdiv);
+			sizeimage += (aligned_width / hdiv) * info->bpp[i] *
+				     (aligned_height / vdiv);
 		}
 
 		/*
@@ -588,6 +611,10 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 		 */
 		plane->sizeimage = max(sizeimage, plane->sizeimage);
 		plane->bytesperline = max(bytesperline, plane->bytesperline);
+		ret = check_bytesperline_sizeimage(plane->bytesperline,
+						   plane->sizeimage);
+		if (WARN_ON(ret))
+			return ret;
 	} else {
 		for (i = 0; i < info->comp_planes; i++) {
 			unsigned int hdiv = (i == 0) ? 1 : info->hdiv;
@@ -613,6 +640,11 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 						 plane->bytesperline *
 						 DIV_ROUND_UP(aligned_height, vdiv),
 						 plane->sizeimage);
+
+			ret = check_bytesperline_sizeimage(plane->bytesperline,
+							   plane->sizeimage);
+			if (WARN_ON(ret))
+				return ret;
 		}
 	}
 	return 0;
@@ -624,7 +656,7 @@ int v4l2_fill_pixfmt(struct v4l2_pix_format *pixfmt, u32 pixelformat,
 {
 	const struct v4l2_format_info *info;
 	u32 bytesperline, sizeimage = 0;
-	int i;
+	int i, ret;
 
 	info = v4l2_format_info(pixelformat);
 	if (!info)
@@ -633,6 +665,10 @@ int v4l2_fill_pixfmt(struct v4l2_pix_format *pixfmt, u32 pixelformat,
 	/* Single planar API cannot be used for multi plane formats. */
 	if (info->mem_planes > 1)
 		return -EINVAL;
+
+	ret = check_width_height(width, height);
+	if (ret)
+		return ret;
 
 	pixfmt->width = width;
 	pixfmt->height = height;

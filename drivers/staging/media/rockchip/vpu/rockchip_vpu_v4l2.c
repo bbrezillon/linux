@@ -239,14 +239,21 @@ static int vidioc_try_fmt(struct file *file, void *priv, struct v4l2_format *f,
 		/* Fill remaining fields */
 		v4l2_fill_pixfmt_mp(pix_mp, fmt->fourcc, pix_mp->width,
 				    pix_mp->height);
-	} else if (!pix_mp->plane_fmt[0].sizeimage) {
+	} else {
+		u32 bytesperline, maxsizeimage;
+		maxsizeimage = fmt->header_size +
+			       pix_mp->width * pix_mp->height * fmt->max_depth;
+
 		/*
 		 * For coded formats the application can specify
 		 * sizeimage. If the application passes a zero sizeimage,
 		 * let's default to the maximum frame size.
+		 * FIXME: we should probably override sizeimage when it's too
+		 * small, but I don't know how to calculate minsizeimage as it
+		 * probably depends the coded format.
 		 */
-		pix_mp->plane_fmt[0].sizeimage = fmt->header_size +
-			pix_mp->width * pix_mp->height * fmt->max_depth;
+		if (!pix_mp->plane_fmt[0].sizeimage)
+			pix_mp->plane_fmt[0].sizeimage = maxsizeimage;
 	}
 
 	return 0;
