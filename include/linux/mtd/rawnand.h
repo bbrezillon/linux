@@ -92,6 +92,18 @@ enum nand_ecc_mode {
 	NAND_ECC_ON_DIE,
 };
 
+/**
+ * enum nand_ecc_placement - NAND ECC placement
+ * @NAND_ECC_PLACEMENT_FREE: The driver can decide where to put ECC bytes.
+ *                           Default behavior is to put them at the end of the
+ *                           OOB area.
+ * @NAND_ECC_PLACEMENT_INTERLEAVED: Syndrome layout: interleave data and OOB.
+ */
+enum nand_ecc_placement {
+	NAND_ECC_PLACEMENT_FREE,
+	NAND_ECC_PLACEMENT_INTERLEAVED,
+};
+
 enum nand_ecc_algo {
 	NAND_ECC_UNKNOWN,
 	NAND_ECC_HAMMING,
