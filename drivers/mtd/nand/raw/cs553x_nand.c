@@ -210,7 +210,7 @@ static int __init cs553x_init_one(int cs, int mmio, unsigned long adr)
 
 	this->legacy.chip_delay = 0;
 
-	this->ecc.mode = NAND_ECC_HW;
+	this->ecc.engine_type = NAND_ECC_ENGINE_CONTROLLER;
 	this->ecc.size = 256;
 	this->ecc.bytes = 3;
 	this->ecc.hwctl  = cs_enable_hwecc;

@@ -430,7 +430,7 @@ static int au1550nd_probe(struct platform_device *pdev)
 
 	/* 30 us command delay time */
 	this->legacy.chip_delay = 30;
-	this->ecc.mode = NAND_ECC_SOFT;
+	this->ecc.engine_type = NAND_ECC_ENGINE_SOFT;
 	this->ecc.algo = NAND_ECC_HAMMING;
 
 	if (pd->devwidth)

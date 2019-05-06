@@ -2203,7 +2203,7 @@ static int ns_attach_chip(struct nand_chip *chip)
 		return -EINVAL;
 	}
 
-	chip->ecc.mode = NAND_ECC_SOFT;
+	chip->ecc.engine_type = NAND_ECC_ENGINE_SOFT;
 	chip->ecc.algo = NAND_ECC_BCH;
 	chip->ecc.size = 512;
 	chip->ecc.strength = bch;
@@ -2242,7 +2242,7 @@ static int __init ns_init_module(void)
 	nsmtd       = nand_to_mtd(chip);
 	nand_set_controller_data(chip, (void *)ns);
 
-	chip->ecc.mode   = NAND_ECC_SOFT;
+	chip->ecc.engine_type = NAND_ECC_ENGINE_SOFT;
 	chip->ecc.algo   = NAND_ECC_HAMMING;
 	/* The NAND_SKIP_BBTSCAN option is necessary for 'overridesize' */
 	/* and 'badblocks' parameters to work */

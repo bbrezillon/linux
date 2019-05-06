@@ -246,7 +246,7 @@ static int ams_delta_init(struct platform_device *pdev)
 		return err;
 	}
 
-	this->ecc.mode = NAND_ECC_SOFT;
+	this->ecc.engine_type = NAND_ECC_ENGINE_SOFT;
 	this->ecc.algo = NAND_ECC_HAMMING;
 
 	platform_set_drvdata(pdev, priv);

@@ -1741,14 +1741,15 @@ static int stm32_fmc2_attach_chip(struct nand_chip *chip)
 	int ret;
 
 	/*
-	 * Only NAND_ECC_HW mode is actually supported
+	 * Only NAND_ECC_ENGINE_CONTROLLER mode is actually supported
 	 * Hamming => ecc.strength = 1
 	 * BCH4 => ecc.strength = 4
 	 * BCH8 => ecc.strength = 8
 	 * ECC sector size = 512
 	 */
-	if (chip->ecc.mode != NAND_ECC_HW) {
-		dev_err(fmc2->dev, "nand_ecc_mode is not well defined in the DT\n");
+	if (chip->ecc.engine_type != NAND_ECC_ENGINE_CONTROLLER) {
+		dev_err(fmc2->dev,
+			"nand_ecc_engine_type is not well defined in the DT\n");
 		return -EINVAL;
 	}
 
@@ -1960,7 +1961,7 @@ static int stm32_fmc2_probe(struct platform_device *pdev)
 			 NAND_USE_BOUNCE_BUFFER;
 
 	/* Default ECC settings */
-	chip->ecc.mode = NAND_ECC_HW;
+	chip->ecc.engine_type = NAND_ECC_ENGINE_CONTROLLER;
 	chip->ecc.size = FMC2_ECC_STEP_SIZE;
 	chip->ecc.strength = FMC2_ECC_BCH8;
 
