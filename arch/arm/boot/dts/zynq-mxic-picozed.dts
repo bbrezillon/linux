@@ -45,18 +45,21 @@
 		clock-names = "send_clk", "send_dly_clk", "ps_clk";
 		#address-cells = <1>;
 		#size-cells = <0>;
+		ecc-engine = <&nand_ecc_engine>;
 
 		flash@0 {
 			compatible = "spi-nand";
 			reg = <0>;
-			nand-ecc-mode = "soft";
-			nand-ecc-algo = "bch";
-			nand-ecc-strength = <8>;
-			nand-ecc-step-size = <512>;
+			nand-ecc-mode = "hw";
 			spi-max-frequency = <25000000>;
 			spi-tx-bus-width = <4>;
 			spi-rx-bus-width = <4>;
 		};
+	};
+
+	nand_ecc_engine: ecc@43c40000 {
+		compatible = "mxic,spi-pipelined-ecc-engine";
+		reg = <0x43c40000 0x10000>;
 	};
 };
 
