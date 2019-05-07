@@ -569,6 +569,32 @@ static int b1_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
 }
 
 static void
+dump_reflist(struct rockchip_vpu_ctx *ctx, const char *name,
+	     const u8 *reflist, unsigned int nelems)
+{
+	unsigned int i;
+
+	vpu_debug(2, "%s reflist:\n", name);
+	for (i = 0; i < nelems; i++)
+		vpu_debug(2, "\t%d\n", reflist[i]);
+}
+
+static void
+dump_dpb(const char *name, const struct v4l2_h264_dpb_entry *dpb)
+{
+	unsigned int i;
+
+	vpu_debug(2, "dump %s DPB\n", name);
+	for (i = 0; i < 16; i++) {
+		const struct v4l2_h264_dpb_entry *entry = &dpb[i];
+		vpu_debug(2, "\tDPB[%d] = ref_ts %lld frame_num %d pic_num %d POC %d %d flags %08x\n",
+			  i, entry->reference_ts, entry->frame_num, entry->pic_num,
+			  entry->top_field_order_cnt, entry->bottom_field_order_cnt,
+			  entry->flags);
+	}
+}
+
+static void
 build_p_ref_list(struct rockchip_vpu_ctx *ctx,
 		 const struct v4l2_ctrl_h264_decode_params *dec_param,
 		 u8 *reflist)
@@ -578,6 +604,7 @@ build_p_ref_list(struct rockchip_vpu_ctx *ctx,
 	init_reflist_builder(ctx, dec_param, reflist, &builder);
 	sort_r(reflist, builder.num_valid, sizeof(*reflist),
 	       p_ref_list_cmp, NULL, &builder);
+	dump_reflist(ctx, "P", reflist, builder.num_valid);
 }
 
 static void
@@ -591,9 +618,13 @@ build_b_ref_lists(struct rockchip_vpu_ctx *ctx,
 	sort_r(b0_reflist, builder.num_valid, sizeof(*b0_reflist),
 	       b0_ref_list_cmp, NULL, &builder);
 
+	dump_reflist(ctx, "B0", b0_reflist, builder.num_valid);
+
 	init_reflist_builder(ctx, dec_param, b1_reflist, &builder);
 	sort_r(b1_reflist, builder.num_valid, sizeof(*b1_reflist),
 	       b1_ref_list_cmp, NULL, &builder);
+
+	dump_reflist(ctx, "B1", b1_reflist, builder.num_valid);
 }
 
 static bool dpb_entry_match(const struct v4l2_h264_dpb_entry *a,
@@ -682,6 +713,8 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 
 	update_dpb(ctx, dec_param);
 	dpb = ctx->h264_dec.dpb;
+	dump_dpb("cache", dpb);
+	dump_dpb("new", dec_param->dpb);
 
 	/*
 	 * Set up bit maps of valid and long term DPBs.
