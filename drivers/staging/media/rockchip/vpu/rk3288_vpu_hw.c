@@ -154,6 +154,12 @@ static const struct rockchip_vpu_codec_ops rk3288_vpu_codec_ops[] = {
 		.init = rockchip_vpu_mpeg2_dec_init,
 		.exit = rockchip_vpu_mpeg2_dec_exit,
 	},
+	[RK_VPU_MODE_MPEG2_DEC] = {
+		.run = rk3288_vpu_h264_dec_run,
+		.reset = rk3288_vpu_dec_reset,
+		.init = rk3288_vpu_h264_dec_init,
+		.exit = rk3288_vpu_h264_dec_exit,
+	},
 };
 
 /*
