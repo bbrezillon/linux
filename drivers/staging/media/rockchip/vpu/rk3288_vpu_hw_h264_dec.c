@@ -318,16 +318,14 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL0);
 
 	/* Decoder control register 1. */
-	reg = VDPU_REG_DEC_CTRL1_PIC_MB_WIDTH(sps->pic_width_in_mbs_minus1 + 1)
-		| VDPU_REG_DEC_CTRL1_PIC_MB_HEIGHT_P(
-			sps->pic_height_in_map_units_minus1 + 1)
-		| VDPU_REG_DEC_CTRL1_REF_FRAMES(sps->max_num_ref_frames);
+	reg = VDPU_REG_DEC_CTRL1_PIC_MB_WIDTH(sps->pic_width_in_mbs_minus1 + 1) |
+	      VDPU_REG_DEC_CTRL1_PIC_MB_HEIGHT_P(sps->pic_height_in_map_units_minus1 + 1) |
+	      VDPU_REG_DEC_CTRL1_REF_FRAMES(sps->max_num_ref_frames);
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL1);
 
 	/* Decoder control register 2. */
-	reg = VDPU_REG_DEC_CTRL2_CH_QP_OFFSET(pps->chroma_qp_index_offset)
-		| VDPU_REG_DEC_CTRL2_CH_QP_OFFSET2(
-			pps->second_chroma_qp_index_offset);
+	reg = VDPU_REG_DEC_CTRL2_CH_QP_OFFSET(pps->chroma_qp_index_offset) |
+	      VDPU_REG_DEC_CTRL2_CH_QP_OFFSET2(pps->second_chroma_qp_index_offset);
 	/* always use the matrix sent from userspace */
 	reg |= VDPU_REG_DEC_CTRL2_TYPE1_QUANT_E;
 
@@ -336,10 +334,9 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL2);
 
 	/* Decoder control register 3. */
-	reg = VDPU_REG_DEC_CTRL3_START_CODE_E
-		| VDPU_REG_DEC_CTRL3_INIT_QP(pps->pic_init_qp_minus26 + 26)
-		| VDPU_REG_DEC_CTRL3_STREAM_LEN(
-			vb2_get_plane_payload(&src_buf->vb2_buf, 0));
+	reg = VDPU_REG_DEC_CTRL3_START_CODE_E |
+	      VDPU_REG_DEC_CTRL3_INIT_QP(pps->pic_init_qp_minus26 + 26) |
+	      VDPU_REG_DEC_CTRL3_STREAM_LEN(vb2_get_plane_payload(&src_buf->vb2_buf, 0));
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL3);
 
 	/* Decoder control register 4. */
@@ -357,9 +354,8 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL4);
 
 	/* Decoder control register 5. */
-	reg = VDPU_REG_DEC_CTRL5_REFPIC_MK_LEN(
-			slice->dec_ref_pic_marking_bit_size)
-		| VDPU_REG_DEC_CTRL5_IDR_PIC_ID(slice->idr_pic_id);
+	reg = VDPU_REG_DEC_CTRL5_REFPIC_MK_LEN(slice->dec_ref_pic_marking_bit_size) |
+	      VDPU_REG_DEC_CTRL5_IDR_PIC_ID(slice->idr_pic_id);
 	if (pps->flags & V4L2_H264_PPS_FLAG_CONSTRAINED_INTRA_PRED)
 		reg |= VDPU_REG_DEC_CTRL5_CONST_INTRA_E;
 	if (pps->flags & V4L2_H264_PPS_FLAG_DEBLOCKING_FILTER_CONTROL_PRESENT)
@@ -373,12 +369,10 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL5);
 
 	/* Decoder control register 6. */
-	reg = VDPU_REG_DEC_CTRL6_PPS_ID(slice->pic_parameter_set_id)
-		| VDPU_REG_DEC_CTRL6_REFIDX0_ACTIVE(
-			pps->num_ref_idx_l0_default_active_minus1 + 1)
-		| VDPU_REG_DEC_CTRL6_REFIDX1_ACTIVE(
-			pps->num_ref_idx_l1_default_active_minus1 + 1)
-		| VDPU_REG_DEC_CTRL6_POC_LENGTH(slice->pic_order_cnt_bit_size);
+	reg = VDPU_REG_DEC_CTRL6_PPS_ID(slice->pic_parameter_set_id) |
+	      VDPU_REG_DEC_CTRL6_REFIDX0_ACTIVE(pps->num_ref_idx_l0_default_active_minus1 + 1) |
+	      VDPU_REG_DEC_CTRL6_REFIDX1_ACTIVE(pps->num_ref_idx_l1_default_active_minus1 + 1) |
+	      VDPU_REG_DEC_CTRL6_POC_LENGTH(slice->pic_order_cnt_bit_size);
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL6);
 
 	/* Error concealment register. */

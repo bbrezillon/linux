@@ -318,13 +318,13 @@ static inline u32 vepu_read(struct rockchip_vpu_dev *vpu, u32 reg)
 static inline void vdpu_write_relaxed(struct rockchip_vpu_dev *vpu,
 				      u32 val, u32 reg)
 {
-	vpu_debug(6, "0x%04x = 0x%08x\n", reg / 4, val);
+	vpu_debug(6, "0x%04x = 0x%08x\n", reg, val);
 	writel_relaxed(val, vpu->dec_base + reg);
 }
 
 static inline void vdpu_write(struct rockchip_vpu_dev *vpu, u32 val, u32 reg)
 {
-	vpu_debug(6, "0x%04x = 0x%08x\n", reg / 4, val);
+	vpu_debug(6, "0x%04x = 0x%08x\n", reg, val);
 	writel(val, vpu->dec_base + reg);
 }
 
