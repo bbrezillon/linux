@@ -274,7 +274,7 @@ static void prepare_table(struct rockchip_vpu_ctx *ctx,
 	memcpy(tbl->cabac_table, h264_cabac_table, sizeof(tbl->cabac_table));
 
 	for (i = 0; i < RK3288_VPU_H264_NUM_DPB; ++i) {
-		tbl->poc[i * 2 + 0] = dpb[i].top_field_order_cnt;
+		tbl->poc[i * 2] = dpb[i].top_field_order_cnt;
 		tbl->poc[i * 2 + 1] = dpb[i].bottom_field_order_cnt;
 
 		vpu_debug(2, "poc [%02d]: %08x %08x\n", i,
@@ -301,12 +301,13 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 
 	src_buf = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
 	/* Decoder control register 0. */
-	reg = VDPU_REG_DEC_CTRL0_DEC_AXI_WR_ID(0xff);
+	reg = VDPU_REG_DEC_CTRL0_DEC_AXI_WR_ID(0x0);
 	if (sps->flags & V4L2_H264_SPS_FLAG_MB_ADAPTIVE_FRAME_FIELD)
 		reg |= VDPU_REG_DEC_CTRL0_SEQ_MBAFF_E;
-	if (sps->profile_idc > 66)
-		reg |= VDPU_REG_DEC_CTRL0_PICORD_COUNT_E
-			| VDPU_REG_DEC_CTRL0_WRITE_MVS_E;
+	reg |= VDPU_REG_DEC_CTRL0_PICORD_COUNT_E;
+	if (dec_param->nal_ref_idc)
+		reg |= VDPU_REG_DEC_CTRL0_WRITE_MVS_E;
+
 	if (!(sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY) &&
 	    (sps->flags & V4L2_H264_SPS_FLAG_MB_ADAPTIVE_FRAME_FIELD ||
 	     slice->flags & V4L2_H264_SLICE_FLAG_FIELD_PIC))
@@ -327,7 +328,7 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	reg = VDPU_REG_DEC_CTRL2_CH_QP_OFFSET(pps->chroma_qp_index_offset) |
 	      VDPU_REG_DEC_CTRL2_CH_QP_OFFSET2(pps->second_chroma_qp_index_offset);
 	/* always use the matrix sent from userspace */
-	reg |= VDPU_REG_DEC_CTRL2_TYPE1_QUANT_E;
+//	reg |= VDPU_REG_DEC_CTRL2_TYPE1_QUANT_E;
 
 	if (slice->flags &  V4L2_H264_SLICE_FLAG_FIELD_PIC)
 		reg |= VDPU_REG_DEC_CTRL2_FIELDPIC_FLAG_E;
@@ -379,17 +380,18 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, 0, VDPU_REG_ERR_CONC);
 
 	/* Prediction filter tap register. */
-	vdpu_write_relaxed(vpu, VDPU_REG_PRED_FLT_PRED_BC_TAP_0_0(1)
-				| VDPU_REG_PRED_FLT_PRED_BC_TAP_0_1(-5 & 0x3ff)
-				| VDPU_REG_PRED_FLT_PRED_BC_TAP_0_2(20),
-				VDPU_REG_PRED_FLT);
+	vdpu_write_relaxed(vpu,
+			   VDPU_REG_PRED_FLT_PRED_BC_TAP_0_0(1) |
+			   VDPU_REG_PRED_FLT_PRED_BC_TAP_0_1(-5 & 0x3ff) |
+			   VDPU_REG_PRED_FLT_PRED_BC_TAP_0_2(20),
+			   VDPU_REG_PRED_FLT);
 
 	/* Reference picture buffer control register. */
 	vdpu_write_relaxed(vpu, 0, VDPU_REG_REF_BUF_CTRL);
 
 	/* Reference picture buffer control register 2. */
 	vdpu_write_relaxed(vpu, VDPU_REG_REF_BUF_CTRL2_APF_THRESHOLD(8),
-				VDPU_REG_REF_BUF_CTRL2);
+			   VDPU_REG_REF_BUF_CTRL2);
 }
 
 static s32 get_poc(enum v4l2_field field, s32 top_field_order_cnt,
@@ -430,16 +432,21 @@ init_reflist_builder(struct rockchip_vpu_ctx *ctx,
 	b->num_valid = 0;
 	b->curpoc = get_poc(buf->field, dec_param->top_field_order_cnt,
 			    dec_param->bottom_field_order_cnt);
-	memset(reflist, 0xff, RK3288_VPU_H264_NUM_DPB);
+	memset(reflist, 0, RK3288_VPU_H264_NUM_DPB);
+
 	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++) {
 		int buf_idx;
 
-		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_VALID))
+		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_VALID)) {
+			reflist[i] = i;
 			continue;
+		}
 
 		buf_idx = vb2_find_timestamp(cap_q, dpb[i].reference_ts, 0);
-		if (buf_idx < 0)
+		if (buf_idx < 0) {
+			reflist[i] = i;
 			continue;
+		}
 
 		buf = to_vb2_v4l2_buffer(ctx->dst_bufs[buf_idx]);
 		reflist[b->num_valid] = i;
@@ -629,6 +636,15 @@ static bool dpb_entry_match(const struct v4l2_h264_dpb_entry *a,
 }
 
 static void
+dump_dec_param(const struct v4l2_ctrl_h264_decode_params *dec_param)
+{
+
+	vpu_debug(2, "num_slices %d flags %08x nal_ref_idc %d POC %d %d\n",
+		 dec_param->num_slices, dec_param->flags, dec_param->nal_ref_idc,
+		 dec_param->top_field_order_cnt, dec_param->bottom_field_order_cnt);
+}
+
+static void
 update_dpb(struct rockchip_vpu_ctx *ctx,
 	   const struct v4l2_ctrl_h264_decode_params *dec_param)
 {
@@ -684,6 +700,7 @@ update_dpb(struct rockchip_vpu_ctx *ctx,
 
 		cdpb = &ctx->h264_dec.dpb[j];
 		*cdpb = *ndpb;
+		set_bit(j, used);
 	}
 }
 
@@ -705,8 +722,9 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 
 	dst_buf = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 
-	update_dpb(ctx, dec_param);
 	dpb = ctx->h264_dec.dpb;
+	dump_dpb("cache", dpb);
+	update_dpb(ctx, dec_param);
 	dump_dpb("cache", dpb);
 	dump_dpb("new", dec_param->dpb);
 
@@ -837,7 +855,7 @@ static void set_buffers(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, dst_dma, VDPU_REG_ADDR_DST);
 
 	/* Higher profiles require DMV buffer appended to reference frames. */
-	if (sps->profile_idc > 66) {
+	if (sps->profile_idc > 66 || 1) {
 		size_t sizeimage = ctx->dst_fmt.plane_fmt[0].sizeimage;
 		size_t mv_offset = round_up(sizeimage, 8);
 
@@ -852,6 +870,14 @@ static void set_buffers(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, ctx->h264_dec.priv.dma, VDPU_REG_ADDR_QTABLE);
 }
 
+void dump_regs(struct rockchip_vpu_ctx *ctx)
+{
+	int i;
+
+	for (i = 0; i < 100; i++)
+		vpu_debug(7, "reg[%d] %08x\n", i, readl(ctx->dev->dec_base + (i * 4)));
+}
+
 void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 {
 	const struct v4l2_ctrl_h264_decode_params *dec_param;
@@ -860,6 +886,11 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	const struct v4l2_ctrl_h264_sps *sps;
 	const struct v4l2_ctrl_h264_pps *pps;
 	struct rockchip_vpu_dev *vpu = ctx->dev;
+	struct vb2_v4l2_buffer *src_buf;
+
+	src_buf = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
+	v4l2_ctrl_request_setup(src_buf->vb2_buf.req_obj.req,
+				&ctx->ctrl_handler);
 
 	scaling = rockchip_vpu_get_ctrl(ctx,
 				V4L2_CID_MPEG_VIDEO_H264_SCALING_MATRIX);
@@ -884,6 +915,10 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	if (WARN_ON(!pps))
 		return;
 
+	vpu_debug(2, "slice type %d\n", slice->slice_type);
+	
+	dump_dec_param(dec_param);
+	
 	/* Prepare data in memory. */
 	prepare_table(ctx, dec_param, scaling);
 
@@ -892,19 +927,26 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	set_ref(ctx, dec_param);
 	set_buffers(ctx, slice, sps);
 
+	/* Controls no longer in-use, we can complete them */
+	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
+				   &ctx->ctrl_handler);
+
+	/* Kick the watchdog and start decoding */
 	schedule_delayed_work(&vpu->watchdog_work, msecs_to_jiffies(2000));
 
 	/* Start decoding! */
-	vdpu_write_relaxed(vpu, VDPU_REG_CONFIG_DEC_AXI_RD_ID(0xffu)
-				| VDPU_REG_CONFIG_DEC_TIMEOUT_E
-				| VDPU_REG_CONFIG_DEC_OUT_ENDIAN
-				| VDPU_REG_CONFIG_DEC_STRENDIAN_E
-				| VDPU_REG_CONFIG_DEC_MAX_BURST(16)
-				| VDPU_REG_CONFIG_DEC_OUTSWAP32_E
-				| VDPU_REG_CONFIG_DEC_INSWAP32_E
-				| VDPU_REG_CONFIG_DEC_STRSWAP32_E
-				| VDPU_REG_CONFIG_DEC_CLK_GATE_E,
-				VDPU_REG_CONFIG);
+	vdpu_write_relaxed(vpu,
+			   VDPU_REG_CONFIG_DEC_AXI_RD_ID(0xffu) |
+			   VDPU_REG_CONFIG_DEC_TIMEOUT_E |
+			   VDPU_REG_CONFIG_DEC_OUT_ENDIAN |
+			   VDPU_REG_CONFIG_DEC_STRENDIAN_E |
+			   VDPU_REG_CONFIG_DEC_MAX_BURST(16) |
+			   VDPU_REG_CONFIG_DEC_OUTSWAP32_E |
+			   VDPU_REG_CONFIG_DEC_INSWAP32_E |
+			   VDPU_REG_CONFIG_DEC_STRSWAP32_E |
+			   VDPU_REG_CONFIG_DEC_CLK_GATE_E,
+			   VDPU_REG_CONFIG);
+	dump_regs(ctx);
 	vdpu_write(vpu, VDPU_REG_INTERRUPT_DEC_E, VDPU_REG_INTERRUPT);
 }
 

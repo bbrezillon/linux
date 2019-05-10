@@ -769,6 +769,7 @@ static int rk_iommu_map(struct iommu_domain *domain, unsigned long _iova,
 	u32 dte_index, pte_index;
 	int ret;
 
+//	pr_info("%s:%i paddr %pa iova %lx size %x\n", __func__, __LINE__, &paddr, _iova, size);
 	spin_lock_irqsave(&rk_domain->dt_lock, flags);
 
 	/*

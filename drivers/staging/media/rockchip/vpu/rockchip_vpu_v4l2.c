@@ -537,8 +537,9 @@ rockchip_vpu_queue_setup(struct vb2_queue *vq,
 	}
 
 	/* The H264 decoder needs extra size on the output buffer. */
-	if (ctx->vpu_src_fmt->fourcc == V4L2_PIX_FMT_H264_SLICE_ANNEXB)
-		extra_size0 = 128 * pixfmt->width / 16 * pixfmt->height / 16;
+	if (ctx->vpu_src_fmt->fourcc == V4L2_PIX_FMT_H264_SLICE_RAW)
+		extra_size0 = 128 * DIV_ROUND_UP(pixfmt->width, 16) *
+			      DIV_ROUND_UP(pixfmt->height, 16);
 
 	if (*num_planes) {
 		if (*num_planes != pixfmt->num_planes)

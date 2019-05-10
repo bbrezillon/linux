@@ -120,7 +120,7 @@ static irqreturn_t rk3288_vdpu_irq(int irq, void *dev_id)
 	vdpu_write(vpu, 0, VDPU_REG_INTERRUPT);
 	vdpu_write(vpu, VDPU_REG_CONFIG_DEC_CLK_GATE_E, VDPU_REG_CONFIG);
 
-	pr_info("%s:%i status %08x\n", __func__, __LINE__, status);
+//	pr_info("%s:%i status %08x\n", __func__, __LINE__, status);
 	rockchip_vpu_irq_done(vpu, 0, state);
 
 	return IRQ_HANDLED;
