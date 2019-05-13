@@ -19,6 +19,7 @@
 #include "panfrost_mmu.h"
 #include "panfrost_job.h"
 #include "panfrost_gpu.h"
+#include "panfrost_perfcnt.h"
 
 static int panfrost_ioctl_get_param(struct drm_device *ddev, void *data, struct drm_file *file)
 {
@@ -340,6 +341,11 @@ static const struct drm_ioctl_desc panfrost_drm_driver_ioctls[] = {
 
 DEFINE_DRM_GEM_SHMEM_FOPS(panfrost_drm_driver_fops);
 
+static int panfrost_debugfs_init(struct drm_minor *minor)
+{
+	return panfrost_perfcnt_debugfs_init(minor);
+}
+
 static struct drm_driver panfrost_drm_driver = {
 	.driver_features	= DRIVER_RENDER | DRIVER_GEM | DRIVER_PRIME |
 				  DRIVER_SYNCOBJ,
@@ -359,6 +365,7 @@ static struct drm_driver panfrost_drm_driver = {
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
 	.gem_prime_import_sg_table = panfrost_gem_prime_import_sg_table,
 	.gem_prime_mmap		= drm_gem_prime_mmap,
+	.debugfs_init		= panfrost_debugfs_init,
 };
 
 static int panfrost_probe(struct platform_device *pdev)
