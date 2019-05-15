@@ -49,9 +49,6 @@ struct vb2_v4l2_buffer {
 	struct vb2_plane	planes[VB2_MAX_PLANES];
 };
 
-/* VB2 V4L2 flags as set in vb2_queue.subsystem_flags */
-#define VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF (1 << 0)
-
 /*
  * to_vb2_v4l2_buffer() - cast struct vb2_buffer * to struct vb2_v4l2_buffer *
  */
