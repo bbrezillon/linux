@@ -437,7 +437,7 @@ init_reflist_builder(struct rockchip_vpu_ctx *ctx,
 	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++) {
 		int buf_idx;
 
-		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_VALID)) {
+		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)) {
 			reflist[i] = i;
 			continue;
 		}
@@ -550,7 +550,7 @@ static int b1_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
 	}
 
 	/* Long term pics in ascending pic num order. */
-	if (!(a->flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM))
+	if (a->flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
 	        return a->pic_num - b->pic_num;
 
 	poca = builder->pocs[idxa];
