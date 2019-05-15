@@ -299,6 +299,8 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 	struct vb2_v4l2_buffer *src_buf;
 	u32 reg;
 
+	vdpu_write_relaxed(vpu, 0xe4, 0xde);
+
 	src_buf = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
 	/* Decoder control register 0. */
 	reg = VDPU_REG_DEC_CTRL0_DEC_AXI_WR_ID(0x0);
@@ -606,6 +608,7 @@ build_p_ref_list(struct rockchip_vpu_ctx *ctx,
 	sort_r(reflist, builder.num_valid, sizeof(*reflist),
 	       p_ref_list_cmp, NULL, &builder);
 	dump_reflist(ctx, "P", reflist, builder.num_valid);
+	dump_reflist(ctx, "P (ref)", dec_param->ref_pic_list_p0, 16);
 }
 
 static void
@@ -620,12 +623,19 @@ build_b_ref_lists(struct rockchip_vpu_ctx *ctx,
 	       b0_ref_list_cmp, NULL, &builder);
 
 	dump_reflist(ctx, "B0", b0_reflist, builder.num_valid);
+	dump_reflist(ctx, "B0 (ref)", dec_param->ref_pic_list_b0, 16);
 
 	init_reflist_builder(ctx, dec_param, b1_reflist, &builder);
 	sort_r(b1_reflist, builder.num_valid, sizeof(*b1_reflist),
 	       b1_ref_list_cmp, NULL, &builder);
 
+	/* Swap first 2 entries in b1 if b1 and b0 are identical. */
+	if (builder.num_valid > 1 &&
+	    !memcmp(b0_reflist, b1_reflist, builder.num_valid))
+		swap(b1_reflist[0], b1_reflist[1]);
+
 	dump_reflist(ctx, "B1", b1_reflist, builder.num_valid);
+	dump_reflist(ctx, "B1 (ref)", dec_param->ref_pic_list_b1, 16);
 }
 
 static bool dpb_entry_match(const struct v4l2_h264_dpb_entry *a,
@@ -636,21 +646,28 @@ static bool dpb_entry_match(const struct v4l2_h264_dpb_entry *a,
 }
 
 static void
-dump_dec_param(const struct v4l2_ctrl_h264_decode_params *dec_param)
+dump_dec_param(struct rockchip_vpu_ctx *ctx, const struct v4l2_ctrl_h264_decode_params *dec_param)
 {
 
 	vpu_debug(2, "num_slices %d flags %08x nal_ref_idc %d POC %d %d\n",
 		 dec_param->num_slices, dec_param->flags, dec_param->nal_ref_idc,
 		 dec_param->top_field_order_cnt, dec_param->bottom_field_order_cnt);
+	dump_reflist(ctx, "P (orig)", dec_param->ref_pic_list_p0, 16);
+	dump_reflist(ctx, "B0 (orig)", dec_param->ref_pic_list_b0, 16);
+	dump_reflist(ctx, "B1 (orig)", dec_param->ref_pic_list_b1, 16);
 }
 
 static void
 update_dpb(struct rockchip_vpu_ctx *ctx,
-	   const struct v4l2_ctrl_h264_decode_params *dec_param)
+	   struct v4l2_ctrl_h264_decode_params *dec_param)
 {
 	DECLARE_BITMAP(new, ARRAY_SIZE(dec_param->dpb)) = { 0, };
 	DECLARE_BITMAP(used, ARRAY_SIZE(dec_param->dpb)) = { 0, };
+	u8 map[16];
 	unsigned int i, j;
+
+	for (i = 0; i < 16; i++)
+		map[i] = i;
 
 	/* Disable all entries by default. */
 	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
@@ -677,11 +694,13 @@ update_dpb(struct rockchip_vpu_ctx *ctx,
 
 			*cdpb = *ndpb;
 			set_bit(j, used);
+			map[i] = j;
 			break;
 		}
 
 		if (j == ARRAY_SIZE(ctx->h264_dec.dpb))
 			set_bit(i, new);
+
 	}
 
 	/* For entries that could not be matched, use remaining free slots. */
@@ -701,11 +720,22 @@ update_dpb(struct rockchip_vpu_ctx *ctx,
 		cdpb = &ctx->h264_dec.dpb[j];
 		*cdpb = *ndpb;
 		set_bit(j, used);
+		map[i] = j;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(dec_param->ref_pic_list_p0); i++) {
+		if (dec_param->ref_pic_list_p0[i] < 16)
+			dec_param->ref_pic_list_p0[i] = map[dec_param->ref_pic_list_p0[i]];
+		if (dec_param->ref_pic_list_b0[i] < 16)
+			dec_param->ref_pic_list_b0[i] = map[dec_param->ref_pic_list_b0[i]];
+		if (dec_param->ref_pic_list_b1[i] < 16)
+			dec_param->ref_pic_list_b1[i] = map[dec_param->ref_pic_list_b1[i]];
 	}
 }
 
 static void set_ref(struct rockchip_vpu_ctx *ctx,
-		    const struct v4l2_ctrl_h264_decode_params *dec_param)
+		    struct v4l2_ctrl_h264_decode_params *dec_param,
+		    const struct v4l2_ctrl_h264_slice_params *slice)
 {
 	struct vb2_queue *cap_q = &ctx->fh.m2m_ctx->cap_q_ctx.q;
 	struct rockchip_vpu_dev *vpu = ctx->dev;
@@ -767,7 +797,33 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 
 	build_p_ref_list(ctx, dec_param, p_reflist);
 	build_b_ref_lists(ctx, dec_param, b0_reflist, b1_reflist);
+	WARN_ON(hweight32(dpb_valid) > 1 &&
+	      !memcmp(b0_reflist, b1_reflist, hweight32(dpb_valid)));
 
+	pr_info("%s:%i\n", __func__, __LINE__);
+	for (i = 0; i < 16; i++) {
+		if (p_reflist[i] != dec_param->ref_pic_list_p0[i] &&
+		    dec_param->ref_pic_list_p0[i] != 0xff) {
+			pr_info("P0 mismatch @%d %02x %02x\n",
+				i, p_reflist[i], dec_param->ref_pic_list_p0[i]);
+			p_reflist[i] = dec_param->ref_pic_list_p0[i];
+		}
+		if (b0_reflist[i] != dec_param->ref_pic_list_b0[i] &&
+		    dec_param->ref_pic_list_b0[i] != 0xff) {
+			pr_info("B0 mismatch @%d %02x %02x\n",
+				i, b0_reflist[i], dec_param->ref_pic_list_b0[i]);
+			b0_reflist[i] = dec_param->ref_pic_list_b0[i];
+		}
+		if (b1_reflist[i] != dec_param->ref_pic_list_b1[i] &&
+		    dec_param->ref_pic_list_b1[i] != 0xff) {
+			pr_info("B1 mismatch @%d %02x %02x\n",
+				i, b1_reflist[i], dec_param->ref_pic_list_b1[i]);
+			b1_reflist[i] = dec_param->ref_pic_list_b1[i];
+		}
+	}
+	pr_info("%s:%i\n", __func__, __LINE__);
+
+	//memcpy(p_reflist, slice->ref_pic_list0, 16);
 	/*
 	 * Each VDPU_REG_BD_REF_PIC(x) register contains three entries
 	 * of each forward and backward picture list.
@@ -874,13 +930,14 @@ void dump_regs(struct rockchip_vpu_ctx *ctx)
 {
 	int i;
 
-	for (i = 0; i < 100; i++)
-		vpu_debug(7, "reg[%d] %08x\n", i, readl(ctx->dev->dec_base + (i * 4)));
+	for (i = 0; i <= 100; i++)
+		vpu_debug(7, "reg[%02d] %08x\n", i, readl(ctx->dev->dec_base + (i * 4)));
 }
 
 void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 {
 	const struct v4l2_ctrl_h264_decode_params *dec_param;
+	struct v4l2_ctrl_h264_decode_params new_dec_param;
 	const struct v4l2_ctrl_h264_scaling_matrix *scaling;
 	const struct v4l2_ctrl_h264_slice_params *slice;
 	const struct v4l2_ctrl_h264_sps *sps;
@@ -917,14 +974,15 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 
 	vpu_debug(2, "slice type %d\n", slice->slice_type);
 	
-	dump_dec_param(dec_param);
-	
+	dump_dec_param(ctx, dec_param);
+
+	new_dec_param = *dec_param;
 	/* Prepare data in memory. */
 	prepare_table(ctx, dec_param, scaling);
 
 	/* Configure hardware registers. */
 	set_params(ctx, dec_param, slice, sps, pps);
-	set_ref(ctx, dec_param);
+	set_ref(ctx, &new_dec_param, slice);
 	set_buffers(ctx, slice, sps);
 
 	/* Controls no longer in-use, we can complete them */
@@ -946,7 +1004,7 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 			   VDPU_REG_CONFIG_DEC_STRSWAP32_E |
 			   VDPU_REG_CONFIG_DEC_CLK_GATE_E,
 			   VDPU_REG_CONFIG);
-	dump_regs(ctx);
+//	dump_regs(ctx);
 	vdpu_write(vpu, VDPU_REG_INTERRUPT_DEC_E, VDPU_REG_INTERRUPT);
 }
 
