@@ -648,6 +648,46 @@ void v4l2_m2m_buf_copy_metadata(const struct vb2_v4l2_buffer *out_vb,
 				struct vb2_v4l2_buffer *cap_vb,
 				bool copy_frame_flags);
 
+/**
+ * v4l2_m2m_release_capture_buf() - check if the capture buffer should be
+ * released
+ *
+ * @out_vb: the output buffer
+ * @cap_vb: the capture buffer
+ *
+ * This helper function returns true if the current capture buffer should
+ * be released to vb2. This is the case if the output buffer specified that
+ * the capture buffer should be held (i.e. not returned to vb2) AND if the
+ * timestamp of the capture buffer differs from the output buffer timestamp.
+ *
+ * This helper is to be called at the start of the device_run callback:
+ *
+ * if (v4l2_m2m_release_capture_buf(out_vb, cap_vb)) {
+ *	v4l2_m2m_buf_done(cap_vb, VB2_BUF_STATE_DONE);
+ *	v4l2_m2m_job_finish(...);
+ *	return;
+ * }
+ * cap_vb->is_held = out_vb->flags & V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF;
+ *
+ * ...
+ *
+ * v4l2_m2m_buf_done(out_vb, VB2_BUF_STATE_DONE);
+ * if (!cap_vb->is_held) {
+ *	v4l2_m2m_buf_done(cap_vb, VB2_BUF_STATE_DONE);
+ *	v4l2_m2m_job_finish(...);
+ * }
+ *
+ * This allows for multiple output buffers to be used to fill in a single
+ * capture buffer. This is typically used by stateless decoders where
+ * multiple e.g. H.264 slices contribute to a single decoded frame.
+ */
+static inline bool v4l2_m2m_release_capture_buf(const struct vb2_v4l2_buffer *out_vb,
+						const struct vb2_v4l2_buffer *cap_vb)
+{
+	return cap_vb->is_held && cap_vb->vb2_buf.copied_timestamp &&
+	       out_vb->vb2_buf.timestamp != cap_vb->vb2_buf.timestamp;
+}
+
 /* v4l2 request helper */
 
 void v4l2_m2m_request_queue(struct media_request *req);
