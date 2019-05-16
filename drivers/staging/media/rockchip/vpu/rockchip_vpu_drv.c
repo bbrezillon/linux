@@ -270,6 +270,7 @@ static int rockchip_vpu_s_ctrl(struct v4l2_ctrl *ctrl)
 	ctx = container_of(ctrl->handler,
 			   struct rockchip_vpu_ctx, ctrl_handler);
 
+	pr_info("%s:%i ctx = %px\n", __func__, __LINE__, ctx);
 	vpu_debug(1, "s_ctrl: id = %d, val = %d\n", ctrl->id, ctrl->val);
 
 	switch (ctrl->id) {
@@ -339,6 +340,13 @@ static struct rockchip_vpu_ctrl controls[] = {
 		.cfg = {
 			.elem_size = sizeof(struct v4l2_ctrl_h264_scaling_matrix),
 		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_VP8_FRAME_HDR,
+		.codec = RK_VPU_VP8_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_vp8_frame_header),
+		},
+	}, {
 	},
 };
 
@@ -434,6 +442,7 @@ static int rockchip_vpu_open(struct file *filp)
 		goto err_fh_free;
 	}
 	ctx->fh.ctrl_handler = &ctx->ctrl_handler;
+	pr_info("%s:%i ctx = %px\n", __func__, __LINE__, ctx);
 
 	return 0;
 
@@ -449,14 +458,15 @@ static int rockchip_vpu_release(struct file *filp)
 	struct rockchip_vpu_ctx *ctx =
 		container_of(filp->private_data, struct rockchip_vpu_ctx, fh);
 
+	pr_info("%s:%i ctx = %px\n", __func__, __LINE__, ctx);
 	/*
 	 * No need for extra locking because this was the last reference
 	 * to this file.
 	 */
-	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	v4l2_fh_del(&ctx->fh);
-	v4l2_fh_exit(&ctx->fh);
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
+	v4l2_fh_exit(&ctx->fh);
+	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	kfree(ctx);
 
 	return 0;

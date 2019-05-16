@@ -87,18 +87,17 @@ struct v4l2_ctrl_vp8_frame_header {
 	 */
 	__u32 macroblock_bit_offset;
 
-	__u8 num_dct_parts;
 	__u32 dct_part_sizes[8];
+	__u8 num_dct_parts;
 
 	__u8 bool_dec_range;
 	__u8 bool_dec_value;
 	__u8 bool_dec_count;
 
-	/* v4l2_buffer indices of reference frames */
-	/* TODO: Replace with u64 timestamp, as being discussed on the ML */
-	__u32 last_frame;
-	__u32 golden_frame;
-	__u32 alt_frame;
+	/* v4l2_buffer timestamps of reference frames */
+	__u64 last_frame_ts;
+	__u64 golden_frame_ts;
+	__u64 alt_frame_ts;
 
 	__u8 flags;
 };

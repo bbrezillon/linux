@@ -59,6 +59,16 @@ struct rockchip_vpu_h264_dec_hw_ctx {
 };
 
 /**
+ * struct rockchip_vpu_vp8d_hw_ctx - Context private data of VP8 decoder.
+ * @segment_map:	Segment map buffer.
+ * @prob_tbl:		Probability table buffer.
+ */
+struct rockchip_vpu_vp8_dec_hw_ctx {
+	struct rockchip_vpu_aux_buf segment_map;
+	struct rockchip_vpu_aux_buf prob_tbl;
+};
+
+/**
  * struct rockchip_vpu_codec_ops - codec mode specific operations
  *
  * @init:	If needed, can be used for initialization.
@@ -113,5 +123,9 @@ void rockchip_vpu_mpeg2_dec_exit(struct rockchip_vpu_ctx *ctx);
 void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx);
 int rk3288_vpu_h264_dec_init(struct rockchip_vpu_ctx *ctx);
 void rk3288_vpu_h264_dec_exit(struct rockchip_vpu_ctx *ctx);
+
+void rk3288_vpu_vp8_dec_run(struct rockchip_vpu_ctx *ctx);
+int rk3288_vpu_vp8_dec_init(struct rockchip_vpu_ctx *ctx);
+void rk3288_vpu_vp8_dec_exit(struct rockchip_vpu_ctx *ctx);
 
 #endif /* ROCKCHIP_VPU_HW_H_ */

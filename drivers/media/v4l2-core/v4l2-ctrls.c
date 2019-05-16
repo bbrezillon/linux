@@ -2112,6 +2112,7 @@ int v4l2_ctrl_handler_init_class(struct v4l2_ctrl_handler *hdl,
 				      GFP_KERNEL | __GFP_ZERO);
 	hdl->error = hdl->buckets ? 0 : -ENOMEM;
 	media_request_object_init(&hdl->req_obj);
+	pr_info("%s:%i lock = %px\n", __func__, __LINE__, hdl->lock);
 	return hdl->error;
 }
 EXPORT_SYMBOL(v4l2_ctrl_handler_init_class);
@@ -2134,6 +2135,7 @@ void v4l2_ctrl_handler_free(struct v4l2_ctrl_handler *hdl)
 			media_request_object_put(&req->req_obj);
 		}
 	}
+	pr_info("%s:%i lock = %px\n", __func__, __LINE__, hdl->lock);
 	mutex_lock(hdl->lock);
 	/* Free all nodes */
 	list_for_each_entry_safe(ref, next_ref, &hdl->ctrl_refs, node) {

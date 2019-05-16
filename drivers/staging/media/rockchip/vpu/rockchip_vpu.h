@@ -47,6 +47,7 @@ struct rockchip_vpu_codec_ops;
 
 #define RK_VPU_MPEG2_DECODER	BIT(16)
 #define RK_VPU_H264_DECODER	BIT(19)
+#define RK_VPU_VP8_DECODER	BIT(20)
 #define RK_VPU_DECODERS		0xffff0000
 
 /**
@@ -88,12 +89,14 @@ struct rockchip_vpu_variant {
  * @RK_VPU_MODE_JPEG_ENC: JPEG encoder.
  * @RK_VPU_MODE_MPEG2_DEC: MPEG-2 decoder.
  * @RK_VPU_MODE_H264_DEC: H264 decoder.
+ * @RK_VPU_MODE_VP8_DEC: VP8 decoder.
  */
 enum rockchip_vpu_codec_mode {
 	RK_VPU_MODE_NONE = -1,
 	RK_VPU_MODE_JPEG_ENC,
 	RK_VPU_MODE_MPEG2_DEC,
 	RK_VPU_MODE_H264_DEC,
+	RK_VPU_MODE_VP8_DEC,
 };
 
 /*
@@ -234,6 +237,7 @@ struct rockchip_vpu_ctx {
 		struct rockchip_vpu_jpeg_enc_hw_ctx jpeg_enc;
 		struct rockchip_vpu_mpeg2_dec_hw_ctx mpeg2_dec;
 		struct rockchip_vpu_h264_dec_hw_ctx h264_dec;
+		struct rockchip_vpu_vp8_dec_hw_ctx vp8_dec;
 	};
 };
 
