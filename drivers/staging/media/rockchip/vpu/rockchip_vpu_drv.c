@@ -339,6 +339,13 @@ static struct rockchip_vpu_ctrl controls[] = {
 		.cfg = {
 			.elem_size = sizeof(struct v4l2_ctrl_h264_scaling_matrix),
 		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_VP8_FRAME_HDR,
+		.codec = RK_VPU_VP8_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_vp8_frame_header),
+		},
+	}, {
 	},
 };
 
