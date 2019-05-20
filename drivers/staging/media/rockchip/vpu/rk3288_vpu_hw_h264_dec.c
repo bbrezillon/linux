@@ -330,6 +330,7 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 
 	/* Decoder control register 3. */
 	reg = VDPU_REG_DEC_CTRL3_START_CODE_E |
+//	reg = 0 |
 	      VDPU_REG_DEC_CTRL3_INIT_QP(pps->pic_init_qp_minus26 + 26) |
 	      VDPU_REG_DEC_CTRL3_STREAM_LEN(vb2_get_plane_payload(&src_buf->vb2_buf, 0));
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL3);
@@ -435,6 +436,7 @@ init_reflist_builder(struct rockchip_vpu_ctx *ctx,
 			continue;
 
 		buf_idx = vb2_find_timestamp(cap_q, dpb[i].reference_ts, 0);
+		WARN_ON(buf_idx < 0);
 		if (buf_idx < 0)
 			continue;
 
@@ -446,7 +448,7 @@ init_reflist_builder(struct rockchip_vpu_ctx *ctx,
 	}
 
 	for (i = b->num_valid; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
-		b->unordered_reflist[i] = i;
+		b->unordered_reflist[i] = 0x1f;
 }
 
 static int p_ref_list_cmp(const void *ptra, const void *ptrb, const void *data)
@@ -501,12 +503,15 @@ static int b0_ref_list_cmp(const void *ptra, const void *ptrb, const void *data)
 	}
 
 	/* Long term pics in ascending pic num order. */
-	if (a->flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
+	if (a->flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM) {
+		WARN_ON(a->pic_num == b->pic_num);
 	        return a->pic_num - b->pic_num;
+	}
 
 	poca = builder->pocs[idxa];
 	pocb = builder->pocs[idxb];
 
+	WARN_ON(pocb == poca);
 	/*
 	 * Short term pics with POC < cur POC first in POC descending order
 	 * followed by short term pics with POC > cur POC in POC ascending
@@ -542,23 +547,41 @@ static int b1_ref_list_cmp(const void *ptra, const void *ptrb, const void *data)
 	}
 
 	/* Long term pics in ascending pic num order. */
-	if (a->flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
+	if (a->flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM) {
+		WARN_ON(a->pic_num == b->pic_num);
 	        return a->pic_num - b->pic_num;
+	}
 
 	poca = builder->pocs[idxa];
 	pocb = builder->pocs[idxb];
 
+	WARN_ON(pocb == poca);
+
 	/*
 	 * Short term pics with POC > cur POC first in POC ascending order
-	 * followed by short term pics with POC > cur POC in POC descending
+	 * followed by short term pics with POC < cur POC in POC descending
 	 * order.
 	 */
-	if ((poca < builder->curpoc) != (pocb < builder->curpoc))
+	if ((poca < builder->curpoc) != (pocb < builder->curpoc)) {
 	        return pocb - poca;
-	else if (poca < builder->curpoc)
+	} else if (poca < builder->curpoc) {
 	        return pocb - poca;
+	}
 
 	return poca - pocb;
+}
+
+static void dump_ref_list(const char *name,
+			  const u8 *reflist,
+			  const struct rockchip_h264_reflist_builder *builder)
+{
+	unsigned int i;
+
+	for (i = 0; i < builder->num_valid; i++)
+		pr_info("reflist_%s[%d] -> %lld(type=%s,poc=%d,picnum=%d)\n", name, i, builder->dpb[reflist[i]].reference_ts,
+			builder->dpb[reflist[i]].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM ?
+			"long" : "short",
+			builder->pocs[reflist[i]], builder->dpb[reflist[i]].pic_num);
 }
 
 static void
@@ -569,6 +592,7 @@ build_p_ref_list(const struct rockchip_h264_reflist_builder *builder,
 	       sizeof(builder->unordered_reflist));
 	sort_r(reflist, builder->num_valid, sizeof(*reflist),
 	       p_ref_list_cmp, NULL, builder);
+	dump_ref_list("P", reflist, builder);
 }
 
 static void
@@ -580,18 +604,21 @@ build_b_ref_lists(const struct rockchip_h264_reflist_builder *builder,
 	       sizeof(builder->unordered_reflist));
 	sort_r(b0_reflist, builder->num_valid, sizeof(*b0_reflist),
 	       b0_ref_list_cmp, NULL, builder);
+	dump_ref_list("B0", b0_reflist, builder);
 
 	memcpy(b1_reflist, builder->unordered_reflist,
 	       sizeof(builder->unordered_reflist));
 	sort_r(b1_reflist, builder->num_valid, sizeof(*b1_reflist),
 	       b1_ref_list_cmp, NULL, builder);
+	dump_ref_list("B1", b1_reflist, builder);
 }
 
 static bool dpb_entry_match(const struct v4l2_h264_dpb_entry *a,
 			    const struct v4l2_h264_dpb_entry *b)
 {
 	return a->top_field_order_cnt == b->top_field_order_cnt &&
-	       a->bottom_field_order_cnt == b->bottom_field_order_cnt;
+	       a->bottom_field_order_cnt == b->bottom_field_order_cnt &&
+	       a->reference_ts == b->reference_ts;
 }
 
 static void
@@ -601,6 +628,14 @@ update_dpb(struct rockchip_vpu_ctx *ctx,
 	DECLARE_BITMAP(new, ARRAY_SIZE(dec_param->dpb)) = { 0, };
 	DECLARE_BITMAP(used, ARRAY_SIZE(dec_param->dpb)) = { 0, };
 	unsigned int i, j;
+
+	/*
+	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
+		ctx->h264_dec.dpb[i] = dec_param->dpb[i];
+
+//	swap(ctx->h264_dec.dpb[0], ctx->h264_dec.dpb[1]);
+	return;
+	*/
 
 	/* Disable all entries by default. */
 	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
@@ -652,6 +687,21 @@ update_dpb(struct rockchip_vpu_ctx *ctx,
 		*cdpb = *ndpb;
 		set_bit(j, used);
 	}
+
+	/*
+	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++) {
+		if (!(ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)) {
+	//		s32 top_poc, bottom_poc;
+	//		top_poc = ctx->h264_dec.dpb[i].top_field_order_cnt;
+	//		bottom_poc = ctx->h264_dec.dpb[i].bottom_field_order_cnt;
+			memset(&ctx->h264_dec.dpb[i], 0, sizeof(ctx->h264_dec.dpb[i]));
+	//		ctx->h264_dec.dpb[i].top_field_order_cnt = top_poc;
+	//		ctx->h264_dec.dpb[i].bottom_field_order_cnt = bottom_poc;
+		}
+	}
+	*/
+
+	return;
 }
 
 static void set_ref(struct rockchip_vpu_ctx *ctx,
@@ -689,6 +739,8 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 	}
 	vdpu_write_relaxed(vpu, dpb_valid << 16, VDPU_REG_VALID_REF);
 	vdpu_write_relaxed(vpu, dpb_longterm << 16, VDPU_REG_LT_REF);
+	pr_info("%s:%i valid %08x long %08x\n", __func__, __LINE__,
+		dpb_valid << 16, dpb_longterm << 16);
 
 	/*
 	 * Set up reference frame picture numbers.
@@ -699,16 +751,19 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 	for (i = 0; i < RK3288_VPU_H264_NUM_DPB; i += 2) {
 		reg = 0;
 
-		if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
-			reg |= VDPU_REG_REF_PIC_REFER0_NBR(dpb[i].pic_num);
-		else
-			reg |= VDPU_REG_REF_PIC_REFER0_NBR(dpb[i].frame_num);
+		if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE) {
+			if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
+				reg |= VDPU_REG_REF_PIC_REFER0_NBR(dpb[i].pic_num);
+			else
+				reg |= VDPU_REG_REF_PIC_REFER0_NBR(dpb[i].frame_num);
+		}
 
-		if (dpb[i + 1].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
-			reg |= VDPU_REG_REF_PIC_REFER1_NBR(dpb[i + 1].pic_num);
-		else
-			reg |= VDPU_REG_REF_PIC_REFER1_NBR(
-					dpb[i + 1].frame_num);
+		if (dpb[i + 1].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE) {
+			if (dpb[i + 1].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
+				reg |= VDPU_REG_REF_PIC_REFER1_NBR(dpb[i + 1].pic_num);
+			else
+				reg |= VDPU_REG_REF_PIC_REFER1_NBR(dpb[i + 1].frame_num);
+		}
 
 		vdpu_write_relaxed(vpu, reg, VDPU_REG_REF_PIC(i / 2));
 	}
@@ -770,9 +825,11 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 		struct vb2_buffer *buf;
 		int buf_idx = -1;
 
-		if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)
+		if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE) {
 			buf_idx = vb2_find_timestamp(cap_q,
 						     dpb[i].reference_ts, 0);
+			WARN_ON(buf_idx < 0);
+		}
 
 		if (buf_idx >= 0)
 			buf = ctx->dst_bufs[buf_idx];
