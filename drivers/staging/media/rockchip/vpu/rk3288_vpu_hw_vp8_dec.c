@@ -485,7 +485,7 @@ static void cfg_parts(struct rockchip_vpu_ctx *ctx,
 	reg.base = VDPU_REG_DEC_CTRL6;
 	reg.mask = 0x3fffff;
 	reg.shift = 0;
-	vp8_dec_reg_write(vpu, &reg, mb_size);
+	vp8_dec_reg_write(vpu, &reg, mb_size + 1);
 
 	/*
 	 * Calculate dct partition info
@@ -587,7 +587,7 @@ static void cfg_ref(struct rockchip_vpu_ctx *ctx,
 
 	/* set last frame address */
 	buf_idx = vb2_find_timestamp(cap_q, hdr->last_frame_ts, 0);
-	pr_info("%s:%i last frame TS %lld buf idx %d\n", __func__, __LINE__, hdr->last_frame_ts, buf_idx);
+//	pr_info("%s:%i last frame TS %lld buf idx %d\n", __func__, __LINE__, hdr->last_frame_ts, buf_idx);
 	if (buf_idx < 0 || !hdr->key_frame)
 		buf = &vb2_dst->vb2_buf;
 	else
@@ -598,7 +598,7 @@ static void cfg_ref(struct rockchip_vpu_ctx *ctx,
 
 	/* set golden reference frame buffer address */
 	buf_idx = vb2_find_timestamp(cap_q, hdr->golden_frame_ts, 0);
-	pr_info("%s:%i golden frame TS %lld buf idx %d\n", __func__, __LINE__, hdr->golden_frame_ts, buf_idx);
+	//pr_info("%s:%i golden frame TS %lld buf idx %d\n", __func__, __LINE__, hdr->golden_frame_ts, buf_idx);
 	WARN_ON(buf_idx < 0 && hdr->golden_frame_ts);
 	if (buf_idx < 0)
 		buf = &vb2_dst->vb2_buf;
@@ -612,7 +612,7 @@ static void cfg_ref(struct rockchip_vpu_ctx *ctx,
 
 	/* set alternate reference frame buffer address */
 	buf_idx = vb2_find_timestamp(cap_q, hdr->alt_frame_ts, 0);
-	pr_info("%s:%i alt frame TS %lld buf idx %d\n", __func__, __LINE__, hdr->alt_frame_ts, buf_idx);
+	//pr_info("%s:%i alt frame TS %lld buf idx %d\n", __func__, __LINE__, hdr->alt_frame_ts, buf_idx);
 	WARN_ON(buf_idx < 0 && hdr->alt_frame_ts);
 	if (buf_idx < 0)
 		buf = &vb2_dst->vb2_buf;
@@ -721,6 +721,24 @@ static void dump_regs(struct rockchip_vpu_ctx *ctx)
 		vpu_debug(7, "reg[%02d] %08x\n", i, readl(ctx->dev->dec_base + i*4));
 }
 
+static void dump_seg_map(struct rockchip_vpu_ctx *ctx)
+{
+	const u8 *ptr = ctx->vp8_dec.segment_map.cpu;
+	unsigned int pos;
+
+	for (pos = 0; pos < ctx->vp8_dec.segment_map.size; pos += 8)
+		vpu_debug(8, "seg_map %08x: %*ph\n", pos, 8, &ptr[pos]);
+}
+
+static void dump_prob_tbl(struct rockchip_vpu_ctx *ctx)
+{
+	const u8 *ptr = ctx->vp8_dec.prob_tbl.cpu;
+	unsigned int pos;
+
+	for (pos = 0; pos < ctx->vp8_dec.prob_tbl.size; pos += 8)
+		vpu_debug(8, "prob_tbl %08x: %*ph\n", pos, 8, &ptr[pos]);
+}
+
 void rk3288_vpu_vp8_dec_run(struct rockchip_vpu_ctx *ctx)
 {
 	const struct v4l2_ctrl_vp8_frame_header *hdr;
@@ -797,6 +815,8 @@ void rk3288_vpu_vp8_dec_run(struct rockchip_vpu_ctx *ctx)
 	cfg_buffers(ctx, hdr);
 
 	dump_regs(ctx);
+	dump_prob_tbl(ctx);
+	dump_seg_map(ctx);
 	/* Controls no longer in-use, we can complete them */
         v4l2_ctrl_request_complete(vb2_src->vb2_buf.req_obj.req,
                                    &ctx->ctrl_handler);
