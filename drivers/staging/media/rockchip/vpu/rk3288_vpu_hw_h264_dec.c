@@ -410,6 +410,7 @@ static s32 get_poc(enum v4l2_field field, s32 top_field_order_cnt,
 struct rockchip_h264_reflist_builder {
 	const struct v4l2_h264_dpb_entry *dpb;
 	s32 pocs[RK3288_VPU_H264_NUM_DPB];
+	u8 unordered_reflist[RK3288_VPU_H264_NUM_DPB];
 	s32 curpoc;
 	u8 num_valid;
 };
@@ -417,43 +418,41 @@ struct rockchip_h264_reflist_builder {
 static void
 init_reflist_builder(struct rockchip_vpu_ctx *ctx,
 		     const struct v4l2_ctrl_h264_decode_params *dec_param,
-		     u8 *reflist, struct rockchip_h264_reflist_builder *b)
+		     struct rockchip_h264_reflist_builder *b)
 {
 	struct vb2_v4l2_buffer *buf = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 	const struct v4l2_h264_dpb_entry *dpb = ctx->h264_dec.dpb;
 	struct vb2_queue *cap_q = &ctx->fh.m2m_ctx->cap_q_ctx.q;
 	unsigned int i;
 
+	memset(b, 0, sizeof(*b));
 	b->dpb = dpb;
-	b->num_valid = 0;
 	b->curpoc = get_poc(buf->field, dec_param->top_field_order_cnt,
 			    dec_param->bottom_field_order_cnt);
-	memset(reflist, 0, RK3288_VPU_H264_NUM_DPB);
 
 	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++) {
 		int buf_idx;
 
-		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)) {
-			reflist[i] = i;
+		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE))
 			continue;
 		}
 
 		buf_idx = vb2_find_timestamp(cap_q, dpb[i].reference_ts, 0);
-		if (buf_idx < 0) {
-			reflist[i] = i;
+		if (buf_idx < 0)
 			continue;
-		}
 
 		buf = to_vb2_v4l2_buffer(ctx->dst_bufs[buf_idx]);
-		reflist[b->num_valid] = i;
-		b->pocs[b->num_valid] = get_poc(buf->field,
-						dpb[i].top_field_order_cnt,
-						dpb[i].bottom_field_order_cnt);
+		b->pocs[i] = get_poc(buf->field, dpb[i].top_field_order_cnt,
+				     dpb[i].bottom_field_order_cnt);
+		b->unordered_reflist[b->num_valid] = i;
 		b->num_valid++;
 	}
+
+	for (i = b->num_valid; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
+		b->unordered_reflist[i] = i;
 }
 
-static int p_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
+static int p_ref_list_cmp(const void *ptra, const void *ptrb, const void *data)
 {
 	const struct rockchip_h264_reflist_builder *builder = data;
 	const struct v4l2_h264_dpb_entry *a, *b;
@@ -483,7 +482,7 @@ static int p_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
 	return a->pic_num - b->pic_num;
 }
 
-static int b0_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
+static int b0_ref_list_cmp(const void *ptra, const void *ptrb, const void *data)
 {
 	const struct rockchip_h264_reflist_builder *builder = data;
 	const struct v4l2_h264_dpb_entry *a, *b;
@@ -524,7 +523,7 @@ static int b0_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
 	return poca - pocb;
 }
 
-static int b1_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
+static int b1_ref_list_cmp(const void *ptra, const void *ptrb, const void *data)
 {
 	const struct rockchip_h264_reflist_builder *builder = data;
 	const struct v4l2_h264_dpb_entry *a, *b;
@@ -566,31 +565,29 @@ static int b1_ref_list_cmp(const void *ptra, const void *ptrb, void *data)
 }
 
 static void
-build_p_ref_list(struct rockchip_vpu_ctx *ctx,
-		 const struct v4l2_ctrl_h264_decode_params *dec_param,
+build_p_ref_list(const struct rockchip_h264_reflist_builder *builder,
 		 u8 *reflist)
 {
-	struct rockchip_h264_reflist_builder builder;
-
-	init_reflist_builder(ctx, dec_param, reflist, &builder);
-	sort_r(reflist, builder.num_valid, sizeof(*reflist),
-	       p_ref_list_cmp, NULL, &builder);
+	memcpy(reflist, builder->unordered_reflist,
+	       sizeof(builder->unordered_reflist));
+	sort_r(reflist, builder->num_valid, sizeof(*reflist),
+	       p_ref_list_cmp, NULL, builder);
 }
 
 static void
-build_b_ref_lists(struct rockchip_vpu_ctx *ctx,
-		  const struct v4l2_ctrl_h264_decode_params *dec_param,
+build_b_ref_lists(const struct rockchip_h264_reflist_builder *builder,
 		  u8 *b0_reflist, u8 *b1_reflist)
 {
-	struct rockchip_h264_reflist_builder builder;
 
-	init_reflist_builder(ctx, dec_param, b0_reflist, &builder);
-	sort_r(b0_reflist, builder.num_valid, sizeof(*b0_reflist),
-	       b0_ref_list_cmp, NULL, &builder);
+	memcpy(b0_reflist, builder->unordered_reflist,
+	       sizeof(builder->unordered_reflist));
+	sort_r(b0_reflist, builder->num_valid, sizeof(*b0_reflist),
+	       b0_ref_list_cmp, NULL, builder);
 
-	init_reflist_builder(ctx, dec_param, b1_reflist, &builder);
-	sort_r(b1_reflist, builder.num_valid, sizeof(*b1_reflist),
-	       b1_ref_list_cmp, NULL, &builder);
+	memcpy(b1_reflist, builder->unordered_reflist,
+	       sizeof(builder->unordered_reflist));
+	sort_r(b1_reflist, builder->num_valid, sizeof(*b1_reflist),
+	       b1_ref_list_cmp, NULL, builder);
 }
 
 static bool dpb_entry_match(const struct v4l2_h264_dpb_entry *a,
@@ -718,8 +715,9 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 		vdpu_write_relaxed(vpu, reg, VDPU_REG_REF_PIC(i / 2));
 	}
 
-	build_p_ref_list(ctx, dec_param, p_reflist);
-	build_b_ref_lists(ctx, dec_param, b0_reflist, b1_reflist);
+	init_reflist_builder(ctx, dec_param, &builder);
+	build_p_ref_list(&builder, p_reflist);
+	build_b_ref_lists(&builder, b0_reflist, b1_reflist);
 
 	/*
 	 * Each VDPU_REG_BD_REF_PIC(x) register contains three entries
