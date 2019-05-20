@@ -111,8 +111,6 @@ static void rockchip_vpu_job_finish(struct rockchip_vpu_dev *vpu,
 	else
 		dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 
-	v4l2_m2m_buf_copy_metadata(src, dst, true);
-
 	if (!dst->is_held) {
 		dst->sequence = ctx->sequence_cap++;
 
@@ -186,6 +184,8 @@ static void device_run(void *priv)
 	ret = pm_runtime_get_sync(ctx->dev->dev);
 	if (ret < 0)
 		goto err_cancel_job;
+
+	v4l2_m2m_buf_copy_metadata(src, dst, true);
 
 	ctx->codec_ops->run(ctx);
 	return;
