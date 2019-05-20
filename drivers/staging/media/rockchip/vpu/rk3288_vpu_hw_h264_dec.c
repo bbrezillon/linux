@@ -260,10 +260,8 @@ static void prepare_table(struct rockchip_vpu_ctx *ctx,
 			  const struct v4l2_ctrl_h264_scaling_matrix *scaling)
 {
 	struct rk3288_vpu_h264_dec_priv_tbl *tbl = ctx->h264_dec.priv.cpu;
-	const struct v4l2_h264_dpb_entry *dpb;
+	const struct v4l2_h264_dpb_entry *dpb = ctx->h264_dec.dpb;
 	int i;
-
-	dpb = dec_param->dpb;
 
 	/*
 	 * Prepare auxiliary buffer.
@@ -435,7 +433,6 @@ init_reflist_builder(struct rockchip_vpu_ctx *ctx,
 
 		if (!(dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE))
 			continue;
-		}
 
 		buf_idx = vb2_find_timestamp(cap_q, dpb[i].reference_ts, 0);
 		if (buf_idx < 0)
@@ -661,6 +658,7 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 		    const struct v4l2_ctrl_h264_decode_params *dec_param)
 {
 	struct vb2_queue *cap_q = &ctx->fh.m2m_ctx->cap_q_ctx.q;
+	struct rockchip_h264_reflist_builder reflist_builder;
 	struct rockchip_vpu_dev *vpu = ctx->dev;
 	const struct v4l2_h264_dpb_entry *dpb;
 	u8 p_reflist[RK3288_VPU_H264_NUM_DPB];
@@ -715,9 +713,9 @@ static void set_ref(struct rockchip_vpu_ctx *ctx,
 		vdpu_write_relaxed(vpu, reg, VDPU_REG_REF_PIC(i / 2));
 	}
 
-	init_reflist_builder(ctx, dec_param, &builder);
-	build_p_ref_list(&builder, p_reflist);
-	build_b_ref_lists(&builder, b0_reflist, b1_reflist);
+	init_reflist_builder(ctx, dec_param, &reflist_builder);
+	build_p_ref_list(&reflist_builder, p_reflist);
+	build_b_ref_lists(&reflist_builder, b0_reflist, b1_reflist);
 
 	/*
 	 * Each VDPU_REG_BD_REF_PIC(x) register contains three entries
@@ -858,13 +856,13 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	if (WARN_ON(!pps))
 		return;
 
-	/* Prepare data in memory. */
-	prepare_table(ctx, dec_param, scaling);
-
 	/* Configure hardware registers. */
 	set_params(ctx, dec_param, slice, sps, pps);
 	set_ref(ctx, dec_param);
 	set_buffers(ctx, slice, sps);
+
+	/* Prepare data in memory. */
+	prepare_table(ctx, dec_param, scaling);
 
 	/* Controls no longer in-use, we can complete them */
 	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
