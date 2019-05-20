@@ -60,9 +60,9 @@ static void generic_swap(void *a, void *b, int size)
  * it less suitable for kernel use.
  */
 void sort_r(void *base, size_t num, size_t size,
-	    int (*cmp_func)(const void *, const void *, void *),
+	    int (*cmp_func)(const void *, const void *, const void *),
 	    void (*swap_func)(void *, void *, int size),
-	    void *priv)
+	    const void *priv)
 {
 	/* pre-scale counters for performance */
 	int i = (num/2 - 1) * size, n = num * size, c, r;
@@ -105,7 +105,7 @@ void sort_r(void *base, size_t num, size_t size,
 }
 EXPORT_SYMBOL(sort_r);
 
-static int cmp_func_wrapper(const void *a, const void *b, void *priv)
+static int cmp_func_wrapper(const void *a, const void *b, const void *priv)
 {
 	int (*cmp_func)(const void *, const void *) = priv;
 	return cmp_func(a, b);
