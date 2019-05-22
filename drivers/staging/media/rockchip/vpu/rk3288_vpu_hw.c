@@ -86,6 +86,20 @@ static const struct rockchip_vpu_fmt rk3288_vpu_dec_fmts[] = {
 			.step_height = 16,
 		},
 	},
+	{
+		.fourcc = V4L2_PIX_FMT_VP8_FRAME,
+		.codec_mode = RK_VPU_MODE_VP8_DEC,
+		.max_depth = 2,
+		.frmsize = {
+                        .min_width = 48,
+                        .max_width = 3840,
+                        .step_width = 16,
+                        .min_height = 48,
+                        .max_height = 2160,
+                        .step_height = 16,
+                },
+        },
+
 };
 
 static irqreturn_t rk3288_vepu_irq(int irq, void *dev_id)
@@ -173,6 +187,12 @@ static const struct rockchip_vpu_codec_ops rk3288_vpu_codec_ops[] = {
 		.init = rk3288_vpu_h264_dec_init,
 		.exit = rk3288_vpu_h264_dec_exit,
 	},
+	[RK_VPU_MODE_VP8_DEC] = {
+		.run = rk3288_vpu_vp8_dec_run,
+		.reset = rk3288_vpu_dec_reset,
+		.init = rk3288_vpu_vp8_dec_init,
+		.exit = rk3288_vpu_vp8_dec_exit,
+	},
 };
 
 /*
@@ -187,7 +207,7 @@ const struct rockchip_vpu_variant rk3288_vpu_variant = {
 	.dec_fmts = rk3288_vpu_dec_fmts,
 	.num_dec_fmts = ARRAY_SIZE(rk3288_vpu_dec_fmts),
 	.codec = RK_VPU_JPEG_ENCODER | RK_VPU_MPEG2_DECODER |
-		 RK_VPU_H264_DECODER,
+		 RK_VPU_H264_DECODER | RK_VPU_VP8_DECODER,
 	.codec_ops = rk3288_vpu_codec_ops,
 	.vepu_irq = rk3288_vepu_irq,
 	.vdpu_irq = rk3288_vdpu_irq,

@@ -346,6 +346,7 @@ rockchip_vpu_update_requires_request(struct rockchip_vpu_ctx *ctx,
 		break;
 	case V4L2_PIX_FMT_MPEG2_SLICE:
 	case V4L2_PIX_FMT_H264_SLICE_RAW:
+	case V4L2_PIX_FMT_VP8_FRAME:
 		ctx->fh.m2m_ctx->out_q_ctx.q.requires_requests = true;
 		break;
 	default:
