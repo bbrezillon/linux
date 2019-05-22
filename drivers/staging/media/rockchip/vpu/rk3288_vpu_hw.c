@@ -7,6 +7,7 @@
  */
 
 #include <linux/clk.h>
+#include <media/v4l2-mem2mem.h>
 
 #include "rockchip_vpu.h"
 #include "rockchip_vpu_jpeg.h"
@@ -121,20 +122,49 @@ static irqreturn_t rk3288_vepu_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+void rk3288_vdpu_dump_vdpu(struct rockchip_vpu_dev *vpu)
+{
+	unsigned int i;
+
+	return;
+	for (i = 0; i < 120; i++)
+		pr_info("%s:%i swreg%d = %08x\n", __func__, __LINE__, i, vdpu_read(vpu, i * 4));
+}
+
 static irqreturn_t rk3288_vdpu_irq(int irq, void *dev_id)
 {
 	struct rockchip_vpu_dev *vpu = dev_id;
+	struct rockchip_vpu_ctx *ctx = v4l2_m2m_get_curr_priv(vpu->m2m_dev);
 	enum vb2_buffer_state state;
 	u32 status;
 
 	status = vdpu_read(vpu, VDPU_REG_INTERRUPT);
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__, status, vdpu_read(vpu, 58 * 4));
 	state = (status & VDPU_REG_INTERRUPT_DEC_RDY_INT) ?
 		VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR;
 
-	vdpu_write(vpu, 0, VDPU_REG_INTERRUPT);
+	rk3288_vdpu_dump_vdpu(vpu);
+//	if (status & VDPU_REG_INTERRUPT_DEC_BUFFER_INT)
+//		ctx->h264_dec.waiting_slice = true;
+//	pr_info("%s:%i status %08x %08x ADDR_STR %08x CTRL2 %08x\n", __func__, __LINE__,
+//		status, vdpu_read(vpu, VDPU_REG_INTERRUPT),
+//		vdpu_read(vpu, VDPU_REG_ADDR_STR),
+//		vdpu_read(vpu, VDPU_REG_DEC_CTRL2));
+	vdpu_write(vpu, 0x0,
+//		   VDPU_REG_INTERRUPT_DEC_IRQ |
+//		   VDPU_REG_INTERRUPT_DEC_IRQ_DIS |
+//		   VDPU_REG_INTERRUPT_DEC_E,
+		   VDPU_REG_INTERRUPT);
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__, status, vdpu_read(vpu, 58 * 4));
+//	pr_info("%s:%i status %08x %08x ADDR_STR %08x CTRL2 %08x\n", __func__, __LINE__,
+//		status, vdpu_read(vpu, VDPU_REG_INTERRUPT),
+//		vdpu_read(vpu, VDPU_REG_ADDR_STR),
+//		vdpu_read(vpu, VDPU_REG_DEC_CTRL2));
 	vdpu_write(vpu, VDPU_REG_CONFIG_DEC_CLK_GATE_E, VDPU_REG_CONFIG);
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__, status, vdpu_read(vpu, 58 * 4));
 
 	rockchip_vpu_irq_done(vpu, 0, state);
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__, status, vdpu_read(vpu, 58 * 4));
 
 	return IRQ_HANDLED;
 }
@@ -159,6 +189,7 @@ static void rk3288_vpu_dec_reset(struct rockchip_vpu_ctx *ctx)
 {
 	struct rockchip_vpu_dev *vpu = ctx->dev;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	vdpu_write(vpu, VDPU_REG_INTERRUPT_DEC_IRQ_DIS, VDPU_REG_INTERRUPT);
 	vdpu_write(vpu, VDPU_REG_CONFIG_DEC_CLK_GATE_E, VDPU_REG_CONFIG);
 	vdpu_write(vpu, 1, VDPU_REG_SOFT_RESET);

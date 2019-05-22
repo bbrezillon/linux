@@ -98,7 +98,7 @@ static void rockchip_vpu_job_finish(struct rockchip_vpu_dev *vpu,
 
 	pm_runtime_mark_last_busy(vpu->dev);
 	pm_runtime_put_autosuspend(vpu->dev);
-	clk_bulk_disable(vpu->variant->num_clocks, vpu->clocks);
+//	clk_bulk_disable(vpu->variant->num_clocks, vpu->clocks);
 
 	src = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
 	if (WARN_ON(!src))
@@ -178,9 +178,11 @@ static void device_run(void *priv)
 
 	dst->is_held = src->flags & V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF;
 
+	/*
 	ret = clk_bulk_enable(ctx->dev->variant->num_clocks, ctx->dev->clocks);
 	if (ret)
 		goto err_cancel_job;
+	*/
 	ret = pm_runtime_get_sync(ctx->dev->dev);
 	if (ret < 0)
 		goto err_cancel_job;
@@ -813,7 +815,7 @@ static int rockchip_vpu_probe(struct platform_device *pdev)
 	pm_runtime_use_autosuspend(vpu->dev);
 	pm_runtime_enable(vpu->dev);
 
-	ret = clk_bulk_prepare(vpu->variant->num_clocks, vpu->clocks);
+	ret = clk_bulk_prepare_enable(vpu->variant->num_clocks, vpu->clocks);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to prepare clocks\n");
 		return ret;
@@ -859,6 +861,7 @@ static int rockchip_vpu_probe(struct platform_device *pdev)
 		goto err_rm_dec_func;
 	}
 
+	pm_runtime_get_sync(vpu->dev);
 	return 0;
 
 err_rm_dec_func:
@@ -871,7 +874,7 @@ err_m2m_rel:
 err_v4l2_unreg:
 	v4l2_device_unregister(&vpu->v4l2_dev);
 err_clk_unprepare:
-	clk_bulk_unprepare(vpu->variant->num_clocks, vpu->clocks);
+	clk_bulk_disable_unprepare(vpu->variant->num_clocks, vpu->clocks);
 	pm_runtime_dont_use_autosuspend(vpu->dev);
 	pm_runtime_disable(vpu->dev);
 	return ret;
@@ -889,7 +892,7 @@ static int rockchip_vpu_remove(struct platform_device *pdev)
 	media_device_cleanup(&vpu->mdev);
 	v4l2_m2m_release(vpu->m2m_dev);
 	v4l2_device_unregister(&vpu->v4l2_dev);
-	clk_bulk_unprepare(vpu->variant->num_clocks, vpu->clocks);
+	clk_bulk_disable_unprepare(vpu->variant->num_clocks, vpu->clocks);
 	pm_runtime_dont_use_autosuspend(vpu->dev);
 	pm_runtime_disable(vpu->dev);
 	return 0;

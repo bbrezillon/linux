@@ -56,6 +56,7 @@ struct rockchip_vpu_mpeg2_dec_hw_ctx {
 struct rockchip_vpu_h264_dec_hw_ctx {
 	struct rockchip_vpu_aux_buf priv;
 	struct v4l2_h264_dpb_entry dpb[16];
+	bool waiting_slice;
 };
 
 /**

@@ -421,7 +421,8 @@
 #define     VDPU_REG_BD_P_REF_PIC_BINIT_RLIST_F15(x)	(((x) & 0x1f) << 0)
 #define VDPU_REG_ERR_CONC			0x0c0
 #define     VDPU_REG_ERR_CONC_STARTMB_X(x)		(((x) & 0x1ff) << 23)
-#define     VDPU_REG_ERR_CONC_STARTMB_Y(x)		(((x) & 0xff) << 15)
+#define     VDPU_REG_ERR_CONC_STARTMB_Y(x)		(((x) & 0x1ff) << 14)
+#define     VDPU_REG_ERR_CONC_MODE(x)			(((x) & 0x3) << 12)
 #define VDPU_REG_PRED_FLT			0x0c4
 #define     VDPU_REG_PRED_FLT_PRED_BC_TAP_0_0(x)	(((x) & 0x3ff) << 22)
 #define     VDPU_REG_PRED_FLT_PRED_BC_TAP_0_1(x)	(((x) & 0x3ff) << 12)
@@ -439,5 +440,7 @@
 #define     VDPU_REG_REF_BUF_CTRL2_REFBU2_PICID(x)	(((x) & 0x1f) << 14)
 #define     VDPU_REG_REF_BUF_CTRL2_APF_THRESHOLD(x)	(((x) & 0x3fff) << 0)
 #define VDPU_REG_SOFT_RESET			0x194
+
+void rk3288_vdpu_dump_vdpu(struct rockchip_vpu_dev *vpu);
 
 #endif /* RK3288_VPU_REGS_H_ */

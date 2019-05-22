@@ -289,6 +289,7 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 		       const struct v4l2_ctrl_h264_pps *pps)
 {
 	struct rockchip_vpu_dev *vpu = ctx->dev;
+	unsigned int mb_w, mb_h, mb_x, mb_y;
 	struct vb2_v4l2_buffer *src_buf;
 	u32 reg;
 
@@ -309,13 +310,24 @@ static void set_params(struct rockchip_vpu_ctx *ctx,
 		reg |= VDPU_REG_DEC_CTRL0_PIC_FIELDMODE_E;
 	if (!(slice->flags & V4L2_H264_SLICE_FLAG_BOTTOM_FIELD))
 		reg |= VDPU_REG_DEC_CTRL0_PIC_TOPFIELD_E;
+	reg |= VDPU_REG_DEC_CTRL0_DEC_MODE(0);
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL0);
 
 	/* Decoder control register 1. */
-	reg = VDPU_REG_DEC_CTRL1_PIC_MB_WIDTH(sps->pic_width_in_mbs_minus1 + 1) |
-	      VDPU_REG_DEC_CTRL1_PIC_MB_HEIGHT_P(sps->pic_height_in_map_units_minus1 + 1) |
+	mb_w = sps->pic_width_in_mbs_minus1 + 1;
+	mb_h = sps->pic_height_in_map_units_minus1 + 1;
+	mb_y = slice->first_mb_in_slice / mb_w;
+	mb_x = slice->first_mb_in_slice % mb_w;
+	reg = VDPU_REG_DEC_CTRL1_PIC_MB_WIDTH(mb_w) |
+	      VDPU_REG_DEC_CTRL1_PIC_MB_HEIGHT_P(mb_h) |
 	      VDPU_REG_DEC_CTRL1_REF_FRAMES(sps->max_num_ref_frames);
 	vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL1);
+	vdpu_write_relaxed(vpu,
+			   VDPU_REG_ERR_CONC_STARTMB_Y(mb_y) |
+			   VDPU_REG_ERR_CONC_STARTMB_X(mb_x) |
+			   VDPU_REG_ERR_CONC_MODE(1),
+			   VDPU_REG_ERR_CONC);
+
 
 	/* Decoder control register 2. */
 	reg = VDPU_REG_DEC_CTRL2_CH_QP_OFFSET(pps->chroma_qp_index_offset) |
@@ -602,6 +614,9 @@ update_dpb(struct rockchip_vpu_ctx *ctx,
 	DECLARE_BITMAP(used, ARRAY_SIZE(dec_param->dpb)) = { 0, };
 	unsigned int i, j;
 
+	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
+		ctx->h264_dec.dpb[i] = dec_param->dpb[i];
+	return;
 	/* Disable all entries by default. */
 	for (i = 0; i < ARRAY_SIZE(ctx->h264_dec.dpb); i++)
 		ctx->h264_dec.dpb[i].flags &= ~V4L2_H264_DPB_ENTRY_FLAG_ACTIVE;
@@ -798,6 +813,10 @@ static void set_buffers(struct rockchip_vpu_ctx *ctx,
 	/* Source (stream) buffer. */
 	src_dma = vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 0);
 	vdpu_write_relaxed(vpu, src_dma, VDPU_REG_ADDR_STR);
+	pr_info("%s:%i ADDR_STR %08x CTRL2 %08x CTRL3 %08x\n", __func__, __LINE__,
+		vdpu_read(vpu, VDPU_REG_ADDR_STR),
+		vdpu_read(vpu, VDPU_REG_DEC_CTRL2),
+		vdpu_read(vpu, VDPU_REG_DEC_CTRL3));
 
 	/* Destination (decoded frame) buffer. */
 	dst_dma = vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 0);
@@ -833,6 +852,8 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	v4l2_ctrl_request_setup(src_buf->vb2_buf.req_obj.req,
 				&ctx->ctrl_handler);
 
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__,
+		vdpu_read(vpu, VDPU_REG_INTERRUPT), vdpu_read(vpu, 58 * 4));
 	scaling = rockchip_vpu_get_ctrl(ctx,
 				V4L2_CID_MPEG_VIDEO_H264_SCALING_MATRIX);
 	if (WARN_ON(!scaling))
@@ -856,6 +877,19 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	if (WARN_ON(!pps))
 		return;
 
+	if (ctx->h264_dec.waiting_slice) {
+		dma_addr_t src_dma;
+		u32 reg;
+
+		src_dma = vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 0);
+		vdpu_write_relaxed(vpu, src_dma, VDPU_REG_ADDR_STR);
+		reg = VDPU_REG_DEC_CTRL3_START_CODE_E |
+		      VDPU_REG_DEC_CTRL3_INIT_QP(pps->pic_init_qp_minus26 + 26) |
+		      VDPU_REG_DEC_CTRL3_STREAM_LEN(vb2_get_plane_payload(&src_buf->vb2_buf, 0));
+		vdpu_write_relaxed(vpu, reg, VDPU_REG_DEC_CTRL3);
+		goto out;
+	}
+
 	/* Configure hardware registers. */
 	set_params(ctx, dec_param, slice, sps, pps);
 	set_ref(ctx, dec_param);
@@ -868,9 +902,12 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
 				   &ctx->ctrl_handler);
 
+	rk3288_vdpu_dump_vdpu(ctx->dev);
 	/* Kick the watchdog and start decoding */
 	schedule_delayed_work(&vpu->watchdog_work, msecs_to_jiffies(2000));
 
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__,
+		vdpu_read(vpu, VDPU_REG_INTERRUPT), vdpu_read(vpu, 58 * 4));
 	/* Start decoding! */
 	vdpu_write_relaxed(vpu,
 			   VDPU_REG_CONFIG_DEC_AXI_RD_ID(0xffu) |
@@ -883,7 +920,14 @@ void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx)
 			   VDPU_REG_CONFIG_DEC_STRSWAP32_E |
 			   VDPU_REG_CONFIG_DEC_CLK_GATE_E,
 			   VDPU_REG_CONFIG);
+
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__,
+		vdpu_read(vpu, VDPU_REG_INTERRUPT), vdpu_read(vpu, 58 * 4));
+out:
+	ctx->h264_dec.waiting_slice = false;
 	vdpu_write(vpu, VDPU_REG_INTERRUPT_DEC_E, VDPU_REG_INTERRUPT);
+	pr_info("%s:%i status %08x swreg58 %08x\n", __func__, __LINE__,
+		vdpu_read(vpu, VDPU_REG_INTERRUPT), vdpu_read(vpu, 58 * 4));
 }
 
 void rk3288_vpu_h264_dec_exit(struct rockchip_vpu_ctx *ctx)
