@@ -211,6 +211,7 @@ struct rockchip_vpu_ctx {
 	const struct rockchip_vpu_fmt *vpu_dst_fmt;
 	struct v4l2_pix_format_mplane dst_fmt;
 
+	struct vb2_buffer *dst_bufs[VB2_MAX_FRAME];
 	struct v4l2_ctrl_handler ctrl_handler;
 	int jpeg_quality;
 

@@ -679,8 +679,30 @@ static int rockchip_vpu_buf_out_validate(struct vb2_buffer *vb)
 	return 0;
 }
 
+static int rockchip_vpu_buf_init(struct vb2_buffer *vb)
+{
+	struct vb2_queue *vq = vb->vb2_queue;
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
+
+	if (!V4L2_TYPE_IS_OUTPUT(vq->type))
+		ctx->dst_bufs[vb->index] = vb;
+
+	return 0;
+}
+
+static void rockchip_vpu_buf_cleanup(struct vb2_buffer *vb)
+{
+	struct vb2_queue *vq = vb->vb2_queue;
+	struct rockchip_vpu_ctx *ctx = vb2_get_drv_priv(vq);
+
+	if (!V4L2_TYPE_IS_OUTPUT(vq->type))
+		ctx->dst_bufs[vb->index] = NULL;
+}
+
 const struct vb2_ops rockchip_vpu_queue_ops = {
 	.queue_setup = rockchip_vpu_queue_setup,
+	.buf_init = rockchip_vpu_buf_init,
+	.buf_cleanup = rockchip_vpu_buf_cleanup,
 	.buf_prepare = rockchip_vpu_buf_prepare,
 	.buf_queue = rockchip_vpu_buf_queue,
 	.buf_out_validate = rockchip_vpu_buf_out_validate,
