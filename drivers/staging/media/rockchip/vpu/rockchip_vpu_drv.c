@@ -101,24 +101,27 @@ static void rockchip_vpu_job_finish(struct rockchip_vpu_dev *vpu,
 	clk_bulk_disable(vpu->variant->num_clocks, vpu->clocks);
 
 	src = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
-	dst = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
-
 	if (WARN_ON(!src))
-		return;
-	if (WARN_ON(!dst))
 		return;
 
 	src->sequence = ctx->sequence_out++;
-	dst->sequence = ctx->sequence_cap++;
 
+	if (!(src->flags & V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF))
+		dst = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
+	else
+		dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 
-	ret = ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
-	if (ret)
-		result = VB2_BUF_STATE_ERROR;
+	if (!dst->is_held) {
+		dst->sequence = ctx->sequence_cap++;
+
+		ret = ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
+		if (ret)
+			result = VB2_BUF_STATE_ERROR;
+
+		v4l2_m2m_buf_done(dst, result);
+	}
 
 	v4l2_m2m_buf_done(src, result);
-	v4l2_m2m_buf_done(dst, result);
-
 	v4l2_m2m_job_finish(vpu->m2m_dev, ctx->fh.m2m_ctx);
 }
 
@@ -155,8 +158,25 @@ void rockchip_vpu_watchdog(struct work_struct *work)
 
 static void device_run(void *priv)
 {
+	struct vb2_v4l2_buffer *src, *dst;
 	struct rockchip_vpu_ctx *ctx = priv;
 	int ret;
+
+	src = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
+	dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
+	if (v4l2_m2m_release_capture_buf(src, dst)) {
+		v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
+		dst->sequence = ctx->sequence_cap++;
+
+		ret = ctx->buf_finish(ctx, &dst->vb2_buf, 0);
+		v4l2_m2m_buf_done(dst,
+				  ret ?
+				  VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
+		v4l2_m2m_job_finish(ctx->dev->m2m_dev, ctx->fh.m2m_ctx);
+		return;
+	}
+
+	dst->is_held = src->flags & V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF;
 
 	ret = clk_bulk_enable(ctx->dev->variant->num_clocks, ctx->dev->clocks);
 	if (ret)
@@ -207,6 +227,9 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 	src_vq->lock = &ctx->dev->vpu_mutex;
 	src_vq->dev = ctx->dev->v4l2_dev.dev;
 	src_vq->supports_requests = true;
+
+	if (!rockchip_vpu_is_encoder_ctx(ctx))
+		src_vq->subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF;
 
 	ret = vb2_queue_init(src_vq);
 	if (ret)
@@ -315,6 +338,12 @@ static struct rockchip_vpu_ctrl controls[] = {
 		.codec = RK_VPU_H264_DECODER,
 		.cfg = {
 			.elem_size = sizeof(struct v4l2_ctrl_h264_scaling_matrix),
+		},
+	}, {
+		.id = V4L2_CID_MPEG_VIDEO_VP8_FRAME_HDR,
+		.codec = RK_VPU_VP8_DECODER,
+		.cfg = {
+			.elem_size = sizeof(struct v4l2_ctrl_vp8_frame_header),
 		},
 	}, {
 	},
