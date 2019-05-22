@@ -11,6 +11,7 @@
 
 #include <linux/interrupt.h>
 #include <linux/v4l2-controls.h>
+#include <media/h264-ctrls.h>
 #include <media/mpeg2-ctrls.h>
 #include <media/videobuf2-core.h>
 
@@ -45,6 +46,16 @@ struct rockchip_vpu_jpeg_enc_hw_ctx {
  */
 struct rockchip_vpu_mpeg2_dec_hw_ctx {
 	struct rockchip_vpu_aux_buf qtable;
+};
+
+/**
+ * struct rockchip_vpu_h264_dec_hw_ctx - Per context data specific to H264
+ * decoding.
+ * @priv_tbl:		Private auxiliary buffer for hardware.
+ */
+struct rockchip_vpu_h264_dec_hw_ctx {
+	struct rockchip_vpu_aux_buf priv;
+	struct v4l2_h264_dpb_entry dpb[16];
 };
 
 /**
@@ -98,5 +109,9 @@ void rockchip_vpu_mpeg2_dec_copy_qtable(u8 *qtable,
 	const struct v4l2_ctrl_mpeg2_quantization *ctrl);
 int rockchip_vpu_mpeg2_dec_init(struct rockchip_vpu_ctx *ctx);
 void rockchip_vpu_mpeg2_dec_exit(struct rockchip_vpu_ctx *ctx);
+
+void rk3288_vpu_h264_dec_run(struct rockchip_vpu_ctx *ctx);
+int rk3288_vpu_h264_dec_init(struct rockchip_vpu_ctx *ctx);
+void rk3288_vpu_h264_dec_exit(struct rockchip_vpu_ctx *ctx);
 
 #endif /* ROCKCHIP_VPU_HW_H_ */

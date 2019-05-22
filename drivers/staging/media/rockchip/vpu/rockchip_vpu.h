@@ -35,6 +35,10 @@
 #define JPEG_MB_WIDTH(w)		DIV_ROUND_UP(w, JPEG_MB_DIM)
 #define JPEG_MB_HEIGHT(h)		DIV_ROUND_UP(h, JPEG_MB_DIM)
 
+#define H264_MB_DIM			16
+#define H264_MB_WIDTH(w)		DIV_ROUND_UP(w, H264_MB_DIM)
+#define H264_MB_HEIGHT(h)		DIV_ROUND_UP(h, H264_MB_DIM)
+
 struct rockchip_vpu_ctx;
 struct rockchip_vpu_codec_ops;
 
@@ -42,6 +46,7 @@ struct rockchip_vpu_codec_ops;
 #define RK_VPU_ENCODERS		0x0000ffff
 
 #define RK_VPU_MPEG2_DECODER	BIT(16)
+#define RK_VPU_H264_DECODER	BIT(19)
 #define RK_VPU_DECODERS		0xffff0000
 
 /**
@@ -82,11 +87,13 @@ struct rockchip_vpu_variant {
  * @RK_VPU_MODE_NONE:  No operating mode. Used for RAW video formats.
  * @RK_VPU_MODE_JPEG_ENC: JPEG encoder.
  * @RK_VPU_MODE_MPEG2_DEC: MPEG-2 decoder.
+ * @RK_VPU_MODE_H264_DEC: H264 decoder.
  */
 enum rockchip_vpu_codec_mode {
 	RK_VPU_MODE_NONE = -1,
 	RK_VPU_MODE_JPEG_ENC,
 	RK_VPU_MODE_MPEG2_DEC,
+	RK_VPU_MODE_H264_DEC,
 };
 
 /*
@@ -225,6 +232,7 @@ struct rockchip_vpu_ctx {
 	union {
 		struct rockchip_vpu_jpeg_enc_hw_ctx jpeg_enc;
 		struct rockchip_vpu_mpeg2_dec_hw_ctx mpeg2_dec;
+		struct rockchip_vpu_h264_dec_hw_ctx h264_dec;
 	};
 };
 
