@@ -804,7 +804,7 @@ static void set_buffers(struct rockchip_vpu_ctx *ctx,
 	vdpu_write_relaxed(vpu, dst_dma, VDPU_REG_ADDR_DST);
 
 	/* Higher profiles require DMV buffer appended to reference frames. */
-	if (sps->profile_idc > 66 || 1) {
+	if (sps->profile_idc > 66) {
 		size_t sizeimage = ctx->dst_fmt.plane_fmt[0].sizeimage;
 		size_t mv_offset = round_up(sizeimage, 8);
 
