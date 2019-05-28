@@ -79,6 +79,7 @@ enum rockchip_vpu_enc_fmt {
 };
 
 extern const struct rockchip_vpu_variant rk3399_vpu_variant;
+extern const struct rockchip_vpu_variant rk3328_vpu_variant;
 extern const struct rockchip_vpu_variant rk3288_vpu_variant;
 
 void rockchip_vpu_watchdog(struct work_struct *work);

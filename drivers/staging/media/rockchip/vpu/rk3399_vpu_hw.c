@@ -175,3 +175,15 @@ const struct rockchip_vpu_variant rk3399_vpu_variant = {
 	.clk_names = {"aclk", "hclk"},
 	.num_clocks = 2
 };
+
+const struct rockchip_vpu_variant rk3328_vpu_variant = {
+	.dec_offset = 0x400,
+	.dec_fmts = rk3399_vpu_dec_fmts,
+	.num_dec_fmts = ARRAY_SIZE(rk3399_vpu_dec_fmts),
+	.codec = RK_VPU_MPEG2_DECODER,
+	.codec_ops = rk3399_vpu_codec_ops,
+	.vdpu_irq = rk3399_vdpu_irq,
+	.init = rk3399_vpu_hw_init,
+	.clk_names = {"aclk", "hclk"},
+	.num_clocks = 2
+};
