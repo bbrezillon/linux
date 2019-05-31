@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Rockchip VPU codec driver
+ * Hantro VPU codec driver
  *
  * Copyright (C) 2018 Rockchip Electronics Co., Ltd.
  */
 
 #include <asm/unaligned.h>
 #include <media/v4l2-mem2mem.h>
-#include "rockchip_vpu_jpeg.h"
-#include "rockchip_vpu.h"
-#include "rockchip_vpu_v4l2.h"
-#include "rockchip_vpu_hw.h"
+#include "hantro_jpeg.h"
+#include "hantro.h"
+#include "hantro_v4l2.h"
+#include "hantro_hw.h"
 #include "rk3288_vpu_regs.h"
 
 #define VEPU_JPEG_QUANT_TABLE_COUNT 16
 
-static void rk3288_vpu_set_src_img_ctrl(struct rockchip_vpu_dev *vpu,
-					struct rockchip_vpu_ctx *ctx)
+static void hantro_h1_set_src_img_ctrl(struct hantro_dev *vpu,
+				       struct hantro_ctx *ctx)
 {
 	struct v4l2_pix_format_mplane *pix_fmt = &ctx->src_fmt;
 	u32 reg;
@@ -28,9 +28,9 @@ static void rk3288_vpu_set_src_img_ctrl(struct rockchip_vpu_dev *vpu,
 	vepu_write_relaxed(vpu, reg, VEPU_REG_IN_IMG_CTRL);
 }
 
-static void rk3288_vpu_jpeg_enc_set_buffers(struct rockchip_vpu_dev *vpu,
-					    struct rockchip_vpu_ctx *ctx,
-					    struct vb2_buffer *src_buf)
+static void hantro_h1_jpeg_enc_set_buffers(struct hantro_dev *vpu,
+					   struct hantro_ctx *ctx,
+					   struct vb2_buffer *src_buf)
 {
 	struct v4l2_pix_format_mplane *pix_fmt = &ctx->src_fmt;
 	dma_addr_t src[3];
@@ -62,9 +62,9 @@ static void rk3288_vpu_jpeg_enc_set_buffers(struct rockchip_vpu_dev *vpu,
 }
 
 static void
-rk3288_vpu_jpeg_enc_set_qtable(struct rockchip_vpu_dev *vpu,
-			       unsigned char *luma_qtable,
-			       unsigned char *chroma_qtable)
+hantro_h1_jpeg_enc_set_qtable(struct hantro_dev *vpu,
+			      unsigned char *luma_qtable,
+			      unsigned char *chroma_qtable)
 {
 	u32 reg, i;
 
@@ -77,11 +77,11 @@ rk3288_vpu_jpeg_enc_set_qtable(struct rockchip_vpu_dev *vpu,
 	}
 }
 
-void rk3288_vpu_jpeg_enc_run(struct rockchip_vpu_ctx *ctx)
+void hantro_h1_jpeg_enc_run(struct hantro_ctx *ctx)
 {
-	struct rockchip_vpu_dev *vpu = ctx->dev;
+	struct hantro_dev *vpu = ctx->dev;
 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
-	struct rockchip_vpu_jpeg_ctx jpeg_ctx;
+	struct hantro_jpeg_ctx jpeg_ctx;
 	u32 reg;
 
 	src_buf = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
@@ -92,17 +92,17 @@ void rk3288_vpu_jpeg_enc_run(struct rockchip_vpu_ctx *ctx)
 	jpeg_ctx.width = ctx->dst_fmt.width;
 	jpeg_ctx.height = ctx->dst_fmt.height;
 	jpeg_ctx.quality = ctx->jpeg_quality;
-	rockchip_vpu_jpeg_header_assemble(&jpeg_ctx);
+	hantro_jpeg_header_assemble(&jpeg_ctx);
 
 	/* Switch to JPEG encoder mode before writing registers */
 	vepu_write_relaxed(vpu, VEPU_REG_ENC_CTRL_ENC_MODE_JPEG,
 			   VEPU_REG_ENC_CTRL);
 
-	rk3288_vpu_set_src_img_ctrl(vpu, ctx);
-	rk3288_vpu_jpeg_enc_set_buffers(vpu, ctx, &src_buf->vb2_buf);
-	rk3288_vpu_jpeg_enc_set_qtable(vpu,
-				       rockchip_vpu_jpeg_get_qtable(&jpeg_ctx, 0),
-				       rockchip_vpu_jpeg_get_qtable(&jpeg_ctx, 1));
+	hantro_h1_set_src_img_ctrl(vpu, ctx);
+	hantro_h1_jpeg_enc_set_buffers(vpu, ctx, &src_buf->vb2_buf);
+	hantro_h1_jpeg_enc_set_qtable(vpu,
+				      hantro_jpeg_get_qtable(&jpeg_ctx, 0),
+				      hantro_jpeg_get_qtable(&jpeg_ctx, 1));
 
 	reg = VEPU_REG_AXI_CTRL_OUTPUT_SWAP16
 		| VEPU_REG_AXI_CTRL_INPUT_SWAP16

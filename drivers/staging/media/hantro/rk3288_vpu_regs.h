@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Rockchip VPU codec driver
+ * Hantro VPU codec driver
  *
  * Copyright 2018 Google LLC.
  *	Tomasz Figa <tfiga@chromium.org>
