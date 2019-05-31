@@ -266,6 +266,7 @@ static const struct hantro_irq imx8mq_irqs[] = {
 	{ "g2", NULL /* TODO: imx8m_vpu_g2_irq */ },
 };
 
+static const char * const imx8mq_clk_names[] = { "g1", "g2", "bus" };
 static const char * const imx8mq_reg_names[] = { "g1", "g2", "ctrl" };
 
 const struct hantro_variant imx8mq_vpu_variant = {
@@ -278,8 +279,8 @@ const struct hantro_variant imx8mq_vpu_variant = {
 	.irqs = imx8mq_irqs,
 	.num_irqs = ARRAY_SIZE(imx8mq_irqs),
 	.num_irqs = 2,
-	.clk_names = { "g1", "g2", "bus" },
-	.num_clocks = 3,
+	.clk_names = imx8mq_clk_names,
+	.num_clocks = ARRAY_SIZE(imx8mq_clk_names),
 	.reg_names = imx8mq_reg_names,
 	.num_regs = ARRAY_SIZE(imx8mq_reg_names)
 };
@@ -290,6 +291,7 @@ static const struct hantro_irq imx8mm_irqs[] = {
 	{ "h1", imx8mm_vpu_h1_irq },
 };
 
+static const char * const imx8mm_clk_names[] = { "g1", "g2", "h1", "bus" };
 static const char * const imx8mm_reg_names[] = { "g1", "g2", "h1", "ctrl" };
 
 const struct hantro_variant imx8mm_vpu_variant = {
@@ -301,8 +303,8 @@ const struct hantro_variant imx8mm_vpu_variant = {
 	.runtime_resume = imx8mm_runtime_resume,
 	.irqs = imx8mm_irqs,
 	.num_irqs = ARRAY_SIZE(imx8mm_irqs),
-	.clk_names = { "g1", "g2", "h1", "bus" },
-	.num_clocks = 4,
+	.clk_names = imx8mm_clk_names,
+	.num_clocks = ARRAY_SIZE(imx8mm_clk_names),
 	.reg_names = imx8mm_reg_names,
 	.num_regs = ARRAY_SIZE(imx8mm_reg_names)
 };
