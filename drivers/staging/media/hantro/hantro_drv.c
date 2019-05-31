@@ -419,6 +419,7 @@ static const struct of_device_id of_hantro_match[] = {
 	{ .compatible = "rockchip,rk3328-vpu", .data = &rk3328_vpu_variant, },
 	{ .compatible = "rockchip,rk3288-vpu", .data = &rk3288_vpu_variant, },
 	{ .compatible = "nxp,imx8mq-vpu", .data = &imx8mq_vpu_variant, },
+	{ .compatible = "nxp,imx8mm-vpu", .data = &imx8mm_vpu_variant, },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, of_hantro_match);
