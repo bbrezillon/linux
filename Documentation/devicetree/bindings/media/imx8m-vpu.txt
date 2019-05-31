@@ -1,0 +1,56 @@
+device-tree bindings for Hantro G1/G2/H1 VPU codecs implemented on i.MX8M SoCs
+
+Required properties:
+- compatible: value should be one of the following
+		"nxp,imx8mq-vpu",
+		"nxp,imx8mm-vpu";
+- regs: VPU core and control block register ranges
+- reg-names: should be
+		"g1", "g2", "ctrl" on i.MX8MQ,
+		"g1", "g2", "h1", "ctrl" on i.MX8MM.
+- interrupts: encoding and decoding interrupt specifiers
+- interrupt-names: should be
+		"g1", "g2" on i.MX8MQ,
+		"g1", "g2", "h1" on i.MX8MM.
+- clocks: phandle to VPU core clocks and bus clock
+- clock-names: should be
+		"g1", "g2", "bus" on i.MX8MQ,
+		"g1", "g2", "h1", "bus" on i.MX8MM.
+- power-domains: phandle to power domain node
+
+Examples:
+
+	vpu: vpu@38300000 {
+		compatible = "nxp,imx8mq-vpu";
+		reg = <0x38300000 0x10000>,
+		      <0x38310000 0x10000>,
+		      <0x38320000 0x10000>;
+		reg-names = "g1", "g2", "ctrl";
+		interrupts = <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "g1", "g2";
+		clocks = <&clk IMX8MQ_CLK_VPU_G1_ROOT>,
+			 <&clk IMX8MQ_CLK_VPU_G2_ROOT>,
+			 <&clk IMX8MQ_CLK_VPU_DEC_ROOT>;
+		clock-names = "g1", "g2", "bus";
+		power-domains = <&pgc_vpu>;
+	};
+
+	vpu: vpu@38300000 {
+		compatible = "nxp,imx8mm-vpu";
+		reg = <0x38300000 0x10000>,
+		      <0x38310000 0x10000>,
+		      <0x38320000 0x10000>;
+		      <0x38330000 0x10000>;
+		reg-names = "g1", "g2", "h1", "ctrl";
+		interrupts = <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
+			     <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "g1", "g2", "h1";
+		clocks = <&clk IMX8MQ_CLK_VPU_G1_ROOT>,
+			 <&clk IMX8MQ_CLK_VPU_G2_ROOT>,
+			 <&clk IMX8MQ_CLK_VPU_H1_ROOT>,
+			 <&clk IMX8MQ_CLK_VPU_DEC_ROOT>;
+		clock-names = "g1", "g2", "h1", "bus";
+		power-domains = <&pgc_vpu>;
+	};
