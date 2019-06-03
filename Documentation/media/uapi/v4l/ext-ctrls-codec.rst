@@ -1749,6 +1749,14 @@ enum v4l2_mpeg_video_h264_hierarchical_coding_type -
       - ``size``
       -
     * - __u32
+      - ``start_byte_offset``
+      - Where the slice payload starts in the output buffer. Useful when
+        operating in per frame decoding mode and decoding multi-slice content.
+        In this case, the output buffer will contain more than one slice and
+        some codecs need to know where each slice starts. Note that this
+        offsets points to the beginning of the slice which is supposed to
+        contain an ANNEX B start code
+    * - __u32
       - ``header_bit_size``
       -
     * - __u16
@@ -1931,7 +1939,10 @@ enum v4l2_mpeg_video_h264_hierarchical_coding_type -
       -
     * - __u16
       - ``num_slices``
-      - Number of slices needed to decode the current frame
+      - Number of slices needed to decode the current frame/field. When
+        operating in per-slice decoding mode (see
+        :c:type:`v4l2_mpeg_video_h264_decoding_mode`), this field
+        should always be set to one
     * - __u16
       - ``nal_ref_idc``
       - NAL reference ID value coming from the NAL Unit header
@@ -2021,6 +2032,35 @@ enum v4l2_mpeg_video_h264_hierarchical_coding_type -
     * - ``V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM``
       - 0x00000004
       - The DPB entry is a long term reference frame
+
+``V4L2_CID_MPEG_VIDEO_H264_DECODING_MODE (enum)``
+    Specifies the decoding mode to use. Currently exposes per slice and per
+    frame decoding but new modes might be added later on.
+
+    .. note::
+
+       This menu control is not yet part of the public kernel API and
+       it is expected to change.
+
+.. c:type:: v4l2_mpeg_video_h264_decoding_mode
+
+.. cssclass:: longtable
+
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - ``V4L2_MPEG_VIDEO_H264_DECODING_PER_SLICE``
+      - 0
+      - The decoding is done per slice. v4l2_ctrl_h264_decode_params->num_slices
+        must be set to 1 and the output buffer should contain only one slice.
+    * - ``V4L2_MPEG_VIDEO_H264_DECODING_PER_FRAME``
+      - 1
+      - The decoding is done per frame. v4l2_ctrl_h264_decode_params->num_slices
+        can be > 1. When that happens, the output buffer should contain all
+        slices needed to decode a frame/field, each slice being prefixed by an
+        Annex B NAL header/start-code.
 
 .. _v4l2-mpeg-mpeg2:
 
