@@ -6,9 +6,11 @@ hantro-vpu-y += \
 		rk3288_vpu_hw.o \
 		hantro_h1_jpeg_enc.o \
 		hantro_g1_mpeg2_dec.o \
+		hantro_g1_vp8_dec.o \
 		rk3399_vpu_hw.o \
 		rk3399_vpu_hw_jpeg_enc.o \
 		rk3399_vpu_hw_mpeg2_dec.o \
 		imx8m_vpu_hw.o \
 		hantro_jpeg.o \
-		hantro_mpeg2.o
+		hantro_mpeg2.o \
+		hantro_vp8.o
