@@ -49,7 +49,7 @@ dma_addr_t hantro_get_ref(struct vb2_queue *q, u64 ts)
 
 	index = vb2_find_timestamp(q, ts, 0);
 	if (index >= 0)
-		return vb2_dma_contig_plane_dma_addr(q->bufs[index], 0);
+		return vb2_dma_contig_plane_dma_addr(vb2_get_buffer(index), 0);
 	return 0;
 }
 
