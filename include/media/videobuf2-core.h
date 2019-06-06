@@ -1172,7 +1172,7 @@ static inline struct vb2_buffer *vb2_get_buffer(struct vb2_queue *q,
 						unsigned int index)
 {
 	if (q->num_buffers > 0 && index < q->num_buffers)
-		return q->buf[index];
+		return q->bufs[index];
 	return NULL;
 }
 
