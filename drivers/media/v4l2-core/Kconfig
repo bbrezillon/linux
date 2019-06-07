@@ -49,6 +49,11 @@ config V4L2_MEM2MEM_CODEC
 	bool
 	depends on V4L2_MEM2MEM_DEV
 
+config V4L2_MEM2MEM_MPEG2_CODEC
+	bool
+	depends on V4L2_MEM2MEM_DEV
+	select V4L2_MEM2MEM_CODEC
+
 # Used by LED subsystem flash drivers
 config V4L2_FLASH_LED_CLASS
 	tristate "V4L2 flash API for LED flash class devices"

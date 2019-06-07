@@ -25,6 +25,7 @@ obj-$(CONFIG_VIDEO_TUNER) += tuner.o
 
 v4l2-mem2mem-y = v4l2-mem2mem-core.o
 v4l2-mem2mem-$(CONFIG_V4L2_MEM2MEM_CODEC) += v4l2-mem2mem-codec.o
+v4l2-mem2mem-$(CONFIG_V4L2_MEM2MEM_MPEG2_CODEC) += v4l2-mem2mem-mpeg2-codec.o
 obj-$(CONFIG_V4L2_MEM2MEM_DEV) += v4l2-mem2mem.o
 
 obj-$(CONFIG_V4L2_FLASH_LED_CLASS) += v4l2-flash-led-class.o
