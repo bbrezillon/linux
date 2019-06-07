@@ -21,6 +21,7 @@
 struct v4l2_m2m_codec_ctx {
 	struct v4l2_fh fh;
 	struct v4l2_ctrl_handler ctrl_hdl;
+	struct v4l2_m2m_dev *m2m_dev;
 };
 
 struct v4l2_m2m_codec_run {
@@ -30,12 +31,15 @@ struct v4l2_m2m_codec_run {
 	} bufs;
 };
 
+void v4l2_m2m_codec_open(struct file *file,
+			 struct v4l2_m2m_dev *m2m_dev,
+			 struct v4l2_m2m_codec_ctx *ctx);
+void v4l2_m2m_codec_release(struct v4l2_m2m_codec_ctx *ctx);
 void v4l2_m2m_codec_run_preamble(struct v4l2_m2m_codec_ctx *ctx,
                                  struct v4l2_m2m_codec_run *run);
 void v4l2_m2m_codec_run_postamble(struct v4l2_m2m_codec_ctx *ctx,
                                   struct v4l2_m2m_codec_run *run);
-void v4l2_m2m_codec_job_finish(struct v4l2_m2m_dev *m2m_dev,
-                               struct v4l2_m2m_codec_ctx *ctx,
+void v4l2_m2m_codec_job_finish(struct v4l2_m2m_codec_ctx *ctx,
                                enum vb2_buffer_state state);
 
 #endif /* _MEDIA_V4L2_MEM2MEM_CODEC_H */
