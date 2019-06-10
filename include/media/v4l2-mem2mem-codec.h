@@ -18,9 +18,26 @@
 #include <media/v4l2-fh.h>
 #include <media/v4l2-mem2mem.h>
 
+struct v4l2_m2m_codec_ctrls {
+	const struct v4l2_ctrl_config *mandatory;
+	unsigned int nmandatory;
+	const struct v4l2_ctrl_config *optional;
+	unsigned int noptional;
+};
+
+struct v4l2_m2m_codec_coded_fmt {
+	u32 fourcc;
+	struct v4l2_frmsize_stepwise frmsize;
+	const struct v4l2_m2m_codec_ctrls *ctrls;
+};
+
 struct v4l2_m2m_codec_ctx {
 	struct v4l2_fh fh;
+	struct v4l2_m2m_codec_coded_fmt *coded_fmt;
 	struct v4l2_ctrl_handler ctrl_hdl;
+	struct {
+		const struct v4l2_m2m_codec_ctrls *def;
+	} ctrls;
 	struct v4l2_m2m_dev *m2m_dev;
 };
 
@@ -31,6 +48,12 @@ struct v4l2_m2m_codec_run {
 	} bufs;
 };
 
+int v4l2_m2m_codec_init_ctrls(struct v4l2_m2m_codec_ctx *ctx,
+			      struct v4l2_m2m_codec_coded_fmt *fmts,
+			      unsigned int nfmts,
+			      const struct v4l2_ctrl_config *extra_ctrls,
+			      unsigned int nextra_ctrls);
+void v4l2_m2m_codec_cleanup_ctrls(struct v4l2_m2m_codec_ctx *ctx);
 void v4l2_m2m_codec_open(struct file *file,
 			 struct v4l2_m2m_dev *m2m_dev,
 			 struct v4l2_m2m_codec_ctx *ctx);
