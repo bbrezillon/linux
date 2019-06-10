@@ -1222,4 +1222,15 @@ bool vb2_request_object_is_buffer(struct media_request_object *obj);
  */
 unsigned int vb2_request_buffer_cnt(struct media_request *req);
 
+/**
+ * vb2_request_get_buf() - return the buffer at index @idx
+ *
+ * @req:	the request.
+ * @idx:	index of the buffer in the req object list
+ *
+ * Return a vb2 buffer or NULL if there's no buffer at the specified index
+ */
+struct vb2_buffer *vb2_request_get_buf(struct media_request *req,
+				       unsigned int idx);
+
 #endif /* _MEDIA_VIDEOBUF2_CORE_H */
