@@ -25,7 +25,12 @@ struct v4l2_m2m_mpeg2_codec_run {
 
 void v4l2_m2m_mpeg2_codec_run_preamble(struct v4l2_m2m_codec_ctx *ctx,
 				       struct v4l2_m2m_mpeg2_codec_run *run);
-void v4l2_m2m_mpeg2_codec_run_postamble(struct v4l2_m2m_codec_ctx *ctx,
-					struct v4l2_m2m_mpeg2_codec_run *run);
+
+static inline void
+v4l2_m2m_mpeg2_codec_run_postamble(struct v4l2_m2m_codec_ctx *ctx,
+				   struct v4l2_m2m_mpeg2_codec_run *run)
+{
+	v4l2_m2m_codec_run_postamble(ctx, &run->base);
+}
 
 #endif /* _MEDIA_V4L2_MEM2MEM_CODEC_H */
