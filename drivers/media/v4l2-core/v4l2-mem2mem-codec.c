@@ -154,6 +154,120 @@ err_free_handler:
 	return ret;
 }
 
+static void v4l2_m2m_codec_reset_fmt(struct v4l2_m2m_codec_ctx *ctx,
+				     struct v4l2_format *f, u32 fourcc)
+{
+	const struct v4l2_ioctl_ops *ops = ctx->codec->vdev.ioctl_ops;
+
+	memset(f, 0, sizeof(*f));
+
+	if (ops->vidioc_g_fmt_vid_cap_mplane) {
+		f->fmt.pix_mp.pixelformat = fourcc;
+	        f->fmt.pix_mp.field = V4L2_FIELD_NONE;
+	        f->fmt.pix_mp.colorspace = V4L2_COLORSPACE_JPEG,
+	        f->fmt.pix_mp.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	        f->fmt.pix_mp.quantization = V4L2_QUANTIZATION_DEFAULT;
+	        f->fmt.pix_mp.xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	} else {
+		f->fmt.pix.pixelformat = fourcc;
+	        f->fmt.pix.field = V4L2_FIELD_NONE;
+	        f->fmt.pix.colorspace = V4L2_COLORSPACE_JPEG,
+	        f->fmt.pix.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	        f->fmt.pix.quantization = V4L2_QUANTIZATION_DEFAULT;
+	        f->fmt.pix.xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	}
+}
+
+static void v4l2_m2m_codec_reset_coded_fmt(struct v4l2_m2m_codec_ctx *ctx)
+{
+	struct v4l2_m2m_codec *codec = ctx->codec;
+	const struct v4l2_ioctl_ops *ops = codec->vdev.ioctl_ops;
+	const struct v4l2_m2m_codec_coded_fmt_desc *desc;
+	struct v4l2_format *f = &ctx->coded_fmt;
+
+	desc = &ctx->codec->caps->coded_fmts[0];
+	ctx->coded_fmt_desc = desc;
+	v4l2_m2m_codec_reset_fmt(ctx, f, desc->fourcc);
+
+	if (ops->vidioc_g_fmt_vid_cap_mplane) {
+		struct v4l2_pix_format_mplane *fmt = &f->fmt.pix_mp;
+
+		if (codec->type == V4L2_M2M_ENCODER)
+			f->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+		else
+			f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+
+		if (desc->frmsize) {
+			fmt->width = desc->frmsize->min_width;
+			fmt->height = desc->frmsize->min_height;
+		}
+
+	} else {
+		struct v4l2_pix_format *fmt = &f->fmt.pix;
+
+		if (codec->type == V4L2_M2M_ENCODER)
+			f->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+		else
+			f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+		if (desc->frmsize) {
+			fmt->width = desc->frmsize->min_width;
+			fmt->height = desc->frmsize->min_height;
+		}
+	}
+
+	if (desc->adjust_fmt)
+		desc->adjust_fmt(ctx, desc, &ctx->coded_fmt);
+}
+
+void v4l2_m2m_codec_reset_decoded_fmt(struct v4l2_m2m_codec_ctx *ctx)
+{
+	struct v4l2_m2m_codec *codec = ctx->codec;
+	const struct v4l2_ioctl_ops *ops = codec->vdev.ioctl_ops;
+	const struct v4l2_m2m_codec_coded_fmt_desc *coded_desc;
+	struct v4l2_format *f = &ctx->decoded_fmt;
+
+	if (!ctx->coded_fmt_desc)
+		v4l2_m2m_codec_reset_coded_fmt(ctx);
+
+	coded_desc = ctx->coded_fmt_desc;
+	v4l2_m2m_codec_reset_fmt(ctx, f, codec->caps->decoded_fmts[0].fourcc);
+	if (ops->vidioc_g_fmt_vid_cap_mplane) {
+		struct v4l2_pix_format_mplane *fmt = &f->fmt.pix_mp;
+
+		if (codec->type == V4L2_M2M_ENCODER)
+			f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+		else
+			f->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+
+		if (coded_desc->frmsize) {
+			fmt->width = coded_desc->frmsize->min_width;
+			fmt->height = coded_desc->frmsize->min_height;
+		}
+
+		v4l2_fill_pixfmt_mp(fmt, fmt->pixelformat,
+				    fmt->width, fmt->height);
+	} else {
+		struct v4l2_pix_format *fmt = &f->fmt.pix;
+
+		if (codec->type == V4L2_M2M_ENCODER)
+			f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		else
+			f->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+
+		if (coded_desc->frmsize) {
+			fmt->width = coded_desc->frmsize->min_width;
+			fmt->height = coded_desc->frmsize->min_height;
+		}
+
+		v4l2_fill_pixfmt(fmt, fmt->pixelformat,
+				 fmt->width, fmt->height);
+	}
+
+	ctx->decoded_fmt_desc = &codec->caps->decoded_fmts[0];
+}
+EXPORT_SYMBOL_GPL(v4l2_m2m_codec_reset_decoded_fmt);
+
 int v4l2_m2m_codec_ctx_init(struct v4l2_m2m_codec_ctx *ctx, struct file *file,
 			    struct v4l2_m2m_codec *codec,
 			    const struct v4l2_ctrl_config *extra_ctrls,
@@ -183,6 +297,9 @@ int v4l2_m2m_codec_ctx_init(struct v4l2_m2m_codec_ctx *ctx, struct file *file,
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
 	file->private_data = &ctx->fh;
 	v4l2_fh_add(&ctx->fh);
+
+	v4l2_m2m_codec_reset_coded_fmt(ctx);
+	v4l2_m2m_codec_reset_decoded_fmt(ctx);
 	return 0;
 
 err_cleanup_ctrls:
@@ -317,9 +434,11 @@ int v4l2_m2m_codec_enum_framesizes(struct file *file, void *priv,
 	if (!fmt)
 		return -EINVAL;
 
-	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
-	fsize->stepwise = fmt->frmsize;
+	if (!fmt->frmsize)
+		return -EINVAL;
 
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise = *fmt->frmsize;
 	return 0;
 
 }
@@ -347,7 +466,7 @@ static int v4l2_m2m_codec_enum_decoded_fmt(struct file *file, void *priv,
 	if (f->index >= codec->caps->num_decoded_fmts)
 		return -EINVAL;
 
-	f->pixelformat = codec->caps->decoded_fmts[f->index];
+	f->pixelformat = codec->caps->decoded_fmts[f->index].fourcc;
 	return 0;
 }
 
@@ -375,41 +494,17 @@ int v4l2_m2m_codec_enum_capture_fmt(struct file *file, void *priv,
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_enum_capture_fmt);
 
-static int v4l2_m2m_codec_g_coded_fmt(struct file *file, void *priv,
-				      struct v4l2_format *f)
-{
-	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
-
-	if (V4L2_TYPE_IS_MULTIPLANAR(f->type))
-		f->fmt.pix_mp = ctx->coded_fmt.mplane;
-	else
-		f->fmt.pix = ctx->coded_fmt.splane;
-
-	return 0;
-}
-
-static int v4l2_m2m_codec_g_decoded_fmt(struct file *file, void *priv,
-					struct v4l2_format *f)
-{
-	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
-
-	if (V4L2_TYPE_IS_MULTIPLANAR(f->type))
-		f->fmt.pix_mp = ctx->decoded_fmt.mplane;
-	else
-		f->fmt.pix = ctx->decoded_fmt.splane;
-
-	return 0;
-}
-
 int v4l2_m2m_codec_g_output_fmt(struct file *file, void *priv,
 				struct v4l2_format *f)
 {
 	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
 
 	if (ctx->codec->type == V4L2_M2M_ENCODER)
-		return v4l2_m2m_codec_g_decoded_fmt(file, priv, f);
+		*f = ctx->decoded_fmt;
+	else
+		*f = ctx->coded_fmt;
 
-	return v4l2_m2m_codec_g_coded_fmt(file, priv, f);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_g_output_fmt);
 
@@ -419,11 +514,141 @@ int v4l2_m2m_codec_g_capture_fmt(struct file *file, void *priv,
 	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
 
 	if (ctx->codec->type == V4L2_M2M_ENCODER)
-		return v4l2_m2m_codec_g_coded_fmt(file, priv, f);
+		*f = ctx->coded_fmt;
+	else
+		*f = ctx->decoded_fmt;
 
-	return v4l2_m2m_codec_g_decoded_fmt(file, priv, f);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_g_capture_fmt);
+
+static void
+v4l2_m2m_codec_apply_frmsize_constraints(struct v4l2_format *f,
+				const struct v4l2_frmsize_stepwise *frmsize)
+{
+	u32 *width, *height;
+
+	if (!frmsize)
+		return;
+
+	if (!V4L2_TYPE_IS_MULTIPLANAR(f->type)) {
+		width = &f->fmt.pix.width;
+       		height = &f->fmt.pix.height;
+	} else {
+		width = &f->fmt.pix_mp.width;
+       		height = &f->fmt.pix_mp.height;
+	}
+
+	v4l2_apply_frmsize_constraints(width, height, frmsize);
+}
+
+static int v4l2_m2m_codec_try_coded_fmt(struct file *file, void *priv,
+					struct v4l2_format *f)
+{
+	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
+	const struct v4l2_m2m_codec_coded_fmt_desc *desc;
+	struct v4l2_m2m_codec *codec = ctx->codec;
+	u32 fourcc;
+	int ret;
+
+	if (!V4L2_TYPE_IS_MULTIPLANAR(f->type))
+		fourcc = f->fmt.pix.pixelformat;
+	else
+		fourcc = f->fmt.pix_mp.pixelformat;
+
+	desc = v4l2_m2m_codec_find_coded_fmt_desc(codec, fourcc);
+	if (!desc)
+		return -EINVAL;
+
+	v4l2_m2m_codec_apply_frmsize_constraints(f, desc->frmsize);
+
+	if (!V4L2_TYPE_IS_MULTIPLANAR(f->type)) {
+		f->fmt.pix.field = V4L2_FIELD_NONE;
+	} else {
+		f->fmt.pix_mp.field = V4L2_FIELD_NONE;
+		/* All coded formats are considered single planar for now. */
+		f->fmt.pix_mp.num_planes = 1;
+	}
+
+	if (desc->adjust_fmt) {
+		ret = desc->adjust_fmt(ctx, desc, f);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int v4l2_m2m_codec_try_decoded_fmt(struct file *file, void *priv,
+					  struct v4l2_format *f)
+{
+	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
+	const struct v4l2_m2m_codec_coded_fmt_desc *coded_desc;
+	struct v4l2_m2m_codec *codec = ctx->codec;
+	unsigned int i;
+	u32 fourcc;
+
+	/*
+	 * The codec context should point to a coded format desc, if the format
+	 * on the coded end has not been set yet, it should point to the
+	 * default value.
+	 */
+	coded_desc = ctx->coded_fmt_desc;
+	if (WARN_ON(!coded_desc))
+		return -EINVAL;
+
+	if (!V4L2_TYPE_IS_MULTIPLANAR(f->type))
+		fourcc = f->fmt.pix.pixelformat;
+	else
+		fourcc = f->fmt.pix_mp.pixelformat;
+
+	for (i = 0; i < codec->caps->num_decoded_fmts; i++) {
+		if (codec->caps->decoded_fmts[i].fourcc == fourcc)
+			break;
+	}
+
+	if (i == codec->caps->num_decoded_fmts)
+		return -EINVAL;
+
+	/* Always apply the frmsize constraint of the coded end. */
+	v4l2_m2m_codec_apply_frmsize_constraints(f, coded_desc->frmsize);
+
+	if (!V4L2_TYPE_IS_MULTIPLANAR(f->type)) {
+		v4l2_fill_pixfmt(&f->fmt.pix, fourcc, f->fmt.pix.width,
+				 f->fmt.pix.height);
+		f->fmt.pix.field = V4L2_FIELD_NONE;
+	} else {
+		v4l2_fill_pixfmt_mp(&f->fmt.pix_mp, fourcc, f->fmt.pix_mp.width,
+				    f->fmt.pix_mp.height);
+		f->fmt.pix_mp.field = V4L2_FIELD_NONE;
+	}
+
+	return 0;
+}
+
+int v4l2_m2m_codec_try_output_fmt(struct file *file, void *priv,
+				  struct v4l2_format *f)
+{
+	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
+	
+	if (ctx->codec->type == V4L2_M2M_ENCODER)
+		return v4l2_m2m_codec_try_decoded_fmt(file, priv, f);
+
+	return v4l2_m2m_codec_try_coded_fmt(file, priv, f);
+}
+EXPORT_SYMBOL_GPL(v4l2_m2m_codec_try_output_fmt);
+
+int v4l2_m2m_codec_try_capture_fmt(struct file *file, void *priv,
+				   struct v4l2_format *f)
+{
+	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
+	
+	if (ctx->codec->type == V4L2_M2M_ENCODER)
+		return v4l2_m2m_codec_try_coded_fmt(file, priv, f);
+
+	return v4l2_m2m_codec_try_decoded_fmt(file, priv, f);
+}
+EXPORT_SYMBOL_GPL(v4l2_m2m_codec_try_capture_fmt);
 
 static int v4l2_m2m_codec_s_fmt(struct file *file, void *priv,
 				struct v4l2_format *f,
@@ -447,6 +672,7 @@ static int v4l2_m2m_codec_s_fmt(struct file *file, void *priv,
 
 	if (V4L2_TYPE_IS_OUTPUT(f->type) == 
 	    (ctx->codec->type == V4L2_M2M_DECODER)) {
+		struct v4l2_m2m_ctx *m2m_ctx = v4l2_m2m_codec_get_m2m_ctx(ctx);
 		const struct v4l2_m2m_codec_coded_fmt_desc *desc;
 		u32 fourcc;
 
@@ -460,6 +686,7 @@ static int v4l2_m2m_codec_s_fmt(struct file *file, void *priv,
 			return -EINVAL;
 
 		ctx->coded_fmt_desc = desc;
+		m2m_ctx->out_q_ctx.q.requires_requests = desc->requires_requests;
 	}
 
 	return 0;
@@ -471,7 +698,7 @@ int v4l2_m2m_codec_s_output_fmt(struct file *file, void *priv,
 	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
 	struct video_device *vfd = video_devdata(file);
 	const struct v4l2_ioctl_ops *ops = vfd->ioctl_ops;
-	union v4l2_m2m_codec_fmt *cap_fmt, *out_fmt;
+	struct v4l2_format *cap_fmt;
 	int ret;
 
 	ret = v4l2_m2m_codec_s_fmt(file, priv, f,
@@ -482,26 +709,24 @@ int v4l2_m2m_codec_s_output_fmt(struct file *file, void *priv,
 		return ret;
 
 	if (ctx->codec->type == V4L2_M2M_DECODER) {
-		out_fmt = &ctx->coded_fmt;
+		ctx->coded_fmt = *f;
 		cap_fmt = &ctx->decoded_fmt;
 	} else {
-		out_fmt = &ctx->decoded_fmt;
+		ctx->decoded_fmt = *f;
 		cap_fmt = &ctx->coded_fmt;
 	}
 
 	/* Propagate colorspace information to capture. */
 	if (V4L2_TYPE_IS_MULTIPLANAR(f->type)) {
-		out_fmt->mplane = f->fmt.pix_mp;
-		cap_fmt->mplane.colorspace = f->fmt.pix_mp.colorspace;
-		cap_fmt->mplane.xfer_func = f->fmt.pix_mp.xfer_func;
-		cap_fmt->mplane.ycbcr_enc = f->fmt.pix_mp.ycbcr_enc;
-		cap_fmt->mplane.quantization = f->fmt.pix_mp.quantization;
+		cap_fmt->fmt.pix_mp.colorspace = f->fmt.pix_mp.colorspace;
+		cap_fmt->fmt.pix_mp.xfer_func = f->fmt.pix_mp.xfer_func;
+		cap_fmt->fmt.pix_mp.ycbcr_enc = f->fmt.pix_mp.ycbcr_enc;
+		cap_fmt->fmt.pix_mp.quantization = f->fmt.pix_mp.quantization;
 	} else {
-		out_fmt->splane = f->fmt.pix;
-		cap_fmt->splane.colorspace = f->fmt.pix.colorspace;
-		cap_fmt->splane.xfer_func = f->fmt.pix.xfer_func;
-		cap_fmt->splane.ycbcr_enc = f->fmt.pix.ycbcr_enc;
-		cap_fmt->splane.quantization = f->fmt.pix.quantization;
+		cap_fmt->fmt.pix.colorspace = f->fmt.pix.colorspace;
+		cap_fmt->fmt.pix.xfer_func = f->fmt.pix.xfer_func;
+		cap_fmt->fmt.pix.ycbcr_enc = f->fmt.pix.ycbcr_enc;
+		cap_fmt->fmt.pix.quantization = f->fmt.pix.quantization;
 	}
 
 	return 0;
@@ -514,7 +739,6 @@ int v4l2_m2m_codec_s_capture_fmt(struct file *file, void *priv,
 	struct v4l2_m2m_codec_ctx *ctx = fh_to_v4l2_m2m_codec_ctx(priv);
 	struct video_device *vfd = video_devdata(file);
 	const struct v4l2_ioctl_ops *ops = vfd->ioctl_ops;
-	union v4l2_m2m_codec_fmt *cap_fmt, *out_fmt;
 	int ret;
 
 	ret = v4l2_m2m_codec_s_fmt(file, priv, f,
@@ -525,14 +749,9 @@ int v4l2_m2m_codec_s_capture_fmt(struct file *file, void *priv,
 		return ret;
 
 	if (ctx->codec->type == V4L2_M2M_DECODER)
-		cap_fmt = &ctx->decoded_fmt;
+		ctx->decoded_fmt = *f;
 	else
-		cap_fmt = &ctx->coded_fmt;
-
-	if (V4L2_TYPE_IS_MULTIPLANAR(f->type))
-		cap_fmt->mplane = f->fmt.pix_mp;
-	else
-		cap_fmt->splane = f->fmt.pix;
+		ctx->coded_fmt = *f;
 
 	return 0;
 }
@@ -543,44 +762,44 @@ int v4l2_m2m_codec_queue_setup(struct vb2_queue *vq, unsigned int *num_buffers,
 			       struct device *alloc_devs[])
 {
 	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(vq);
-	union v4l2_m2m_codec_fmt *fmt;
+	struct v4l2_format *f;
 	int i;
 
 	if (V4L2_TYPE_IS_OUTPUT(vq->type) == 
 	    (ctx->codec->type == V4L2_M2M_DECODER))
-		fmt = &ctx->coded_fmt;
+		f = &ctx->coded_fmt;
 	else
-		fmt = &ctx->decoded_fmt;
+		f = &ctx->decoded_fmt;
 
 	if (!V4L2_TYPE_IS_MULTIPLANAR(vq->type)) {
 		if (*num_planes) {
 			if (*num_planes != 1)
 				return -EINVAL;
 
-			if (sizes[0] < fmt->splane.sizeimage)
+			if (sizes[0] < f->fmt.pix.sizeimage)
 				return -EINVAL;
 		} else {
-			sizes[0] = fmt->splane.sizeimage;
+			sizes[0] = f->fmt.pix.sizeimage;
 		}
 
 		return 0;
 	}
 
 	if (*num_planes) {
-		if (*num_planes != fmt->mplane.num_planes)
+		if (*num_planes != f->fmt.pix_mp.num_planes)
 			return -EINVAL;
 
-		for (i = 0; i < fmt->mplane.num_planes; i++) {
-			if (sizes[i] < fmt->mplane.plane_fmt[i].sizeimage)
+		for (i = 0; i < f->fmt.pix_mp.num_planes; i++) {
+			if (sizes[i] < f->fmt.pix_mp.plane_fmt[i].sizeimage)
 				return -EINVAL;
 		}
 
 		return 0;
 	}
 
-	*num_planes = fmt->mplane.num_planes;
-	for (i = 0; i < fmt->mplane.num_planes; i++)
-		sizes[i] = fmt->mplane.plane_fmt[i].sizeimage;
+	*num_planes = f->fmt.pix_mp.num_planes;
+	for (i = 0; i < f->fmt.pix_mp.num_planes; i++)
+		sizes[i] = f->fmt.pix_mp.plane_fmt[i].sizeimage;
 
 	return 0;
 }
@@ -621,29 +840,29 @@ int v4l2_m2m_codec_buf_prepare(struct vb2_buffer *vb)
 {
 	struct vb2_queue *vq = vb->vb2_queue;
 	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(vq);
-	union v4l2_m2m_codec_fmt *fmt;
+	struct v4l2_format *f;
 	int i;
 
 	if (V4L2_TYPE_IS_OUTPUT(vq->type) ==
 	    (ctx->codec->type == V4L2_M2M_DECODER))
-		fmt = &ctx->coded_fmt;
+		f = &ctx->coded_fmt;
 	else
-		fmt = &ctx->decoded_fmt;
+		f = &ctx->decoded_fmt;
 
 	if (!V4L2_TYPE_IS_MULTIPLANAR(vq->type)) {
-		if (vb2_plane_size(vb, 0) < fmt->splane.sizeimage)
+		if (vb2_plane_size(vb, 0) < f->fmt.pix.sizeimage)
 			return -EINVAL;
 
-		vb2_set_plane_payload(vb, 0, fmt->splane.sizeimage);
+		vb2_set_plane_payload(vb, 0, f->fmt.pix.sizeimage);
 		return 0;
 	}
 
-	for (i = 0; i < fmt->mplane.num_planes; ++i) {
-		if (vb2_plane_size(vb, i) < fmt->mplane.plane_fmt[i].sizeimage)
+	for (i = 0; i < f->fmt.pix_mp.num_planes; ++i) {
+		if (vb2_plane_size(vb, i) < f->fmt.pix_mp.plane_fmt[i].sizeimage)
 			return -EINVAL;
 
 		vb2_set_plane_payload(vb, i,
-				      fmt->mplane.plane_fmt[i].sizeimage);
+				      f->fmt.pix_mp.plane_fmt[i].sizeimage);
 	}
 
 	return 0;

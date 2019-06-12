@@ -19,6 +19,8 @@
 #include <media/v4l2-fh.h>
 #include <media/v4l2-mem2mem.h>
 
+struct v4l2_m2m_codec_ctx;
+
 struct v4l2_m2m_codec_ctrls {
 	const struct v4l2_ctrl_config *mandatory;
 	unsigned int num_mandatory;
@@ -26,17 +28,26 @@ struct v4l2_m2m_codec_ctrls {
 	unsigned int num_optional;
 };
 
+struct v4l2_m2m_codec_decoded_fmt_desc {
+	u32 fourcc;
+	const void *priv;
+};
+
 struct v4l2_m2m_codec_coded_fmt_desc {
 	u32 fourcc;
-	struct v4l2_frmsize_stepwise frmsize;
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct v4l2_m2m_codec_ctrls *ctrls;
+	u32 requires_requests : 1;
+	int (*adjust_fmt)(struct v4l2_m2m_codec_ctx *ctx,
+			  const struct v4l2_m2m_codec_coded_fmt_desc *fmt_desc,
+			  struct v4l2_format *f);
 	const void *priv;
 };
 
 struct v4l2_m2m_codec_caps {
 	const struct v4l2_m2m_codec_coded_fmt_desc *coded_fmts;
 	unsigned int num_coded_fmts;
-	u32 *decoded_fmts;
+	const struct v4l2_m2m_codec_decoded_fmt_desc *decoded_fmts;
 	unsigned int num_decoded_fmts;
 };
 
@@ -70,16 +81,12 @@ v4l2_m2m_codec_get_type(const struct v4l2_m2m_codec *codec)
 	return codec->type;
 }
 
-union v4l2_m2m_codec_fmt {
-	struct v4l2_pix_format splane;
-	struct v4l2_pix_format_mplane mplane;
-};
-
 struct v4l2_m2m_codec_ctx {
 	struct v4l2_fh fh;
-	union v4l2_m2m_codec_fmt coded_fmt;
-	union v4l2_m2m_codec_fmt decoded_fmt;
+	struct v4l2_format coded_fmt;
+	struct v4l2_format decoded_fmt;
 	const struct v4l2_m2m_codec_coded_fmt_desc *coded_fmt_desc;
+	const struct v4l2_m2m_codec_decoded_fmt_desc *decoded_fmt_desc;
 	struct v4l2_ctrl_handler ctrl_hdl;
 	struct v4l2_m2m_codec *codec;
 };
@@ -100,6 +107,12 @@ static inline struct v4l2_m2m_ctx *
 v4l2_m2m_codec_get_m2m_ctx(struct v4l2_m2m_codec_ctx *ctx)
 {
 	return ctx->fh.m2m_ctx;
+}
+
+static inline struct v4l2_ctrl_handler *
+v4l2_m2m_codec_get_ctrl_handler(struct v4l2_m2m_codec_ctx *ctx)
+{
+	return &ctx->ctrl_hdl;
 }
 
 struct v4l2_m2m_codec_run {
@@ -132,6 +145,31 @@ void v4l2_m2m_codec_run_postamble(struct v4l2_m2m_codec_ctx *ctx,
 void v4l2_m2m_codec_job_finish(struct v4l2_m2m_codec_ctx *ctx,
 			       enum vb2_buffer_state state);
 
+static inline const struct v4l2_format *
+v4l2_m2m_codec_get_coded_fmt(struct v4l2_m2m_codec_ctx *ctx)
+{
+	return &ctx->coded_fmt;
+}
+
+static inline const struct v4l2_m2m_codec_coded_fmt_desc *
+v4l2_m2m_codec_get_coded_fmt_desc(struct v4l2_m2m_codec_ctx *ctx)
+{
+	return ctx->coded_fmt_desc;
+}
+
+static inline const struct v4l2_format *
+v4l2_m2m_codec_get_decoded_fmt(struct v4l2_m2m_codec_ctx *ctx)
+{
+	return &ctx->decoded_fmt;
+}
+
+static inline const struct v4l2_m2m_codec_decoded_fmt_desc *
+v4l2_m2m_codec_get_decoded_fmt_desc(struct v4l2_m2m_codec_ctx *ctx)
+{
+	return ctx->decoded_fmt_desc;
+}
+
+void v4l2_m2m_codec_reset_decoded_fmt(struct v4l2_m2m_codec_ctx *ctx);
 const struct v4l2_m2m_codec_coded_fmt_desc *
 v4l2_m2m_codec_find_coded_fmt_desc(struct v4l2_m2m_codec *codec, u32 fourcc);
 int v4l2_m2m_codec_enum_framesizes(struct file *file, void *priv,
@@ -144,6 +182,10 @@ int v4l2_m2m_codec_g_output_fmt(struct file *file, void *priv,
 				struct v4l2_format *f);
 int v4l2_m2m_codec_g_capture_fmt(struct file *file, void *priv,
 				 struct v4l2_format *f);
+int v4l2_m2m_codec_try_output_fmt(struct file *file, void *priv,
+                                  struct v4l2_format *f);
+int v4l2_m2m_codec_try_capture_fmt(struct file *file, void *priv,
+                                   struct v4l2_format *f);
 int v4l2_m2m_codec_s_output_fmt(struct file *file, void *priv,
 				struct v4l2_format *f);
 int v4l2_m2m_codec_s_capture_fmt(struct file *file, void *priv,
