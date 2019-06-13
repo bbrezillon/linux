@@ -2234,6 +2234,317 @@ enum v4l2_mpeg_video_h264_hierarchical_coding_type -
     Quantization parameter for a P frame for FWHT. Valid range: from 1
     to 31.
 
+.. _v4l2-mpeg-vp8:
+
+``V4L2_CID_MPEG_VIDEO_VP8_FRAME_HDR (struct)``
+    Specifies the frame parameters for the associated VP8 parsed frame data.
+    This includes the necessary parameters for
+    configuring a stateless hardware decoding pipeline for VP8.
+    The bitstream parameters are defined according to :ref:`vp8`.
+
+    .. note::
+
+       This compound control is not yet part of the public kernel API and
+       it is expected to change.
+
+.. c:type:: v4l2_ctrl_vp8_frame_header
+
+.. cssclass:: longtable
+
+.. tabularcolumns:: |p{5.8cm}|p{4.8cm}|p{6.6cm}|
+
+.. flat-table:: struct v4l2_ctrl_vp8_frame_header
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u8
+      - ``version``
+      - Bitstream version.
+    * - __u16
+      - ``width``
+      - The width of the frame
+    * - __u16
+      - ``height``
+      - The height of the frame
+    * - __u8
+      - ``horizontal_scale``
+      - Horizontal scale.
+    * - __u8
+      - ``vertical_scale``
+      - Vertical scale.
+    * - struct :c:type:`v4l2_vp8_segment_header`
+      - ``segment_header``
+      - Structure with segment-based adjustments metadata.
+    * - struct :c:type:`v4l2_vp8_loopfilter_header`
+      - ``loopfilter_header``
+      - Structure with loop filter level adjustments metadata.
+    * - struct :c:type:`v4l2_vp8_quantization_header`
+      - ``quant_header``
+      - Structure with VP8 dequantization indices metadata.
+    * - struct :c:type:`v4l2_vp8_entropy_header`
+      - ``entropy_header``
+      - Structure with VP8 entropy coder probabilities metadata.
+    * - __u16
+      - ``sign_bias_golden``
+      - Sign bias flag for golden reference frame.
+    * - __u16
+      - ``sign_bias_alternate``
+      - Sign bias flag for alternate reference frame.
+    * - __u8
+      - ``prob_skip_false``
+      -
+    * - __u8
+      - ``prob_intra``
+      -
+    * - __u8
+      - ``prob_last``
+      -
+    * - __u8
+      - ``prob_gf``
+      -
+    * - __u32
+      - ``first_part_size``
+      -
+    * - __u32
+      - ``macroblock_bit_offset``
+      - Offset in bits of macroblock data in first partition.
+    * - __u32
+      - ``dct_part_sizes[8]``
+      - DCT coefficients sizes.
+    * - __u8
+      - ``num_dct_parts``
+      - Number of DCT coefficients partitions.
+    * - struct :c:type:`v4l2_vp8_entropy_coder_state`
+      - ``coder_state``
+      - Structure with VP8 entropy coder state.
+    * - __u64
+      - ``last_frame_ts``
+      - Timestamp for the V4L2 capture buffer to use as last reference frame, used
+        with inter-coded frames. The timestamp refers to the ``timestamp`` field in
+	struct :c:type:`v4l2_buffer`. Use the :c:func:`v4l2_timeval_to_ns()`
+	function to convert the struct :c:type:`timeval` in struct
+	:c:type:`v4l2_buffer` to a __u64.
+    * - __u64
+      - ``golden_frame_ts``
+      - Timestamp for the V4L2 capture buffer to use as last reference frame, used
+        with inter-coded frames. The timestamp refers to the ``timestamp`` field in
+	struct :c:type:`v4l2_buffer`. Use the :c:func:`v4l2_timeval_to_ns()`
+	function to convert the struct :c:type:`timeval` in struct
+	:c:type:`v4l2_buffer` to a __u64.
+    * - __u64
+      - ``alt_frame_ts``
+      - Timestamp for the V4L2 capture buffer to use as alternate reference frame, used
+        with inter-coded frames. The timestamp refers to the ``timestamp`` field in
+	struct :c:type:`v4l2_buffer`. Use the :c:func:`v4l2_timeval_to_ns()`
+	function to convert the struct :c:type:`timeval` in struct
+	:c:type:`v4l2_buffer` to a __u64.
+    * - __u64
+      - ``flags``
+      - flags
+    * - __u64
+      - ``flags``
+      - See :ref:`Frame Header Flags <vp8_frame_header_flags>`
+
+.. _vp8_frame_header_flags:
+
+``Frame Header Flags``
+
+.. cssclass:: longtable
+
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - ``V4L2_VP8_FRAME_HDR_FLAG_KEY_FRAME``
+      - 0x01
+      - Inidicates if the frame is a key frame.
+    * - ``V4L2_VP8_FRAME_HDR_FLAG_EXPERIMENTAL``
+      - 0x02
+      - Experimental bitstream.
+    * - ``V4L2_VP8_FRAME_HDR_FLAG_SHOW_FRAME``
+      - 0x04
+      - Show frame flag, indicates if the frame is for display.
+    * - ``V4L2_VP8_FRAME_HDR_FLAG_MB_NO_SKIP_COEFF``
+      - 0x08
+      - Enable/disable skipping of macroblocks with no non-zero coefficients.
+
+.. c:type:: v4l2_vp8_entropy_coder_state
+
+.. cssclass:: longtable
+
+.. tabularcolumns:: |p{1.5cm}|p{6.3cm}|p{9.4cm}|
+
+.. flat-table:: struct v4l2_vp8_entropy_coder_state
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u8
+      - ``range``
+      -
+    * - __u8
+      - ``value``
+      -
+    * - __u8
+      - ``bit_count``
+      -
+
+.. c:type:: v4l2_vp8_segment_header
+
+.. cssclass:: longtable
+
+.. tabularcolumns:: |p{1.5cm}|p{6.3cm}|p{9.4cm}|
+
+.. flat-table:: struct v4l2_vp8_segment_header
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u8
+      - ``segment_feature_mode``
+      - Indicates the mode of segment feature data. 1 for absolute value
+        mode, 0 for delta value mode.
+    * - __s8
+      - ``quant_update[4]``
+      - Signed quantizer value update.
+    * - __s8
+      - ``lf_update[4]``
+      - Signed loop filter level value update.
+    * - __u8
+      - ``segment_probs[3]``
+      - Segment probabilities.
+    * - __u32
+      - ``flags``
+      - See :ref:`Segment Header Flags <vp8_segment_header_flags>`
+
+.. _vp8_segment_header_flags:
+
+``Segment Header Flags``
+
+.. cssclass:: longtable
+
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - ``V4L2_VP8_SEGMNT_HDR_FLAG_ENABLED``
+      - 0x01
+      - Enable/disable segment-based adjustments.
+    * - ``V4L2_VP8_SEGMNT_HDR_FLAG_UPDATE_MAP``
+      - 0x02
+      - Indicates if the macroblock segmentation map is updated in this frame.
+    * - ``V4L2_VP8_SEGMNT_HDR_FLAG_UPDATE_FEATURE_DATA``
+      - 0x04
+      - Indicates if the segment feature data is updated in this frame.
+
+.. c:type:: v4l2_vp8_loopfilter_header
+
+.. cssclass:: longtable
+
+.. tabularcolumns:: |p{1.5cm}|p{6.3cm}|p{9.4cm}|
+
+.. flat-table:: struct v4l2_vp8_loopfilter_header
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u16
+      - ``type``
+      - Filter type.
+    * - __u8
+      - ``level``
+      - Filter level
+    * - __u8
+      - ``sharpness_level``
+      - Sharpness level
+    * - __s8
+      - ``ref_frm_delta_magnitude[4]``
+      -
+    * - __s8
+      - ``mb_mode_delta_magnitude[4]``
+      -
+    * - __u16
+      - ``flags``
+      - See :ref:`Loopfilter Header Flags <vp8_loopfilter_header_flags>`
+
+.. _vp8_loopfilter_header_flags:
+
+``Loopfilter Header Flags``
+
+.. cssclass:: longtable
+
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - ``V4L2_VP8_LF_HDR_ADJ_ENABLE``
+      - 0x01
+      - Enable/disable macroblock-level loop filter adjustment.
+    * - ``V4L2_VP8_LF_HDR_DELTA_UPDATE``
+      - 0x02
+      - Indicates if the delta values used in an adjustment are updated.
+
+.. c:type:: v4l2_vp8_quantization_header
+
+.. cssclass:: longtable
+
+.. tabularcolumns:: |p{1.5cm}|p{6.3cm}|p{9.4cm}|
+
+.. flat-table:: struct v4l2_vp8_quantization_header
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u8
+      - ``y_ac_qi``
+      -
+    * - __s8
+      - ``y_dc_delta``
+      -
+    * - __s8
+      - ``y2_dc_delta``
+      -
+    * - __s8
+      - ``y2_ac_delta``
+      -
+    * - __s8
+      - ``uv_dc_delta``
+      -
+    * - __s8
+      - ``uv_ac_delta``
+      -
+    * - __u16
+      - ``dequant_factors[4][3][2]``
+      -
+
+.. c:type:: v4l2_vp8_entropy_header
+
+.. cssclass:: longtable
+
+.. tabularcolumns:: |p{1.5cm}|p{6.3cm}|p{9.4cm}|
+
+.. flat-table:: struct v4l2_vp8_entropy_header
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u8
+      - ``coeff_probs[4][8][3][11]``
+      -
+    * - __u8
+      - ``y_mode_probs[4]``
+      -
+    * - __u8
+      - ``uv_mode_probs[3]``
+      -
+    * - __u8
+      - ``mv_probs[2][19]``
+      -
+
 .. raw:: latex
 
     \normalsize
