@@ -21,6 +21,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-mem2mem.h>
+#include <media/v4l2-mem2mem-codec.h>
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
 
@@ -82,8 +83,10 @@ struct hantro_irq {
 struct hantro_variant {
 	unsigned int enc_offset;
 	unsigned int dec_offset;
+	const struct v4l2_m2m_codec_caps *enc_caps;
 	const struct hantro_fmt *enc_fmts;
 	unsigned int num_enc_fmts;
+	const struct v4l2_m2m_codec_caps *dec_caps;
 	const struct hantro_fmt *dec_fmts;
 	unsigned int num_dec_fmts;
 	unsigned int codec;
@@ -127,11 +130,8 @@ struct hantro_ctrl {
 /*
  * struct hantro_func - Hantro VPU functionality
  *
- * @id:			processing functionality ID (can be
- *			%MEDIA_ENT_F_PROC_VIDEO_ENCODER or
- *			%MEDIA_ENT_F_PROC_VIDEO_DECODER)
- * @vdev:		&struct video_device that exposes the encoder or
- *			decoder functionality
+ * @codec:		&struct v4l2_m2m_codec serving as a base for the hantro
+ *			functionality
  * @source_pad:		&struct media_pad with the source pad.
  * @sink:		&struct media_entity pointer with the sink entity
  * @sink_pad:		&struct media_pad with the sink pad.
@@ -143,8 +143,7 @@ struct hantro_ctrl {
  * Contains everything needed to attach the video device to the media device.
  */
 struct hantro_func {
-	unsigned int id;
-	struct video_device vdev;
+	struct v4l2_m2m_codec codec;
 	struct media_pad source_pad;
 	struct media_entity sink;
 	struct media_pad sink_pad;
@@ -156,7 +155,8 @@ struct hantro_func {
 static inline struct hantro_func *
 hantro_vdev_to_func(struct video_device *vdev)
 {
-	return container_of(vdev, struct hantro_func, vdev);
+	return container_of(vdev_to_v4l2_m2m_codec(vdev),
+			    struct hantro_func, codec);
 }
 
 /**
@@ -203,8 +203,8 @@ struct hantro_dev {
 /**
  * struct hantro_ctx - Context (instance) private data.
  *
+ * @base:		M2M codec context
  * @dev:		VPU driver data to which the context belongs.
- * @fh:			V4L2 file handler.
  *
  * @sequence_cap:       Sequence counter for capture queue
  * @sequence_out:       Sequence counter for output queue
@@ -226,23 +226,13 @@ struct hantro_dev {
  * @vp8_dec:		VP8-decoding context.
  */
 struct hantro_ctx {
+	struct v4l2_m2m_codec_ctx base;
 	struct hantro_dev *dev;
-	struct v4l2_fh fh;
 
 	u32 sequence_cap;
 	u32 sequence_out;
 
-	const struct hantro_fmt *vpu_src_fmt;
-	struct v4l2_pix_format_mplane src_fmt;
-	const struct hantro_fmt *vpu_dst_fmt;
-	struct v4l2_pix_format_mplane dst_fmt;
-
-	struct v4l2_ctrl_handler ctrl_handler;
 	int jpeg_quality;
-
-	int (*buf_finish)(struct hantro_ctx *ctx,
-			  struct vb2_buffer *buf,
-			  unsigned int bytesused);
 
 	const struct hantro_codec_ops *codec_ops;
 
@@ -255,6 +245,23 @@ struct hantro_ctx {
 	};
 };
 
+static inline struct hantro_ctx *
+codec_to_hantro_ctx(struct v4l2_m2m_codec_ctx *codec_ctx)
+{
+	return container_of(codec_ctx, struct hantro_ctx, base);
+}
+
+struct hantro_fmt {
+	u32 hwid;
+	u32 header_size;
+};
+
+#define HANTRO_FMT(_hwid, _hdr_size)		\
+	&((struct hantro_fmt) {			\
+		.hwid = _hwid,			\
+		.header_size = _hdr_size,	\
+	})
+
 /**
  * struct hantro_fmt - information about supported video formats.
  * @name:	Human readable name of the format.
@@ -265,7 +272,6 @@ struct hantro_ctx {
  * @max_depth:	Maximum depth, for bitstream formats
  * @enc_fmt:	Format identifier for encoder registers.
  * @frmsize:	Supported range of frame sizes (only for bitstream formats).
- */
 struct hantro_fmt {
 	char *name;
 	u32 fourcc;
@@ -275,6 +281,7 @@ struct hantro_fmt {
 	enum hantro_enc_fmt enc_fmt;
 	struct v4l2_frmsize_stepwise frmsize;
 };
+ */
 
 /* Logging helpers */
 
@@ -308,7 +315,7 @@ extern int hantro_debug;
 /* Structure access helpers. */
 static inline struct hantro_ctx *fh_to_ctx(struct v4l2_fh *fh)
 {
-	return container_of(fh, struct hantro_ctx, fh);
+	return container_of(fh, struct hantro_ctx, base.fh);
 }
 
 /* Register accessors. */
@@ -362,13 +369,13 @@ dma_addr_t hantro_get_ref(struct vb2_queue *q, u64 ts);
 static inline struct vb2_v4l2_buffer *
 hantro_get_src_buf(struct hantro_ctx *ctx)
 {
-	return v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
+	return v4l2_m2m_next_src_buf(ctx->base.fh.m2m_ctx);
 }
 
 static inline struct vb2_v4l2_buffer *
 hantro_get_dst_buf(struct hantro_ctx *ctx)
 {
-	return v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
+	return v4l2_m2m_next_dst_buf(ctx->base.fh.m2m_ctx);
 }
 
 #endif /* HANTRO_H_ */

@@ -19,48 +19,52 @@
  * Supported formats.
  */
 
-static const struct hantro_fmt rk3288_vpu_enc_fmts[] = {
+#define FRMSIZE(min_w, max_w, step_w, min_h, max_h, step_h)      \
+        &((struct v4l2_frmsize_stepwise) {                      \
+                .min_width = min_w,                             \
+                .max_width = max_w,                             \
+                .step_width = step_w,                           \
+                .min_height = min_h,                            \
+                .max_height = max_h,                            \
+                .step_height = step_h,                          \
+        })
+
+static const struct v4l2_m2m_codec_decoded_fmt_desc rk3288_enc_decoded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_YUV420M,
-		.codec_mode = HANTRO_MODE_NONE,
-		.enc_fmt = RK3288_VPU_ENC_FMT_YUV420P,
+		.priv = HANTRO_FMT(RK3288_VPU_ENC_FMT_YUV420P),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_NV12M,
-		.codec_mode = HANTRO_MODE_NONE,
-		.enc_fmt = RK3288_VPU_ENC_FMT_YUV420SP,
+		.priv = HANTRO_FMT(RK3288_VPU_ENC_FMT_YUV420SP),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_YUYV,
-		.codec_mode = HANTRO_MODE_NONE,
-		.enc_fmt = RK3288_VPU_ENC_FMT_YUYV422,
+		.priv = HANTRO_FMT(RK3288_VPU_ENC_FMT_YUYV422),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_UYVY,
-		.codec_mode = HANTRO_MODE_NONE,
-		.enc_fmt = RK3288_VPU_ENC_FMT_UYVY422,
-	},
-	{
-		.fourcc = V4L2_PIX_FMT_JPEG,
-		.codec_mode = HANTRO_MODE_JPEG_ENC,
-		.max_depth = 2,
-		.header_size = JPEG_HEADER_SIZE,
-		.frmsize = {
-			.min_width = 96,
-			.max_width = 8192,
-			.step_width = JPEG_MB_DIM,
-			.min_height = 32,
-			.max_height = 8192,
-			.step_height = JPEG_MB_DIM,
-		},
+		.priv = HANTRO_FMT(RK3288_VPU_ENC_FMT_UYVY422),
 	},
 };
 
-static const struct hantro_fmt rk3288_vpu_dec_fmts[] = {
+static const struct v4l2_m2m_codec_coded_fmt_desc rk3288_enc_decoded_fmts[] = {
+	{
+		.fourcc = V4L2_PIX_FMT_JPEG,
+		.frmsize = FRMSIZE(96, 8192, JPEG_MB_DIM, 8192, JPEG_MB_DIM),
+		.ctrls = v4l2_m2m_codec_jpeg_ctrls,
+		.adjust_fmt = hantro_h1_jpeg_enc_adjust_fmt,
+		.priv = HANTRO_FMT(HANTRO_MODE_JPEG_ENC),
+	},
+}
+
+static const struct v4l2_m2m_codec_decoded_fmt_desc rk3288_dec_decoded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_NV12,
-		.codec_mode = HANTRO_MODE_NONE,
 	},
+};
+
+static const struct v4l2_m2m_codec_coded_fmt_desc rk3288_dec_decoded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_H264_SLICE_RAW,
 		.codec_mode = HANTRO_MODE_H264_DEC,
@@ -76,16 +80,15 @@ static const struct hantro_fmt rk3288_vpu_dec_fmts[] = {
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_MPEG2_SLICE,
-		.codec_mode = HANTRO_MODE_MPEG2_DEC,
-		.max_depth = 2,
-		.frmsize = {
-			.min_width = 48,
-			.max_width = 1920,
-			.step_width = MPEG2_MB_DIM,
-			.min_height = 48,
-			.max_height = 1088,
-			.step_height = MPEG2_MB_DIM,
-		},
+		.adjust_fmt = hantro_g1_mpeg2_dec_adjust_fmt,
+		.frmsize = FRMSIZE(48, 1920, MPEG2_MB_DIM, 48, 1088, MPEG2_MB_DIM),
+		.priv = HANTRO_FMT(HANTRO_MODE_MPEG2_DEC),
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_VP8_FRAME,
+		.adjust_fmt = hantro_g1_vp8_dec_adjust_fmt,
+		.frmsize = FRMSIZE(48, 3840, 16, 48, 2160, 16),
+		.priv = HANTRO_FMT(HANTRO_MODE_VP8_DEC),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_VP8_FRAME,

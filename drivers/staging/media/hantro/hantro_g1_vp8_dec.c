@@ -405,7 +405,8 @@ static void cfg_tap(struct hantro_ctx *ctx,
 static void cfg_ref(struct hantro_ctx *ctx,
 		    const struct v4l2_ctrl_vp8_frame_header *hdr)
 {
-	struct vb2_queue *cap_q = &ctx->fh.m2m_ctx->cap_q_ctx.q;
+	struct v4l2_m2m_ctx *m2m_ctx = v4l2_m2m_codec_get_m2m_ctx(&ctx->base);
+	struct vb2_queue *cap_q = &m2m_ctx->cap_q_ctx.q;
 	struct hantro_dev *vpu = ctx->dev;
 	struct vb2_v4l2_buffer *vb2_dst;
 	u32 reg;
@@ -467,10 +468,11 @@ static void cfg_buffers(struct hantro_ctx *ctx,
 
 void hantro_g1_vp8_dec_run(struct hantro_ctx *ctx)
 {
+	const struct v4l2_format *f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
 	const struct v4l2_ctrl_vp8_frame_header *hdr;
 	struct hantro_dev *vpu = ctx->dev;
-	size_t height = ctx->dst_fmt.height;
-	size_t width = ctx->dst_fmt.width;
+	size_t height = f->fmt.pix_mp.height;
+	size_t width = f->fmt.pix_mp.width;
 	struct vb2_v4l2_buffer *vb2_src;
 	u32 mb_width, mb_height;
 	u32 reg;

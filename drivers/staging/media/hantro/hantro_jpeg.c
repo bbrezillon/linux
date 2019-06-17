@@ -293,9 +293,16 @@ void hantro_jpeg_header_assemble(struct hantro_jpeg_ctx *ctx)
 
 int hantro_jpeg_enc_init(struct hantro_ctx *ctx)
 {
-	ctx->jpeg_enc.bounce_buffer.size =
-		ctx->dst_fmt.plane_fmt[0].sizeimage -
-		ctx->vpu_dst_fmt->header_size;
+	const struct v4l2_format *f = v4l2_m2m_codec_get_coded_fmt(&ctx->base);
+	const struct v4l2_m2m_codec_decoded_fmt_desc *fdesc;
+	const struct v4l2_pix_format_mplane *dst_fmt = &f->fmt.pix_mp;
+	const struct hantro_fmt *hfmt;
+
+	fdesc = v4l2_m2m_codec_get_decoded_fmt_desc(&ctx->base);
+	hfmt = fdesc->priv;
+
+	ctx->jpeg_enc.bounce_buffer.size = dst_fmt->plane_fmt[0].sizeimage -
+					   hfmt->header_size;
 
 	ctx->jpeg_enc.bounce_buffer.cpu =
 		dma_alloc_attrs(ctx->dev->dev,

@@ -36,7 +36,10 @@
 static void rk3399_vpu_set_src_img_ctrl(struct hantro_dev *vpu,
 					struct hantro_ctx *ctx)
 {
-	struct v4l2_pix_format_mplane *pix_fmt = &ctx->src_fmt;
+	const struct v4l2_format *f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
+	const struct v4l2_pix_format_mplane *pix_fmt = &f->fmt.pix_mp;
+	const struct v4l2_m2m_codec_decoded_fmt_desc *sf;
+	const struct hantro_fmt *hfmt;
 	u32 reg;
 
 	/*
@@ -56,7 +59,9 @@ static void rk3399_vpu_set_src_img_ctrl(struct hantro_dev *vpu,
 	 */
 	vepu_write_relaxed(vpu, reg, VEPU_REG_ENC_OVER_FILL_STRM_OFFSET);
 
-	reg = VEPU_REG_IN_IMG_CTRL_FMT(ctx->vpu_src_fmt->enc_fmt);
+	sf = v4l2_m2m_codec_get_decoded_fmt_desc(&ctx->base);
+	hfmt = sf->priv;
+	reg = VEPU_REG_IN_IMG_CTRL_FMT(hfmt->hwid);
 	vepu_write_relaxed(vpu, reg, VEPU_REG_ENC_CTRL1);
 }
 
@@ -64,7 +69,8 @@ static void rk3399_vpu_jpeg_enc_set_buffers(struct hantro_dev *vpu,
 					    struct hantro_ctx *ctx,
 					    struct vb2_buffer *src_buf)
 {
-	struct v4l2_pix_format_mplane *pix_fmt = &ctx->src_fmt;
+	const struct v4l2_format *f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
+	const struct v4l2_pix_format_mplane *pix_fmt = &f->fmt.pix_mp;
 	dma_addr_t src[3];
 
 	WARN_ON(pix_fmt->num_planes > 3);
@@ -110,20 +116,26 @@ rk3399_vpu_jpeg_enc_set_qtable(struct hantro_dev *vpu,
 
 void rk3399_vpu_jpeg_enc_run(struct hantro_ctx *ctx)
 {
-	struct hantro_dev *vpu = ctx->dev;
+	const struct v4l2_pix_format_mplane *dst_fmt, *src_fmt;
 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
+	struct hantro_dev *vpu = ctx->dev;
 	struct hantro_jpeg_ctx jpeg_ctx;
+	const struct v4l2_format *f;
 	u32 reg;
 
 	src_buf = hantro_get_src_buf(ctx);
 	dst_buf = hantro_get_dst_buf(ctx);
+	f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
+	src_fmt = &f->fmt.pix_mp;
+	f = v4l2_m2m_codec_get_coded_fmt(&ctx->base);
+	dst_fmt = &f->fmt.pix_mp;
 
 	hantro_prepare_run(ctx);
 
 	memset(&jpeg_ctx, 0, sizeof(jpeg_ctx));
 	jpeg_ctx.buffer = vb2_plane_vaddr(&dst_buf->vb2_buf, 0);
-	jpeg_ctx.width = ctx->dst_fmt.width;
-	jpeg_ctx.height = ctx->dst_fmt.height;
+	jpeg_ctx.width = dst_fmt->width;
+	jpeg_ctx.height = dst_fmt->height;
 	jpeg_ctx.quality = ctx->jpeg_quality;
 	hantro_jpeg_header_assemble(&jpeg_ctx);
 
@@ -149,8 +161,8 @@ void rk3399_vpu_jpeg_enc_run(struct hantro_ctx *ctx)
 	reg = VEPU_REG_AXI_CTRL_BURST_LEN(16);
 	vepu_write_relaxed(vpu, reg, VEPU_REG_AXI_CTRL);
 
-	reg = VEPU_REG_MB_WIDTH(JPEG_MB_WIDTH(ctx->src_fmt.width))
-		| VEPU_REG_MB_HEIGHT(JPEG_MB_HEIGHT(ctx->src_fmt.height))
+	reg = VEPU_REG_MB_WIDTH(JPEG_MB_WIDTH(src_fmt->width))
+		| VEPU_REG_MB_HEIGHT(JPEG_MB_HEIGHT(src_fmt->height))
 		| VEPU_REG_FRAME_TYPE_INTRA
 		| VEPU_REG_ENCODE_FORMAT_JPEG
 		| VEPU_REG_ENCODE_ENABLE;

@@ -877,10 +877,14 @@ int v4l2_m2m_codec_start_streaming(struct vb2_queue *q, unsigned int count)
 	if (desc->ops->start) {
 		ret = desc->ops->start(ctx);
 		if (ret)
-			return ret;
+			goto err_queue_cleanup;
 	}
 
 	return 0;
+
+err_queue_cleanup:
+	v4l2_m2m_codec_queue_cleanup(q, VB2_BUF_STATE_ERROR);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_start_streaming);
 
@@ -899,5 +903,7 @@ void v4l2_m2m_codec_stop_streaming(struct vb2_queue *q)
 
 	if (desc->ops->stop)
 		desc->ops->stop(ctx);
+
+	v4l2_m2m_codec_queue_cleanup(q, VB2_BUF_STATE_ERROR);
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_stop_streaming);

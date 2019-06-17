@@ -105,11 +105,14 @@ rk3399_vpu_mpeg2_dec_set_buffers(struct hantro_dev *vpu,
 				 const struct v4l2_mpeg2_picture *picture,
 				 const struct v4l2_ctrl_mpeg2_slice_params *slice_params)
 {
+	const struct v4l2_format *f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
+	const struct v4l2_pix_format_mplane *dst_fmt = &f->fmt.pix_mp;
+	struct v4l2_m2m_ctx *m2m_ctx = v4l2_m2m_codec_get_m2m_ctx(&ctx->base);
 	dma_addr_t forward_addr = 0, backward_addr = 0;
 	dma_addr_t current_addr, addr;
 	struct vb2_queue *vq;
 
-	vq = v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx);
+	vq = v4l2_m2m_get_dst_vq(m2m_ctx);
 
 	switch (picture->picture_coding_type) {
 	case V4L2_MPEG2_PICTURE_CODING_TYPE_B:
@@ -130,7 +133,7 @@ rk3399_vpu_mpeg2_dec_set_buffers(struct hantro_dev *vpu,
 	current_addr = addr;
 
 	if (picture->picture_structure == PICT_BOTTOM_FIELD)
-		addr += ALIGN(ctx->dst_fmt.width, 16);
+		addr += ALIGN(dst_fmt->width, 16);
 	vdpu_write_relaxed(vpu, addr, VDPU_REG_DEC_OUT_BASE);
 
 	if (!forward_addr)
@@ -162,6 +165,8 @@ rk3399_vpu_mpeg2_dec_set_buffers(struct hantro_dev *vpu,
 
 void rk3399_vpu_mpeg2_dec_run(struct hantro_ctx *ctx)
 {
+	const struct v4l2_format *f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
+	const struct v4l2_pix_format_mplane *dst_fmt = &f->fmt.pix_mp;
 	struct hantro_dev *vpu = ctx->dev;
 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
 	const struct v4l2_ctrl_mpeg2_slice_params *slice_params;
@@ -223,8 +228,8 @@ void rk3399_vpu_mpeg2_dec_run(struct hantro_ctx *ctx)
 	      VDPU_REG_DEC_CLK_GATE_E(1);
 	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(57));
 
-	reg = VDPU_REG_PIC_MB_WIDTH(MPEG2_MB_WIDTH(ctx->dst_fmt.width)) |
-	      VDPU_REG_PIC_MB_HEIGHT_P(MPEG2_MB_HEIGHT(ctx->dst_fmt.height)) |
+	reg = VDPU_REG_PIC_MB_WIDTH(MPEG2_MB_WIDTH(dst_fmt->width)) |
+	      VDPU_REG_PIC_MB_HEIGHT_P(MPEG2_MB_HEIGHT(dst_fmt->height)) |
 	      VDPU_REG_ALT_SCAN_E(picture->alternate_scan) |
 	      VDPU_REG_TOPFIELDFIRST_E(picture->top_field_first);
 	vdpu_write_relaxed(vpu, reg, VDPU_SWREG(120));

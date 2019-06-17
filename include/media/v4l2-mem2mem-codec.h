@@ -219,6 +219,8 @@ int v4l2_m2m_codec_buf_out_validate(struct vb2_buffer *vb);
 int v4l2_m2m_codec_buf_prepare(struct vb2_buffer *vb);
 void v4l2_m2m_codec_buf_queue(struct vb2_buffer *vb);
 void v4l2_m2m_codec_buf_request_complete(struct vb2_buffer *vb);
+int v4l2_m2m_codec_start_streaming(struct vb2_queue *q, unsigned int count);
+void v4l2_m2m_codec_stop_streaming(struct vb2_queue *q);
 
 int v4l2_m2m_codec_request_validate(struct media_request *req);
 

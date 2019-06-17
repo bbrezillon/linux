@@ -300,7 +300,7 @@ init_reflist_builder(struct hantro_ctx *ctx,
 	const struct v4l2_ctrl_h264_decode_params *dec_param;
 	struct vb2_v4l2_buffer *buf = hantro_get_dst_buf(ctx);
 	const struct v4l2_h264_dpb_entry *dpb = ctx->h264_dec.dpb;
-	struct vb2_queue *cap_q = &ctx->fh.m2m_ctx->cap_q_ctx.q;
+	struct vb2_queue *cap_q = &ctx->base.fh.m2m_ctx->cap_q_ctx.q;
 	unsigned int i;
 
 	dec_param = ctx->h264_dec.ctrls.decode;
@@ -539,7 +539,7 @@ static void update_dpb(struct hantro_ctx *ctx)
 struct vb2_buffer *hantro_h264_get_ref_buf(struct hantro_ctx *ctx,
 					   unsigned int dpb_idx)
 {
-	struct vb2_queue *cap_q = &ctx->fh.m2m_ctx->cap_q_ctx.q;
+	struct vb2_queue *cap_q = &ctx->base.fh.m2m_ctx->cap_q_ctx.q;
 	struct v4l2_h264_dpb_entry *dpb = ctx->h264_dec.dpb;
 	struct vb2_buffer *buf;
 	int buf_idx = -1;

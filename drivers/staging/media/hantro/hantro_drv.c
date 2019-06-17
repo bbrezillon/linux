@@ -35,14 +35,6 @@ module_param_named(debug, hantro_debug, int, 0644);
 MODULE_PARM_DESC(debug,
 		 "Debug level - higher value produces more verbose messages");
 
-void *hantro_get_ctrl(struct hantro_ctx *ctx, u32 id)
-{
-	struct v4l2_ctrl *ctrl;
-
-	ctrl = v4l2_ctrl_find(&ctx->ctrl_handler, id);
-	return ctrl ? ctrl->p_cur.p : NULL;
-}
-
 dma_addr_t hantro_get_ref(struct vb2_queue *q, u64 ts)
 {
 	struct vb2_buffer *buf;
@@ -59,9 +51,10 @@ static int
 hantro_enc_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *buf,
 		      unsigned int bytesused)
 {
+	const struct hantro_fmt *fmt = ctx->base.coded_fmt_desc->priv;
 	size_t avail_size;
 
-	avail_size = vb2_plane_size(buf, 0) - ctx->vpu_dst_fmt->header_size;
+	avail_size = vb2_plane_size(buf, 0) - fmt->header_size;
 	if (bytesused > avail_size)
 		return -EINVAL;
 	/*
@@ -69,13 +62,11 @@ hantro_enc_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *buf,
 	 * TODO: Rework the JPEG encoder to eliminate the need
 	 * for a bounce buffer.
 	 */
-	if (ctx->jpeg_enc.bounce_buffer.cpu) {
-		memcpy(vb2_plane_vaddr(buf, 0) +
-		       ctx->vpu_dst_fmt->header_size,
+	if (ctx->jpeg_enc.bounce_buffer.cpu)
+		memcpy(vb2_plane_vaddr(buf, 0) + fmt->header_size,
 		       ctx->jpeg_enc.bounce_buffer.cpu, bytesused);
-	}
-	buf->planes[0].bytesused =
-		ctx->vpu_dst_fmt->header_size + bytesused;
+
+	buf->planes[0].bytesused = fmt->header_size + bytesused;
 	return 0;
 }
 
@@ -83,8 +74,10 @@ static int
 hantro_dec_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *buf,
 		      unsigned int bytesused)
 {
+	struct v4l2_format *fmt = &ctx->base.decoded_fmt;
+
 	/* For decoders set bytesused as per the output picture. */
-	buf->planes[0].bytesused = ctx->dst_fmt.plane_fmt[0].sizeimage;
+	buf->planes[0].bytesused = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
 	return 0;
 }
 
@@ -93,6 +86,7 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 			      unsigned int bytesused,
 			      enum vb2_buffer_state result)
 {
+	struct v4l2_m2m_ctx *m2m_ctx = v4l2_m2m_codec_get_m2m_ctx(&ctx->base);
 	struct vb2_v4l2_buffer *src, *dst;
 	int ret;
 
@@ -100,32 +94,26 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 	pm_runtime_put_autosuspend(vpu->dev);
 	clk_bulk_disable(vpu->variant->num_clocks, vpu->clocks);
 
-	src = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
-	dst = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
-
-	if (WARN_ON(!src))
-		return;
-	if (WARN_ON(!dst))
-		return;
-
+	src = v4l2_m2m_next_src_buf(m2m_ctx);
+	dst = v4l2_m2m_next_dst_buf(m2m_ctx);
 	src->sequence = ctx->sequence_out++;
 	dst->sequence = ctx->sequence_cap++;
 
-	ret = ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
+	if (v4l2_m2m_codec_get_type(ctx->base.codec) == V4L2_M2M_ENCODER)
+		ret = hantro_enc_buf_finish(ctx, &dst->vb2_buf, bytesused);
+	else
+		ret = hantro_dec_buf_finish(ctx, &dst->vb2_buf, bytesused);
 	if (ret)
 		result = VB2_BUF_STATE_ERROR;
 
-	v4l2_m2m_buf_done(src, result);
-	v4l2_m2m_buf_done(dst, result);
-
-	v4l2_m2m_job_finish(vpu->m2m_dev, ctx->fh.m2m_ctx);
+	v4l2_m2m_codec_job_finish(&ctx->base, result);
 }
 
 void hantro_irq_done(struct hantro_dev *vpu, unsigned int bytesused,
 		     enum vb2_buffer_state result)
 {
-	struct hantro_ctx *ctx =
-		v4l2_m2m_get_curr_priv(vpu->m2m_dev);
+	struct v4l2_m2m_codec_ctx *codec_ctx = v4l2_m2m_get_curr_priv(vpu->m2m_dev);
+	struct hantro_ctx *ctx = codec_to_hantro_ctx(codec_ctx);
 
 	/*
 	 * If cancel_delayed_work returns false
@@ -157,7 +145,7 @@ void hantro_prepare_run(struct hantro_ctx *ctx)
 
 	src_buf = hantro_get_src_buf(ctx);
 	v4l2_ctrl_request_setup(src_buf->vb2_buf.req_obj.req,
-				&ctx->ctrl_handler);
+				&ctx->base.ctrl_hdl);
 }
 
 void hantro_finish_run(struct hantro_ctx *ctx)
@@ -166,7 +154,7 @@ void hantro_finish_run(struct hantro_ctx *ctx)
 
 	src_buf = hantro_get_src_buf(ctx);
 	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
-				   &ctx->ctrl_handler);
+				   &ctx->base.ctrl_hdl);
 
 	/* Kick the watchdog. */
 	schedule_delayed_work(&ctx->dev->watchdog_work,
@@ -200,17 +188,17 @@ err_cancel_job:
 
 bool hantro_is_encoder_ctx(const struct hantro_ctx *ctx)
 {
-	return ctx->buf_finish == hantro_enc_buf_finish;
+	return v4l2_m2m_codec_get_type(ctx->base.codec) == V4L2_M2M_ENCODER;
 }
 
 static struct v4l2_m2m_ops vpu_m2m_ops = {
 	.device_run = device_run,
 };
 
-static int
-queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
+static int queue_init(struct v4l2_m2m_codec_ctx *codec_ctx,
+		      struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 {
-	struct hantro_ctx *ctx = priv;
+	struct hantro_ctx *ctx = codec_to_hantro_ctx(codec_ctx);
 	int ret;
 
 	src_vq->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
@@ -264,30 +252,11 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 	return vb2_queue_init(dst_vq);
 }
 
-static int hantro_s_ctrl(struct v4l2_ctrl *ctrl)
-{
-	struct hantro_ctx *ctx;
-
-	ctx = container_of(ctrl->handler,
-			   struct hantro_ctx, ctrl_handler);
-
-	vpu_debug(1, "s_ctrl: id = %d, val = %d\n", ctrl->id, ctrl->val);
-
-	switch (ctrl->id) {
-	case V4L2_CID_JPEG_COMPRESSION_QUALITY:
-		ctx->jpeg_quality = ctrl->val;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static const struct v4l2_ctrl_ops hantro_ctrl_ops = {
-	.s_ctrl = hantro_s_ctrl,
+static const struct v4l2_m2m_codec_ops hantro_codec_ops = {
+	.queue_init = queue_init,
 };
 
+/*
 static const struct hantro_ctrl controls[] = {
 	{
 		.codec = HANTRO_JPEG_ENCODER,
@@ -297,7 +266,6 @@ static const struct hantro_ctrl controls[] = {
 			.max = 100,
 			.step = 1,
 			.def = 50,
-			.ops = &hantro_ctrl_ops,
 		},
 	}, {
 		.codec = HANTRO_MPEG2_DECODER,
@@ -351,36 +319,11 @@ static const struct hantro_ctrl controls[] = {
 	}, {
 	},
 };
-
-static int hantro_ctrls_setup(struct hantro_dev *vpu,
-			      struct hantro_ctx *ctx,
-			      int allowed_codecs)
-{
-	int i, num_ctrls = ARRAY_SIZE(controls);
-
-	v4l2_ctrl_handler_init(&ctx->ctrl_handler, num_ctrls);
-
-	for (i = 0; i < num_ctrls; i++) {
-		if (!(allowed_codecs & controls[i].codec))
-			continue;
-
-		v4l2_ctrl_new_custom(&ctx->ctrl_handler,
-				     &controls[i].cfg, NULL);
-		if (ctx->ctrl_handler.error) {
-			vpu_err("Adding control (%d) failed %d\n",
-				controls[i].cfg.id,
-				ctx->ctrl_handler.error);
-			v4l2_ctrl_handler_free(&ctx->ctrl_handler);
-			return ctx->ctrl_handler.error;
-		}
-	}
-	return v4l2_ctrl_handler_setup(&ctx->ctrl_handler);
-}
+*/
 
 /*
  * V4L2 file operations.
  */
-
 static int hantro_open(struct file *filp)
 {
 	struct hantro_dev *vpu = video_drvdata(filp);
@@ -403,60 +346,32 @@ static int hantro_open(struct file *filp)
 		return -ENOMEM;
 
 	ctx->dev = vpu;
-	if (func->id == MEDIA_ENT_F_PROC_VIDEO_ENCODER) {
+	if (v4l2_m2m_codec_get_type(&func->codec) == V4L2_M2M_ENCODER) {
 		allowed_codecs = vpu->variant->codec & HANTRO_ENCODERS;
-		ctx->buf_finish = hantro_enc_buf_finish;
-		ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vpu->m2m_dev, ctx,
-						    queue_init);
-	} else if (func->id == MEDIA_ENT_F_PROC_VIDEO_DECODER) {
-		allowed_codecs = vpu->variant->codec & HANTRO_DECODERS;
-		ctx->buf_finish = hantro_dec_buf_finish;
-		ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vpu->m2m_dev, ctx,
-						    queue_init);
 	} else {
-		ctx->fh.m2m_ctx = ERR_PTR(-ENODEV);
+		allowed_codecs = vpu->variant->codec & HANTRO_DECODERS;
 	}
-	if (IS_ERR(ctx->fh.m2m_ctx)) {
-		ret = PTR_ERR(ctx->fh.m2m_ctx);
+
+	ret = v4l2_m2m_codec_ctx_init(&ctx->base, filp, &func->codec);
+	if (ret) {
 		kfree(ctx);
 		return ret;
 	}
 
-	v4l2_fh_init(&ctx->fh, vdev);
-	filp->private_data = &ctx->fh;
-	v4l2_fh_add(&ctx->fh);
-
 	hantro_reset_fmts(ctx);
-
-	ret = hantro_ctrls_setup(vpu, ctx, allowed_codecs);
-	if (ret) {
-		vpu_err("Failed to set up controls\n");
-		goto err_fh_free;
-	}
-	ctx->fh.ctrl_handler = &ctx->ctrl_handler;
-
 	return 0;
-
-err_fh_free:
-	v4l2_fh_del(&ctx->fh);
-	v4l2_fh_exit(&ctx->fh);
-	kfree(ctx);
-	return ret;
 }
 
 static int hantro_release(struct file *filp)
 {
-	struct hantro_ctx *ctx =
-		container_of(filp->private_data, struct hantro_ctx, fh);
+	struct v4l2_m2m_codec_ctx *codec_ctx = file_to_v4l2_m2m_codec_ctx(filp);
+	struct hantro_ctx *ctx = codec_to_hantro_ctx(codec_ctx);
 
 	/*
 	 * No need for extra locking because this was the last reference
 	 * to this file.
 	 */
-	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
-	v4l2_fh_del(&ctx->fh);
-	v4l2_fh_exit(&ctx->fh);
-	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
+	v4l2_m2m_codec_ctx_cleanup(codec_ctx);
 	kfree(ctx);
 
 	return 0;
@@ -517,35 +432,40 @@ static int hantro_register_entity(struct media_device *mdev,
 static int hantro_attach_func(struct hantro_dev *vpu,
 			      struct hantro_func *func)
 {
+	struct video_device *vdev = v4l2_m2m_codec_to_vdev(&func->codec);
 	struct media_device *mdev = &vpu->mdev;
 	struct media_link *link;
+	int funcid;
 	int ret;
+
+	funcid = v4l2_m2m_codec_get_type(&func->codec) == V4L2_M2M_ENCODER ?
+		 MEDIA_ENT_F_PROC_VIDEO_ENCODER :
+		 MEDIA_ENT_F_PROC_VIDEO_DECODER;
 
 	/* Create the three encoder entities with their pads */
 	func->source_pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = hantro_register_entity(mdev, &func->vdev.entity, "source",
+	ret = hantro_register_entity(mdev, &vdev->entity, "source",
 				     &func->source_pad, 1, MEDIA_ENT_F_IO_V4L,
-				     &func->vdev);
+				     vdev);
 	if (ret)
 		return ret;
 
 	func->proc_pads[0].flags = MEDIA_PAD_FL_SINK;
 	func->proc_pads[1].flags = MEDIA_PAD_FL_SOURCE;
 	ret = hantro_register_entity(mdev, &func->proc, "proc",
-				     func->proc_pads, 2, func->id,
-				     &func->vdev);
+				     func->proc_pads, 2, funcid, vdev);
 	if (ret)
 		goto err_rel_entity0;
 
 	func->sink_pad.flags = MEDIA_PAD_FL_SINK;
 	ret = hantro_register_entity(mdev, &func->sink, "sink",
 				     &func->sink_pad, 1, MEDIA_ENT_F_IO_V4L,
-				     &func->vdev);
+				     vdev);
 	if (ret)
 		goto err_rel_entity1;
 
 	/* Connect the three entities */
-	ret = media_create_pad_link(&func->vdev.entity, 0, &func->proc, 1,
+	ret = media_create_pad_link(&vdev->entity, 0, &func->proc, 1,
 				    MEDIA_LNK_FL_IMMUTABLE |
 				    MEDIA_LNK_FL_ENABLED);
 	if (ret)
@@ -560,14 +480,14 @@ static int hantro_attach_func(struct hantro_dev *vpu,
 	/* Create video interface */
 	func->intf_devnode = media_devnode_create(mdev, MEDIA_INTF_T_V4L_VIDEO,
 						  0, VIDEO_MAJOR,
-						  func->vdev.minor);
+						  vdev->minor);
 	if (!func->intf_devnode) {
 		ret = -ENOMEM;
 		goto err_rm_links1;
 	}
 
 	/* Connect the two DMA engines to the interface */
-	link = media_create_intf_link(&func->vdev.entity,
+	link = media_create_intf_link(&vdev->entity,
 				      &func->intf_devnode->intf,
 				      MEDIA_LNK_FL_IMMUTABLE |
 				      MEDIA_LNK_FL_ENABLED);
@@ -593,7 +513,7 @@ err_rm_links1:
 
 err_rm_links0:
 	media_entity_remove_links(&func->proc);
-	media_entity_remove_links(&func->vdev.entity);
+	media_entity_remove_links(&vdev->entity);
 
 err_rel_entity2:
 	media_device_unregister_entity(&func->sink);
@@ -602,26 +522,29 @@ err_rel_entity1:
 	media_device_unregister_entity(&func->proc);
 
 err_rel_entity0:
-	media_device_unregister_entity(&func->vdev.entity);
+	media_device_unregister_entity(&vdev->entity);
 	return ret;
 }
 
 static void hantro_detach_func(struct hantro_func *func)
 {
+	struct video_device *vdev = v4l2_m2m_codec_to_vdev(&func->codec);
+
 	media_devnode_remove(func->intf_devnode);
 	media_entity_remove_links(&func->sink);
 	media_entity_remove_links(&func->proc);
-	media_entity_remove_links(&func->vdev.entity);
+	media_entity_remove_links(&vdev->entity);
 	media_device_unregister_entity(&func->sink);
 	media_device_unregister_entity(&func->proc);
-	media_device_unregister_entity(&func->vdev.entity);
+	media_device_unregister_entity(&vdev->entity);
 }
 
-static int hantro_add_func(struct hantro_dev *vpu, unsigned int funcid)
+static int hantro_add_func(struct hantro_dev *vpu, enum v4l2_m2m_codec_type type)
 {
 	const struct of_device_id *match;
 	struct hantro_func *func;
 	struct video_device *vfd;
+	char name[32];
 	int ret;
 
 	match = of_match_node(of_hantro_match, vpu->dev->of_node);
@@ -631,26 +554,25 @@ static int hantro_add_func(struct hantro_dev *vpu, unsigned int funcid)
 		return -ENOMEM;
 	}
 
-	func->id = funcid;
+	snprintf(name, sizeof(name), "%s-%s", match->compatible,
+		 type == V4L2_M2M_ENCODER ? "enc" : "dec");
+	ret = v4l2_m2m_codec_init(&func->codec, type, vpu->m2m_dev,
+				  &vpu->v4l2_dev,
+				  type == V4L2_M2M_ENCODER ?
+				  vpu->variant->enc_caps :
+				  vpu->variant->dec_caps,
+				  &hantro_codec_ops, &hantro_fops,
+				  &hantro_ioctl_ops, &vpu->vpu_mutex,
+				  name, vpu);
+	if (ret)
+		return ret;
 
-	vfd = &func->vdev;
-	vfd->fops = &hantro_fops;
-	vfd->release = video_device_release_empty;
-	vfd->lock = &vpu->vpu_mutex;
-	vfd->v4l2_dev = &vpu->v4l2_dev;
-	vfd->vfl_dir = VFL_DIR_M2M;
-	vfd->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_M2M_MPLANE;
-	vfd->ioctl_ops = &hantro_ioctl_ops;
-	snprintf(vfd->name, sizeof(vfd->name), "%s-%s", match->compatible,
-		 funcid == MEDIA_ENT_F_PROC_VIDEO_ENCODER ? "enc" : "dec");
-
-	if (funcid == MEDIA_ENT_F_PROC_VIDEO_ENCODER)
+	if (type == V4L2_M2M_ENCODER)
 		vpu->encoder = func;
 	else
 		vpu->decoder = func;
 
-	video_set_drvdata(vfd, vpu);
-
+	vfd = v4l2_m2m_codec_to_vdev(&func->codec);
 	ret = video_register_device(vfd, VFL_TYPE_GRABBER, -1);
 	if (ret) {
 		v4l2_err(&vpu->v4l2_dev, "Failed to register video device\n");
@@ -679,7 +601,7 @@ static int hantro_add_enc_func(struct hantro_dev *vpu)
 	if (!vpu->variant->enc_fmts)
 		return 0;
 
-	return hantro_add_func(vpu, MEDIA_ENT_F_PROC_VIDEO_ENCODER);
+	return hantro_add_func(vpu, V4L2_M2M_ENCODER);
 }
 
 static int hantro_add_dec_func(struct hantro_dev *vpu)
@@ -687,7 +609,7 @@ static int hantro_add_dec_func(struct hantro_dev *vpu)
 	if (!vpu->variant->dec_fmts)
 		return 0;
 
-	return hantro_add_func(vpu, MEDIA_ENT_F_PROC_VIDEO_DECODER);
+	return hantro_add_func(vpu, V4L2_M2M_DECODER);
 }
 
 static void hantro_remove_func(struct hantro_dev *vpu,
@@ -704,7 +626,7 @@ static void hantro_remove_func(struct hantro_dev *vpu,
 		return;
 
 	hantro_detach_func(func);
-	video_unregister_device(&func->vdev);
+	video_unregister_device(v4l2_m2m_codec_to_vdev(&func->codec));
 }
 
 static void hantro_remove_enc_func(struct hantro_dev *vpu)
@@ -718,7 +640,7 @@ static void hantro_remove_dec_func(struct hantro_dev *vpu)
 }
 
 static const struct media_device_ops hantro_m2m_media_ops = {
-	.req_validate = vb2_request_validate,
+	.req_validate = v4l2_m2m_codec_request_validate,
 	.req_queue = v4l2_m2m_request_queue,
 };
 

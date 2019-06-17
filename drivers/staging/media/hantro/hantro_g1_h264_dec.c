@@ -232,6 +232,7 @@ static void set_ref(struct hantro_ctx *ctx)
 
 static void set_buffers(struct hantro_ctx *ctx)
 {
+	const struct v4l2_format *dst_fmt = v4l2_m2m_codec_get_coded_fmt(&ctx->base);
 	const struct hantro_h264_dec_ctrls *ctrls = &ctx->h264_dec.ctrls;
 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
 	struct hantro_dev *vpu = ctx->dev;
@@ -250,11 +251,11 @@ static void set_buffers(struct hantro_ctx *ctx)
 
 	/* Higher profiles require DMV buffer appended to reference frames. */
 	if (ctrls->sps->profile_idc > 66) {
-		size_t sizeimage = ctx->dst_fmt.plane_fmt[0].sizeimage;
+		size_t sizeimage = dst_fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
 		size_t mv_offset = round_up(sizeimage, 8);
 
 		if (ctrls->slices[0].flags & V4L2_H264_SLICE_FLAG_BOTTOM_FIELD)
-			mv_offset += 32 * H264_MB_WIDTH(ctx->dst_fmt.width);
+			mv_offset += 32 * H264_MB_WIDTH(dst_fmt->fmt.pix_mp.width);
 
 		vdpu_write_relaxed(vpu, dst_dma + mv_offset,
 				   G1_REG_ADDR_DIR_MV);
