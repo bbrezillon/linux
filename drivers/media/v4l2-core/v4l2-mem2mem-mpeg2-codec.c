@@ -29,3 +29,9 @@ void v4l2_m2m_mpeg2_codec_run_preamble(struct v4l2_m2m_codec_ctx *ctx,
 	v4l2_m2m_codec_run_preamble(ctx, &run->base);
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_mpeg2_codec_run_preamble);
+
+const struct v4l2_m2m_codec_coded_fmt_ctrls v4l2_m2m_mpeg2_stateless_codec_std_ctrls =
+	V4L2_M2M_CODEC_CODED_FMT_CTRLS(
+		V4L2_M2M_CODEC_CTRLS(V4L2_M2M_MPEG2_SLICE_PARAMS_CTRL),
+		V4L2_M2M_CODEC_CTRLS(V4L2_M2M_MPEG2_QUANTIZATION_CTRL));
+EXPORT_SYMBOL_GPL(v4l2_m2m_mpeg2_stateless_codec_std_ctrls);
