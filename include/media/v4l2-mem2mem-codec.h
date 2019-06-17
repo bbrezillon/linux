@@ -22,25 +22,47 @@
 struct v4l2_m2m_codec_ctx;
 
 struct v4l2_m2m_codec_ctrls {
-	const struct v4l2_ctrl_config *mandatory;
-	unsigned int num_mandatory;
-	const struct v4l2_ctrl_config *optional;
-	unsigned int num_optional;
+	const struct v4l2_ctrl_config *ctrls;
+	unsigned int num_ctrls;
 };
+
+#define V4L2_M2M_CODEC_CTRLS(...)							\
+	{										\
+		.ctrls = (const struct v4l2_ctrl_config[]){__VA_ARGS__},		\
+		.num_ctrls = sizeof((struct v4l2_ctrl_config[]){__VA_ARGS__}) /		\
+			     sizeof(struct v4l2_ctrl_config),				\
+	}
 
 struct v4l2_m2m_codec_decoded_fmt_desc {
 	u32 fourcc;
 	const void *priv;
 };
 
+struct v4l2_m2m_codec_coded_fmt_ctrls {
+	struct v4l2_m2m_codec_ctrls mandatory;
+	struct v4l2_m2m_codec_ctrls optional;
+};
+
+#define V4L2_M2M_CODEC_CODED_FMT_CTRLS(_mandatory, _optional)		\
+	{								\
+		.mandatory = _mandatory,				\
+		.optional = _optional,					\
+	}
+
+struct v4l2_m2m_codec_coded_fmt_ops {
+	int (*adjust_fmt)(struct v4l2_m2m_codec_ctx *ctx,
+			  struct v4l2_format *f);
+	int (*start)(struct v4l2_m2m_codec_ctx *ctx);
+	void (*stop)(struct v4l2_m2m_codec_ctx *ctx);
+	int (*run)(struct v4l2_m2m_codec_ctx *ctx);
+};
+
 struct v4l2_m2m_codec_coded_fmt_desc {
 	u32 fourcc;
 	const struct v4l2_frmsize_stepwise *frmsize;
-	const struct v4l2_m2m_codec_ctrls *ctrls;
+	const struct v4l2_m2m_codec_coded_fmt_ctrls *ctrls;
 	u32 requires_requests : 1;
-	int (*adjust_fmt)(struct v4l2_m2m_codec_ctx *ctx,
-			  const struct v4l2_m2m_codec_coded_fmt_desc *fmt_desc,
-			  struct v4l2_format *f);
+	const struct v4l2_m2m_codec_coded_fmt_ops *ops;
 	const void *priv;
 };
 
@@ -56,11 +78,18 @@ enum v4l2_m2m_codec_type {
 	V4L2_M2M_DECODER,
 };
 
+struct v4l2_m2m_codec_ops {
+	int (*queue_init)(struct v4l2_m2m_codec_ctx *ctx,
+			  struct vb2_queue *src_vq,
+			  struct vb2_queue *dst_vq);
+};
+
 struct v4l2_m2m_codec {
 	struct video_device vdev;
 	enum v4l2_m2m_codec_type type;
 	struct v4l2_m2m_dev *m2m_dev;
 	const struct v4l2_m2m_codec_caps *caps;
+	const struct v4l2_m2m_codec_ops *ops;
 };
 
 static inline struct v4l2_m2m_codec *
@@ -127,16 +156,12 @@ int v4l2_m2m_codec_init(struct v4l2_m2m_codec *codec,
 			struct v4l2_m2m_dev *m2m_dev,
 			struct v4l2_device *v4l2_dev,
 			const struct v4l2_m2m_codec_caps *caps,
-			const struct v4l2_file_operations *fops,
-			const struct v4l2_ioctl_ops *ioctl_ops,
+			const struct v4l2_m2m_codec_ops *ops,
+			const struct v4l2_file_operations *vdev_fops,
+			const struct v4l2_ioctl_ops *vdev_ioctl_ops,
 			struct mutex *lock, const char *name, void *drvdata);
 int v4l2_m2m_codec_ctx_init(struct v4l2_m2m_codec_ctx *ctx, struct file *file,
-			    struct v4l2_m2m_codec *codec,
-			    const struct v4l2_ctrl_config *extra_ctrls,
-			    unsigned int nextra_ctrls,
-			    int (*queue_init)(struct v4l2_m2m_codec_ctx *ctx,
-					      struct vb2_queue *src_vq,
-					      struct vb2_queue *dst_vq));
+			    struct v4l2_m2m_codec *codec);
 void v4l2_m2m_codec_ctx_cleanup(struct v4l2_m2m_codec_ctx *ctx);
 void v4l2_m2m_codec_run_preamble(struct v4l2_m2m_codec_ctx *ctx,
 				 struct v4l2_m2m_codec_run *run);

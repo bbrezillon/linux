@@ -21,21 +21,29 @@ int v4l2_m2m_codec_init(struct v4l2_m2m_codec *codec,
 			struct v4l2_m2m_dev *m2m_dev,
 			struct v4l2_device *v4l2_dev,
 			const struct v4l2_m2m_codec_caps *caps,
+			const struct v4l2_m2m_codec_ops *ops,
 			const struct v4l2_file_operations *fops,
 			const struct v4l2_ioctl_ops *ioctl_ops,
 			struct mutex *lock, const char *name, void *drvdata)
 {
 	struct video_device *vdev = v4l2_m2m_codec_to_vdev(codec);
+	unsigned int i;
 	ssize_t ret;
 
-	if (!codec || !caps || !m2m_dev ||
+	if (!codec || !caps || !m2m_dev || !ops ||
 	    !caps->num_coded_fmts || !caps->num_decoded_fmts ||
-	    !caps->coded_fmts || !caps->decoded_fmts)
+	    !caps->coded_fmts || !caps->decoded_fmts || !ops->queue_init)
 		return -EINVAL;
+
+	for (i = 0; i < caps->num_coded_fmts; i++) {
+		if (!caps->coded_fmts[i].ops)
+			return -EINVAL;
+	}
 
 	codec->type = type;
 	codec->m2m_dev = m2m_dev;
 	codec->caps = caps;
+	codec->ops = ops;
 	vdev->lock = lock;
 	vdev->v4l2_dev = v4l2_dev;
 	vdev->fops = fops;
@@ -58,46 +66,18 @@ int v4l2_m2m_codec_init(struct v4l2_m2m_codec *codec,
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_init);
 
-struct v4l2_m2m_codec_queue_init_ctx {
-	struct v4l2_m2m_codec_ctx *ctx;
-	int (*queue_init)(struct v4l2_m2m_codec_ctx *ctx,
-			  struct vb2_queue *src_vq,
-			  struct vb2_queue *dst_vq);
-};
-
-static int v4l2_m2m_codec_queue_init_wrapper(void *priv,
-					     struct vb2_queue *src_vq,
-					     struct vb2_queue *dst_vq)
-{
-	struct v4l2_m2m_codec_queue_init_ctx *qctx = priv;
-
-	return qctx->queue_init(qctx->ctx, src_vq, dst_vq);
-}
-
 static int v4l2_m2m_codec_add_ctrls(struct v4l2_m2m_codec_ctx *ctx,
-				    const struct v4l2_ctrl_config *ctrls,
-				    unsigned int nctrls)
+				    const struct v4l2_m2m_codec_ctrls *ctrls)
 {
 	unsigned int i;
 
-	if (nctrls && !ctrls)
+	if (ctrls->num_ctrls && !ctrls->ctrls)
 		return -EINVAL;
 
-	for (i = 0; i < nctrls; i++) {
-		const struct v4l2_ctrl_config *cfg = &ctrls[i];
+	for (i = 0; i < ctrls->num_ctrls; i++) {
+		const struct v4l2_ctrl_config *cfg = &ctrls->ctrls[i];
 
-		if (cfg->type == V4L2_CTRL_TYPE_MENU ||
-		    cfg->type == V4L2_CTRL_TYPE_INTEGER_MENU)
-			v4l2_ctrl_new_std_menu(&ctx->ctrl_hdl,
-					       cfg->ops, cfg->id, cfg->max,
-					       cfg->menu_skip_mask, cfg->def);
-		else if (cfg->type > V4L2_CTRL_COMPOUND_TYPES)
-			v4l2_ctrl_new_custom(&ctx->ctrl_hdl, cfg, ctx);
-		else
-			v4l2_ctrl_new_std(&ctx->ctrl_hdl, cfg->ops, cfg->id,
-					  cfg->min, cfg->max, cfg->step,
-					  cfg->def);
-
+		v4l2_ctrl_new_custom(&ctx->ctrl_hdl, cfg, ctx);
 		if (ctx->ctrl_hdl.error)
 			return ctx->ctrl_hdl.error;
 	}
@@ -110,37 +90,32 @@ static void v4l2_m2m_codec_cleanup_ctrls(struct v4l2_m2m_codec_ctx *ctx)
 	v4l2_ctrl_handler_free(&ctx->ctrl_hdl);
 }
 
-static int v4l2_m2m_codec_init_ctrls(struct v4l2_m2m_codec_ctx *ctx,
-				     const struct v4l2_ctrl_config *extra_ctrls,
-				     unsigned int nextra_ctrls)
+static int v4l2_m2m_codec_init_ctrls(struct v4l2_m2m_codec_ctx *ctx)
 {
 	const struct v4l2_m2m_codec_coded_fmt_desc *fmts;
-	unsigned int i, nfmts, nctrls = nextra_ctrls;
+	unsigned int i, nfmts, nctrls = 0;
 	int ret;
 
 	fmts = ctx->codec->caps->coded_fmts;
 	nfmts = ctx->codec->caps->num_coded_fmts;
 	for (i = 0; i < nfmts; i++)
-		nctrls += fmts[i].ctrls->num_mandatory +
-			  fmts[i].ctrls->num_optional;
+		nctrls += fmts[i].ctrls->mandatory.num_ctrls +
+			  fmts[i].ctrls->optional.num_ctrls;
 
 	v4l2_ctrl_handler_init(&ctx->ctrl_hdl, nctrls);
 
 	for (i = 0; i < nfmts; i++) {
-		ret = v4l2_m2m_codec_add_ctrls(ctx, fmts[i].ctrls->mandatory,
-					       fmts[i].ctrls->num_mandatory);
+		if (!fmts[i].ctrls)
+			continue;
+
+		ret = v4l2_m2m_codec_add_ctrls(ctx, &fmts[i].ctrls->mandatory);
 		if (ret)
 			goto err_free_handler;
 
-		ret = v4l2_m2m_codec_add_ctrls(ctx, fmts[i].ctrls->optional,
-					       fmts[i].ctrls->num_optional);
+		ret = v4l2_m2m_codec_add_ctrls(ctx, &fmts[i].ctrls->optional);
 		if (ret)
 			goto err_free_handler;
 	}
-
-	ret = v4l2_m2m_codec_add_ctrls(ctx, extra_ctrls, nextra_ctrls);
-	if (ret)
-		goto err_free_handler;
 
 	ret = v4l2_ctrl_handler_setup(&ctx->ctrl_hdl);
 	if (ret)
@@ -216,8 +191,8 @@ static void v4l2_m2m_codec_reset_coded_fmt(struct v4l2_m2m_codec_ctx *ctx)
 		}
 	}
 
-	if (desc->adjust_fmt)
-		desc->adjust_fmt(ctx, desc, &ctx->coded_fmt);
+	if (desc->ops->adjust_fmt)
+		desc->ops->adjust_fmt(ctx, &ctx->coded_fmt);
 }
 
 void v4l2_m2m_codec_reset_decoded_fmt(struct v4l2_m2m_codec_ctx *ctx)
@@ -268,27 +243,26 @@ void v4l2_m2m_codec_reset_decoded_fmt(struct v4l2_m2m_codec_ctx *ctx)
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_reset_decoded_fmt);
 
-int v4l2_m2m_codec_ctx_init(struct v4l2_m2m_codec_ctx *ctx, struct file *file,
-			    struct v4l2_m2m_codec *codec,
-			    const struct v4l2_ctrl_config *extra_ctrls,
-			    unsigned int nextra_ctrls,
-			    int (*queue_init)(struct v4l2_m2m_codec_ctx *ctx,
-					      struct vb2_queue *src_vq,
-					      struct vb2_queue *dst_vq))
+static int v4l2_m2m_codec_queue_init(void *priv, struct vb2_queue *src_vq,
+				     struct vb2_queue *dst_vq)
 {
-	struct v4l2_m2m_codec_queue_init_ctx qctx = {
-		.ctx = ctx,
-		.queue_init = queue_init,
-	};
+	struct v4l2_m2m_codec_ctx *ctx = priv;
+
+	return ctx->codec->ops->queue_init(ctx, src_vq, dst_vq);
+}
+
+int v4l2_m2m_codec_ctx_init(struct v4l2_m2m_codec_ctx *ctx, struct file *file,
+			    struct v4l2_m2m_codec *codec)
+{
 	int ret;
 
 	ctx->codec = codec;
-	ret = v4l2_m2m_codec_init_ctrls(ctx, extra_ctrls, nextra_ctrls);
+	ret = v4l2_m2m_codec_init_ctrls(ctx);
 	if (ret)
 		return ret;
 
-	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(codec->m2m_dev, &qctx,
-					    v4l2_m2m_codec_queue_init_wrapper);
+	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(codec->m2m_dev, ctx,
+					    v4l2_m2m_codec_queue_init);
 	if (IS_ERR(ctx->fh.m2m_ctx)) {
 		ret = PTR_ERR(ctx->fh.m2m_ctx);
 		goto err_cleanup_ctrls;
@@ -367,6 +341,7 @@ EXPORT_SYMBOL_GPL(v4l2_m2m_codec_job_finish);
 
 int v4l2_m2m_codec_request_validate(struct media_request *req)
 {
+	const struct v4l2_m2m_codec_coded_fmt_ctrls *ctrls;
 	struct v4l2_m2m_codec_ctx *ctx;
 	struct v4l2_ctrl_handler *hdl;
 	struct vb2_buffer *vb;
@@ -391,8 +366,9 @@ int v4l2_m2m_codec_request_validate(struct media_request *req)
 	if (!hdl)
 		return -ENOENT;
 
-	for (i = 0; i < ctx->coded_fmt_desc->ctrls->num_mandatory; i++) {
-		u32 id = ctx->coded_fmt_desc->ctrls->mandatory[i].id;
+	ctrls = ctx->coded_fmt_desc->ctrls;
+	for (i = 0; ctrls && i < ctrls->mandatory.num_ctrls; i++) {
+		u32 id = ctrls->mandatory.ctrls[i].id;
 		struct v4l2_ctrl *ctrl;
 
 		ctrl = v4l2_ctrl_request_hdl_ctrl_find(hdl, id);
@@ -570,8 +546,8 @@ static int v4l2_m2m_codec_try_coded_fmt(struct file *file, void *priv,
 		f->fmt.pix_mp.num_planes = 1;
 	}
 
-	if (desc->adjust_fmt) {
-		ret = desc->adjust_fmt(ctx, desc, f);
+	if (desc->ops->adjust_fmt) {
+		ret = desc->ops->adjust_fmt(ctx, f);
 		if (ret)
 			return ret;
 	}
@@ -885,3 +861,45 @@ void v4l2_m2m_codec_buf_request_complete(struct vb2_buffer *vb)
 	v4l2_ctrl_request_complete(vb->req_obj.req, &ctx->ctrl_hdl);
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_codec_buf_request_complete);
+
+int v4l2_m2m_codec_start_streaming(struct vb2_queue *q, unsigned int count)
+{
+	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	struct v4l2_m2m_codec *codec = ctx->codec;
+	int ret;
+
+	if ((codec->type == V4L2_M2M_DECODER) != V4L2_TYPE_IS_OUTPUT(q->type))
+		return 0;
+
+	desc = ctx->coded_fmt_desc;
+	if (WARN_ON(!desc))
+		return -EINVAL;
+
+	if (desc->ops->start) {
+		ret = desc->ops->start(ctx);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(v4l2_m2m_codec_start_streaming);
+
+void v4l2_m2m_codec_stop_streaming(struct vb2_queue *q)
+{
+	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	const struct v4l2_m2m_codec_coded_fmt_desc *desc;
+	struct v4l2_m2m_codec *codec = ctx->codec;
+	int ret;
+
+	if ((codec->type == V4L2_M2M_DECODER) == V4L2_TYPE_IS_OUTPUT(q->type))
+		return;
+
+	desc = ctx->coded_fmt_desc;
+	if (WARN_ON(!desc))
+		return;
+
+	if (desc->ops->stop)
+		desc->ops->stop(ctx);
+}
+EXPORT_SYMBOL_GPL(v4l2_m2m_codec_stop_streaming);
