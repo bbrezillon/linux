@@ -1421,8 +1421,8 @@ struct vb2_buffer *vb2_request_get_buf(struct media_request *req,
 {
 	struct media_request_object *obj;
 	struct vb2_buffer *buf = NULL;
+	unsigned int nbufs = 0;
 	unsigned long flags;
-	unsigned int nbufs;
 
 	spin_lock_irqsave(&req->lock, flags);
 	list_for_each_entry(obj, &req->objects, list) {
