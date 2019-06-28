@@ -864,7 +864,8 @@ EXPORT_SYMBOL_GPL(v4l2_m2m_codec_buf_request_complete);
 
 int v4l2_m2m_codec_start_streaming(struct vb2_queue *q, unsigned int count)
 {
-	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(q);
+	const struct v4l2_m2m_codec_coded_fmt_desc *desc;
 	struct v4l2_m2m_codec *codec = ctx->codec;
 	int ret;
 
@@ -887,10 +888,9 @@ EXPORT_SYMBOL_GPL(v4l2_m2m_codec_start_streaming);
 
 void v4l2_m2m_codec_stop_streaming(struct vb2_queue *q)
 {
-	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
+	struct v4l2_m2m_codec_ctx *ctx = vb2_get_drv_priv(q);
 	const struct v4l2_m2m_codec_coded_fmt_desc *desc;
 	struct v4l2_m2m_codec *codec = ctx->codec;
-	int ret;
 
 	if ((codec->type == V4L2_M2M_DECODER) == V4L2_TYPE_IS_OUTPUT(q->type))
 		return;
