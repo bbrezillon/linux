@@ -21,33 +21,28 @@
 
 struct v4l2_m2m_codec_ctx;
 
+struct v4l2_m2m_codec_ctrl_desc {
+	u32 per_request : 1;
+	u32 mandatory : 1;
+	struct v4l2_ctrl_config cfg;
+};
+
 struct v4l2_m2m_codec_ctrls {
-	const struct v4l2_ctrl_config *ctrls;
+	const struct v4l2_m2m_codec_ctrl_desc *ctrls;
 	unsigned int num_ctrls;
 };
 
 #define V4L2_M2M_CODEC_CTRLS(...)							\
 	{										\
-		.ctrls = (const struct v4l2_ctrl_config[]){__VA_ARGS__},		\
-		.num_ctrls = sizeof((struct v4l2_ctrl_config[]){__VA_ARGS__}) /		\
-			     sizeof(struct v4l2_ctrl_config),				\
+		.ctrls = (const struct v4l2_m2m_codec_ctrl_desc[]){__VA_ARGS__},	\
+		.num_ctrls = sizeof((struct v4l2_m2m_codec_ctrl_desc[]){__VA_ARGS__}) /	\
+			     sizeof(struct v4l2_m2m_codec_ctrl_desc),			\
 	}
 
 struct v4l2_m2m_codec_decoded_fmt_desc {
 	u32 fourcc;
 	const void *priv;
 };
-
-struct v4l2_m2m_codec_coded_fmt_ctrls {
-	struct v4l2_m2m_codec_ctrls mandatory;
-	struct v4l2_m2m_codec_ctrls optional;
-};
-
-#define V4L2_M2M_CODEC_CODED_FMT_CTRLS(_mandatory, _optional)		\
-	{								\
-		.mandatory = _mandatory,				\
-		.optional = _optional,					\
-	}
 
 struct v4l2_m2m_codec_coded_fmt_ops {
 	int (*adjust_fmt)(struct v4l2_m2m_codec_ctx *ctx,
@@ -59,9 +54,9 @@ struct v4l2_m2m_codec_coded_fmt_ops {
 
 struct v4l2_m2m_codec_coded_fmt_desc {
 	u32 fourcc;
-	const struct v4l2_frmsize_stepwise *frmsize;
-	const struct v4l2_m2m_codec_coded_fmt_ctrls *ctrls;
 	u32 requires_requests : 1;
+	const struct v4l2_frmsize_stepwise *frmsize;
+	const struct v4l2_m2m_codec_ctrls *ctrls;
 	const struct v4l2_m2m_codec_coded_fmt_ops *ops;
 	const void *priv;
 };

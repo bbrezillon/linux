@@ -71,11 +71,14 @@ static int v4l2_m2m_codec_add_ctrls(struct v4l2_m2m_codec_ctx *ctx,
 {
 	unsigned int i;
 
+	if (!ctrls)
+		return 0;
+
 	if (ctrls->num_ctrls && !ctrls->ctrls)
 		return -EINVAL;
 
 	for (i = 0; i < ctrls->num_ctrls; i++) {
-		const struct v4l2_ctrl_config *cfg = &ctrls->ctrls[i];
+		const struct v4l2_ctrl_config *cfg = &ctrls->ctrls[i].cfg;
 
 		v4l2_ctrl_new_custom(&ctx->ctrl_hdl, cfg, ctx);
 		if (ctx->ctrl_hdl.error)
@@ -99,20 +102,12 @@ static int v4l2_m2m_codec_init_ctrls(struct v4l2_m2m_codec_ctx *ctx)
 	fmts = ctx->codec->caps->coded_fmts;
 	nfmts = ctx->codec->caps->num_coded_fmts;
 	for (i = 0; i < nfmts; i++)
-		nctrls += fmts[i].ctrls->mandatory.num_ctrls +
-			  fmts[i].ctrls->optional.num_ctrls;
+		nctrls += fmts[i].ctrls->num_ctrls;
 
 	v4l2_ctrl_handler_init(&ctx->ctrl_hdl, nctrls);
 
 	for (i = 0; i < nfmts; i++) {
-		if (!fmts[i].ctrls)
-			continue;
-
-		ret = v4l2_m2m_codec_add_ctrls(ctx, &fmts[i].ctrls->mandatory);
-		if (ret)
-			goto err_free_handler;
-
-		ret = v4l2_m2m_codec_add_ctrls(ctx, &fmts[i].ctrls->optional);
+		ret = v4l2_m2m_codec_add_ctrls(ctx, fmts[i].ctrls);
 		if (ret)
 			goto err_free_handler;
 	}
@@ -341,7 +336,7 @@ EXPORT_SYMBOL_GPL(v4l2_m2m_codec_job_finish);
 
 int v4l2_m2m_codec_request_validate(struct media_request *req)
 {
-	const struct v4l2_m2m_codec_coded_fmt_ctrls *ctrls;
+	const struct v4l2_m2m_codec_ctrls *ctrls;
 	struct v4l2_m2m_codec_ctx *ctx;
 	struct v4l2_ctrl_handler *hdl;
 	struct vb2_buffer *vb;
@@ -367,9 +362,12 @@ int v4l2_m2m_codec_request_validate(struct media_request *req)
 		return -ENOENT;
 
 	ctrls = ctx->coded_fmt_desc->ctrls;
-	for (i = 0; ctrls && i < ctrls->mandatory.num_ctrls; i++) {
-		u32 id = ctrls->mandatory.ctrls[i].id;
+	for (i = 0; ctrls && i < ctrls->num_ctrls; i++) {
+		u32 id = ctrls->ctrls[i].cfg.id;
 		struct v4l2_ctrl *ctrl;
+
+		if (!ctrls->ctrls[i].per_request || !ctrls->ctrls[i].mandatory)
+			continue;
 
 		ctrl = v4l2_ctrl_request_hdl_ctrl_find(hdl, id);
 		if (!ctrl)
