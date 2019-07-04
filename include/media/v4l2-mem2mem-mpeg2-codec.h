@@ -35,16 +35,18 @@ v4l2_m2m_mpeg2_codec_run_postamble(struct v4l2_m2m_codec_ctx *ctx,
 
 #define V4L2_M2M_MPEG2_SLICE_PARAMS_CTRL					\
 	{									\
-		.id = V4L2_CID_MPEG_VIDEO_MPEG2_SLICE_PARAMS,			\
-		.elem_size = sizeof(struct v4l2_ctrl_mpeg2_slice_params),	\
-	},
+		.per_request = true,						\
+		.mandatory = true,						\
+		.cfg.id = V4L2_CID_MPEG_VIDEO_MPEG2_SLICE_PARAMS,		\
+		.cfg.elem_size = sizeof(struct v4l2_ctrl_mpeg2_slice_params),	\
+	}
 
 #define V4L2_M2M_MPEG2_QUANTIZATION_CTRL					\
 	{									\
-		.id = V4L2_CID_MPEG_VIDEO_MPEG2_QUANTIZATION,			\
-		.elem_size = sizeof(struct v4l2_ctrl_mpeg2_quantization),	\
+		.cfg.id = V4L2_CID_MPEG_VIDEO_MPEG2_QUANTIZATION,		\
+		.cfg.elem_size = sizeof(struct v4l2_ctrl_mpeg2_quantization),	\
 	}
 
-const struct v4l2_m2m_codec_coded_fmt_ctrls v4l2_m2m_mpeg2_stateless_codec_std_ctrls;
+const struct v4l2_m2m_codec_ctrls v4l2_m2m_mpeg2_stateless_codec_std_ctrls;
 
 #endif /* _MEDIA_V4L2_MEM2MEM_CODEC_H */
