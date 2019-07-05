@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0
+config VIDEO_ROCKCHIP
+	bool "Rockchip Video Devices"
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	help
+	  If you have a Rockchip SoC based embedding a video codec.
+
+	  Note that this option doesn't include new drivers in the
+	  kernel: saying N will just cause Kconfig to skip all the
+	  questions about Allwinner media devices.
+
+if VIDEO_ROCKCHIP
+
+source "drivers/staging/media/rockchip/vdec/Kconfig"
+
+endif
