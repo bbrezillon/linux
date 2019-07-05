@@ -49,6 +49,11 @@ config V4L2_MEM2MEM_CODEC
 	bool
 	depends on V4L2_MEM2MEM_DEV
 
+config V4L2_MEM2MEM_H264_CODEC
+	bool
+	depends on V4L2_MEM2MEM_DEV
+	select V4L2_MEM2MEM_CODEC
+
 config V4L2_MEM2MEM_MPEG2_CODEC
 	bool
 	depends on V4L2_MEM2MEM_DEV
