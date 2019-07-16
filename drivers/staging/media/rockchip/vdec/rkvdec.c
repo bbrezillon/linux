@@ -396,7 +396,10 @@ static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
 	struct rkvdec_dev *rkvdec = priv;
 	u32 status = readl(rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
-	dev_dbg(rkvdec->dev, "dec status %x\n", status);
+	dev_info(rkvdec->dev, "dec status %x strmd err %08x errinfo %08x\n", status,
+		 readl(rkvdec->regs + RKVDEC_REG_STRMD_ERR_STA),
+		 readl(rkvdec->regs + RKVDEC_REG_H264_ERRINFO_NUM)
+		 );
 
 	writel(0, rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
@@ -420,7 +423,8 @@ static void rkvdec_watchdog_func(struct work_struct *work)
 			      watchdog_work);
 	codec_ctx = v4l2_m2m_get_curr_priv(rkvdec->codec.m2m_dev);
 	if (codec_ctx) {
-		dev_err(rkvdec->dev, "Frame processing timed out!\n");
+		dev_err(rkvdec->dev, "Frame processing timed out! (status %08x)\n",
+			readl(rkvdec->regs + RKVDEC_REG_INTERRUPT));
 		writel(RKVDEC_IRQ_DIS, rkvdec->regs + RKVDEC_REG_INTERRUPT);
 		writel(0, rkvdec->regs + RKVDEC_REG_SYSCTRL);
 		rkvdec_job_finish(codec_ctx_to_rkvdec_ctx(codec_ctx),

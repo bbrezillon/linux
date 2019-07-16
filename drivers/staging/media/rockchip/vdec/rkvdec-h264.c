@@ -431,10 +431,12 @@ static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 	 * packet unit for HW accessing.
 	 */
 	hw_ps = &priv_tbl->param_set[pps->pic_parameter_set_id];
+	pr_info("%s:%i PPS id %d\n", __func__, __LINE__, pps->pic_parameter_set_id);
 	memset(hw_ps, 0, sizeof(*hw_ps));
 
 #define WRITE_PPS(value, field) RKVDEC_SET_FIELD(hw_ps->info, field, value)
 	/* write sps */
+	WRITE_PPS(0xf, SEQ_PARAMETER_SET_ID);
 	WRITE_PPS(sps->chroma_format_idc, CHROMA_FORMAT_IDC);
 	WRITE_PPS(sps->bit_depth_luma_minus8 + 8, BIT_DEPTH_LUMA);
 	WRITE_PPS(sps->bit_depth_chroma_minus8 + 8, BIT_DEPTH_CHROMA);
@@ -444,44 +446,39 @@ static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 	WRITE_PPS(sps->pic_order_cnt_type, PIC_ORDER_CNT_TYPE);
 	WRITE_PPS(sps->log2_max_pic_order_cnt_lsb_minus4,
 		  LOG2_MAX_PIC_ORDER_CNT_LSB_MINUS4);
-	WRITE_PPS((sps->flags &
-		   V4L2_H264_SPS_FLAG_DELTA_PIC_ORDER_ALWAYS_ZERO) >> 2,
+	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_DELTA_PIC_ORDER_ALWAYS_ZERO),
 		  DELTA_PIC_ORDER_ALWAYS_ZERO_FLAG);
 	WRITE_PPS(sps->pic_width_in_mbs_minus1 + 1, PIC_WIDTH_IN_MBS);
 	WRITE_PPS(sps->pic_height_in_map_units_minus1 + 1, PIC_HEIGHT_IN_MBS);
-	WRITE_PPS((sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY) >> 4,
+	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY),
 		  FRAME_MBS_ONLY_FLAG);
-	WRITE_PPS((sps->flags &
-		   V4L2_H264_SPS_FLAG_MB_ADAPTIVE_FRAME_FIELD) >> 5,
+	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_MB_ADAPTIVE_FRAME_FIELD),
 		  MB_ADAPTIVE_FRAME_FIELD_FLAG);
-	WRITE_PPS((sps->flags & V4L2_H264_SPS_FLAG_DIRECT_8X8_INFERENCE) >> 6,
+	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_DIRECT_8X8_INFERENCE),
 		  DIRECT_8X8_INFERENCE_FLAG);
 
 	/* write pps */
-	WRITE_PPS(pps->flags & V4L2_H264_PPS_FLAG_ENTROPY_CODING_MODE,
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_ENTROPY_CODING_MODE),
 		  ENTROPY_CODING_MODE_FLAG);
-	WRITE_PPS((pps->flags &
-		   V4L2_H264_PPS_FLAG_BOTTOM_FIELD_PIC_ORDER_IN_FRAME_PRESENT)
-		   >> 1, BOTTOM_FIELD_PIC_ORDER_IN_FRAME_PRESENT_FLAG);
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_BOTTOM_FIELD_PIC_ORDER_IN_FRAME_PRESENT),
+		  BOTTOM_FIELD_PIC_ORDER_IN_FRAME_PRESENT_FLAG);
 	WRITE_PPS(pps->num_ref_idx_l0_default_active_minus1,
 		  NUM_REF_IDX_L0_DEFAULT_ACTIVE_MINUS1);
 	WRITE_PPS(pps->num_ref_idx_l1_default_active_minus1,
 		  NUM_REF_IDX_L1_DEFAULT_ACTIVE_MINUS1);
-	WRITE_PPS((pps->flags & V4L2_H264_PPS_FLAG_WEIGHTED_PRED) >> 2,
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_WEIGHTED_PRED),
 		  WEIGHTED_PRED_FLAG);
 	WRITE_PPS(pps->weighted_bipred_idc, WEIGHTED_BIPRED_IDC);
 	WRITE_PPS(pps->pic_init_qp_minus26, PIC_INIT_QP_MINUS26);
 	WRITE_PPS(pps->pic_init_qs_minus26, PIC_INIT_QS_MINUS26);
 	WRITE_PPS(pps->chroma_qp_index_offset, CHROMA_QP_INDEX_OFFSET);
-	WRITE_PPS((pps->flags &
-		   V4L2_H264_PPS_FLAG_DEBLOCKING_FILTER_CONTROL_PRESENT) >> 3,
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_DEBLOCKING_FILTER_CONTROL_PRESENT),
 		  DEBLOCKING_FILTER_CONTROL_PRESENT_FLAG);
-	WRITE_PPS((pps->flags & V4L2_H264_PPS_FLAG_CONSTRAINED_INTRA_PRED) >> 4,
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_CONSTRAINED_INTRA_PRED),
 		  CONSTRAINED_INTRA_PRED_FLAG);
-	WRITE_PPS((pps->flags &
-		   V4L2_H264_PPS_FLAG_REDUNDANT_PIC_CNT_PRESENT) >> 5,
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_REDUNDANT_PIC_CNT_PRESENT),
 		  REDUNDANT_PIC_CNT_PRESENT);
-	WRITE_PPS((pps->flags & V4L2_H264_PPS_FLAG_TRANSFORM_8X8_MODE) >> 6,
+	WRITE_PPS(!!(pps->flags & V4L2_H264_PPS_FLAG_TRANSFORM_8X8_MODE),
 		  TRANSFORM_8X8_MODE_FLAG);
 	WRITE_PPS(pps->second_chroma_qp_index_offset,
 		  SECOND_CHROMA_QP_INDEX_OFFSET);
@@ -516,7 +513,7 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 	u32 i, j;
 	u16 *p = (u16 *)hw_rps;
 
-	memset(hw_rps, 0, RKV_RPS_SIZE);
+	memset(hw_rps, 0, sizeof(priv_tbl->rps));
 
 	/*
 	 * Assign an invalid pic_num if DPB entry at that position is inactive.
@@ -703,7 +700,9 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	f = v4l2_m2m_codec_get_decoded_fmt(&ctx->base);
 	dst_fmt = &f->fmt.pix_mp;
 	hor_virstride = (sps->bit_depth_luma_minus8 + 8) * dst_fmt->width / 8;
+	pr_info("%s:%i bit_depth_luma_minus8 %d\n", __func__, __LINE__, sps->bit_depth_luma_minus8);
 	ver_virstride = round_up(dst_fmt->height, 16);
+	pr_info("%s:%i hor_virstride %d ver_virstride %d\n", __func__, __LINE__, hor_virstride, ver_virstride);
 	y_virstride = hor_virstride * ver_virstride;
 
 	if (sps->chroma_format_idc == 0)
@@ -721,19 +720,26 @@ static void config_registers(struct rkvdec_ctx *ctx,
 
 	/* config rlc base address */
 	rlc_addr = vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 0);
+	WARN_ON((rlc_addr) & 0xf);
 	writel_relaxed(rlc_addr, rkvdec->regs + RKVDEC_REG_STRM_RLC_BASE);
 
-	rlc_len = vb2_plane_size(&src_buf->vb2_buf, 0);
+	rlc_len = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
 	reg = RKVDEC_STRM_LEN(rlc_len);
+
+	pr_info("%s:%i rlc_len 0x%x type %d\n", __func__, __LINE__, rlc_len, src_buf->vb2_buf.type);
+	WARN_ON((rlc_len) & 0xf);
+	WARN_ON(rlc_len > 0x7ffffff);
 	writel_relaxed(reg, rkvdec->regs + RKVDEC_REG_STRM_LEN);
 
 	/* config cabac table */
 	offset = offsetof(struct rkvdec_h264_priv_tbl, cabac_table);
+	WARN_ON((priv_start_addr + offset) & 0xf);
 	writel_relaxed(priv_start_addr + offset,
 		       rkvdec->regs + RKVDEC_REG_CABACTBL_PROB_BASE);
 
 	/* config output base address */
 	dst_addr = vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 0);
+	WARN_ON((dst_addr) & 0xf);
 	writel_relaxed(dst_addr, rkvdec->regs + RKVDEC_REG_DECOUT_BASE);
 
 	reg = RKVDEC_Y_VIRSTRIDE(y_virstride / 16);
@@ -750,6 +756,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
 			     RKVDEC_COLMV_USED_FLAG_REF |
 			     RKVDEC_TOPFIELD_USED_REF |
 			     RKVDEC_BOTFIELD_USED_REF;
+		WARN_ON(vb2_dma_contig_plane_dma_addr(vb_buf, 0) & 0xf);
 		writel_relaxed(dpb[i].top_field_order_cnt,
 			       rkvdec->regs +  poc_reg_tbl_top_field[i]);
 		writel_relaxed(dpb[i].bottom_field_order_cnt,
@@ -775,11 +782,13 @@ static void config_registers(struct rkvdec_ctx *ctx,
 
 	/* config hw pps address */
 	offset = offsetof(struct rkvdec_h264_priv_tbl, param_set);
+	WARN_ON((priv_start_addr + offset) & 0xf);
 	writel_relaxed(priv_start_addr + offset,
 		       rkvdec->regs + RKVDEC_REG_PPS_BASE);
 
 	/* config hw rps address */
 	offset = offsetof(struct rkvdec_h264_priv_tbl, rps);
+	WARN_ON((priv_start_addr + offset) & 0xf);
 	writel_relaxed(priv_start_addr + offset,
 		       rkvdec->regs + RKVDEC_REG_RPS_BASE);
 
@@ -790,6 +799,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	writel_relaxed(reg, rkvdec->regs + RKVDEC_REG_AXI_DDR_WDATA);
 
 	offset = offsetof(struct rkvdec_h264_priv_tbl, err_info);
+	WARN_ON((priv_start_addr + offset) & 0xf);
 	writel_relaxed(priv_start_addr + offset,
 		       rkvdec->regs + RKVDEC_REG_H264_ERRINFO_BASE);
 }
@@ -872,11 +882,14 @@ static int rkvdec_h264_run(struct v4l2_m2m_codec_ctx *codec_ctx)
 
 	schedule_delayed_work(&rkvdec->watchdog_work, msecs_to_jiffies(2000));
 
+	writel(0xfffffff7, rkvdec->regs + RKVDEC_REG_STRMD_ERR_EN);
+	writel(0xffffffff, rkvdec->regs + RKVDEC_REG_H264_ERR_E);
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_LUMA_CACHE_COMMAND);
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
 
 	/* Start decoding! */
-	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E,
+	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E |
+	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E,
 	       rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
 	return 0;
