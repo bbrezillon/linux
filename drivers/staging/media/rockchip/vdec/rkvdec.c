@@ -142,8 +142,10 @@ static int rkvdec_queue_setup(struct vb2_queue *vq, unsigned int *num_buffers,
 		return 0;
 
 	pixfmt = &ctx->decoded_fmt.fmt.pix_mp;
+	pr_info("%s:%i sizes[0] = %x\n", __func__, __LINE__, sizes[0]);
 	sizes[0] += 128 * DIV_ROUND_UP(pixfmt->width, 16) *
 		    DIV_ROUND_UP(pixfmt->height, 16);
+	pr_info("%s:%i sizes[0] = %x\n", __func__, __LINE__, sizes[0]);
 	return 0;
 }
 
@@ -475,7 +477,7 @@ static int rkvdec_probe(struct platform_device *pdev)
 	 * Bump ACLK to max. possible freq. (500 MHz) to improve performance
 	 * When 4k video playback.
 	 */
-	clk_set_rate(rkvdec->clocks[0].clk, 500 * 1000 * 1000);
+	clk_set_rate(rkvdec->clocks[0].clk, 300 * 1000 * 1000);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	rkvdec->regs = devm_ioremap_resource(&pdev->dev, res);
