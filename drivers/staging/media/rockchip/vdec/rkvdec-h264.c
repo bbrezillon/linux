@@ -919,8 +919,8 @@ static int rkvdec_h264_run(struct v4l2_m2m_codec_ctx *codec_ctx)
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
 
 	/* Start decoding! */
-	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E |
-	       0/*RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E*/,
+	writel(RKVDEC_INTERRUPT_DEC_E /*| RKVDEC_CONFIG_DEC_CLK_GATE_E |*/
+	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E,
 	       rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
 	return 0;
