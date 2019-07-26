@@ -741,6 +741,7 @@ static int rk_iommu_map_iova(struct rk_iommu_domain *rk_domain, u32 *pte_addr,
 	 * dte or pte shared with an existing mapping.
 	 */
 	rk_iommu_zap_iova_first_last(rk_domain, iova, size);
+	//pr_info("%s:%i %pad -> %pad (%lx)\n", __func__, __LINE__, &iova, &paddr, size);
 
 	return 0;
 unwind:

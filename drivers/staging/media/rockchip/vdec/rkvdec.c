@@ -143,6 +143,7 @@ static int rkvdec_queue_setup(struct vb2_queue *vq, unsigned int *num_buffers,
 
 	pixfmt = &ctx->decoded_fmt.fmt.pix_mp;
 	pr_info("%s:%i sizes[0] = %x\n", __func__, __LINE__, sizes[0]);
+//	sizes[0] *= 2;
 	sizes[0] += 128 * DIV_ROUND_UP(pixfmt->width, 16) *
 		    DIV_ROUND_UP(pixfmt->height, 16);
 	pr_info("%s:%i sizes[0] = %x\n", __func__, __LINE__, sizes[0]);
@@ -226,7 +227,7 @@ static int rkvdec_queue_init(struct v4l2_m2m_codec_ctx *codec_ctx,
 
 	src_vq->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
 	src_vq->io_modes = VB2_MMAP | VB2_DMABUF;
-	src_vq->drv_priv = ctx;
+	src_vq->drv_priv = codec_ctx;
 	src_vq->ops = &rkvdec_queue_ops;
 	src_vq->mem_ops = &vb2_dma_contig_memops;
 
@@ -235,8 +236,8 @@ static int rkvdec_queue_init(struct v4l2_m2m_codec_ctx *codec_ctx,
 	 * for faster allocation. Also, no CPU access on the source queue,
 	 * so no kernel mapping needed.
 	 */
-	src_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
-			    DMA_ATTR_NO_KERNEL_MAPPING;
+	src_vq->dma_attrs = /*DMA_ATTR_ALLOC_SINGLE_PAGES |
+			    DMA_ATTR_NO_KERNEL_MAPPING*/ 0;
 	src_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
 	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	src_vq->lock = &rkvdec->vdev_lock;
@@ -249,11 +250,11 @@ static int rkvdec_queue_init(struct v4l2_m2m_codec_ctx *codec_ctx,
 
 	dst_vq->bidirectional = true;
 	dst_vq->mem_ops = &vb2_dma_contig_memops;
-	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
-			    DMA_ATTR_NO_KERNEL_MAPPING;
+	dst_vq->dma_attrs = /*DMA_ATTR_ALLOC_SINGLE_PAGES |
+			    DMA_ATTR_NO_KERNEL_MAPPING*/0;
 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
-	dst_vq->drv_priv = ctx;
+	dst_vq->drv_priv = codec_ctx;
 	dst_vq->ops = &rkvdec_queue_ops;
 	dst_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
@@ -393,16 +394,19 @@ static void rkvdec_v4l2_cleanup(struct rkvdec_dev *rkvdec)
 	v4l2_device_unregister(&rkvdec->v4l2_dev);
 }
 
+void rkvdec_print_errinfo(struct rkvdec_dev *);
+
 static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
 {
 	struct rkvdec_dev *rkvdec = priv;
 	u32 status = readl(rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
-	dev_info(rkvdec->dev, "dec status %x strmd err %08x errinfo %08x\n", status,
+	dev_info(rkvdec->dev, "dec status %x strmd err %08x errinfo %08x errctu %08x\n", status,
 		 readl(rkvdec->regs + RKVDEC_REG_STRMD_ERR_STA),
-		 readl(rkvdec->regs + RKVDEC_REG_H264_ERRINFO_NUM)
-		 );
+		 readl(rkvdec->regs + RKVDEC_REG_H264_ERRINFO_NUM),
+		 readl(rkvdec->regs + RKVDEC_REG_STRMD_ERR_CTU));
 
+	rkvdec_print_errinfo(rkvdec);
 	writel(0, rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
 	if (cancel_delayed_work(&rkvdec->watchdog_work)) {
@@ -490,6 +494,8 @@ static int rkvdec_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	vb2_dma_contig_set_max_seg_size(&pdev->dev, DMA_BIT_MASK(32));
+
 	irq = platform_get_irq(pdev, 0);
 	if (irq <= 0) {
 		dev_err(&pdev->dev, "Could not get vdec IRQ\n");
@@ -504,6 +510,7 @@ static int rkvdec_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	clk_bulk_prepare(ARRAY_SIZE(rkvdec_clk_names), rkvdec->clocks);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 100);
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
@@ -511,6 +518,8 @@ static int rkvdec_probe(struct platform_device *pdev)
 	ret = rkvdec_v4l2_init(rkvdec);
 	if (ret)
 		goto err_disable_runtime_pm;
+
+//	pm_runtime_get(&pdev->dev);
 
 	return 0;
 

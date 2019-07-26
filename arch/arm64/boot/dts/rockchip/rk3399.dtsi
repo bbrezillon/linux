@@ -1278,6 +1278,7 @@
 		clock-names = "aclk", "iface";
 		power-domains = <&power RK3399_PD_VDU>;
 		#iommu-cells = <0>;
+		status = "disabled";
 	};
 
 	vdec: video-codec@ff660000 {
@@ -1289,7 +1290,7 @@
 			 <&cru SCLK_VDU_CA>, <&cru SCLK_VDU_CORE>;
 		clock-names = "aclk", "iface", "cabac", "core";
 		power-domains = <&power RK3399_PD_VDU>;
-		iommus = <&vdec_mmu>;
+		//iommus = <&vdec_mmu>;
 	};
 
 	iep_mmu: iommu@ff670800 {

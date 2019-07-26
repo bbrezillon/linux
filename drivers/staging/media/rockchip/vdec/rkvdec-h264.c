@@ -207,6 +207,23 @@ static const u32 rkvdec_h264_cabac_table[] = {
 	0x1423091d, 0x430e241d
 };
 
+void rkvdec_print_errinfo(struct rkvdec_dev *rkvdec)
+{
+	struct rkvdec_h264_priv_tbl *priv_tbl;
+	struct v4l2_m2m_codec_ctx *codec_ctx;
+	struct rkvdec_ctx *ctx;
+	struct rkvdec_h264_ctx *h264_ctx;
+
+	return;
+	codec_ctx = v4l2_m2m_get_curr_priv(rkvdec->codec.m2m_dev);
+	ctx = codec_ctx_to_rkvdec_ctx(codec_ctx);
+	h264_ctx = ctx->priv;
+	priv_tbl = h264_ctx->priv_tbl.cpu;
+
+	pr_info("%s:%i err_info %*ph\n", __func__, __LINE__, 32, priv_tbl->err_info);
+	pr_info("%s:%i rlc_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_STRM_RLC_BASE));
+}
+
 struct rkvdec_h264_reflist_builder {
 	const struct v4l2_h264_dpb_entry *dpb;
 	s32 pocs[RKVDEC_H264_DPB_SIZE];
@@ -412,6 +429,31 @@ build_b_ref_lists(const struct rkvdec_h264_reflist_builder *builder,
 	       b1_ref_list_cmp, NULL, builder);
 }
 
+static void rkvdec_dump_spspps(struct rkvdec_h264_priv_tbl *priv_tbl)
+{
+	unsigned int i = 0;
+	u32 *data = (u32 *)priv_tbl->param_set;
+
+	pr_info("SPSPPS\n");
+//	for (i = 0; i < sizeof(priv_tbl->param_set) / 4; i += 8)
+		pr_info("%08x %08x %08x %08x %08x %08x %08x %08x\n",
+			data[i], data[i + 1], data[i+2], data[i+3],
+			data[i+4], data[i + 5], data[i+6], data[i+7]);
+}
+
+static void rkvdec_dump_rps(struct rkvdec_h264_priv_tbl *priv_tbl)
+{
+	unsigned int i;
+	u32 *data = (u32 *)priv_tbl->rps;
+
+//	return;
+	pr_info("RPS\n");
+	for (i = 0; i < sizeof(priv_tbl->rps) / 4; i += 8)
+		pr_info("%08x %08x %08x %08x %08x %08x %08x %08x\n",
+			data[i], data[i + 1], data[i+2], data[i+3],
+			data[i+4], data[i + 5], data[i+6], data[i+7]);
+}
+
 static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 			    struct v4l2_m2m_h264_decode_run *run)
 {
@@ -459,6 +501,7 @@ static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 		  MB_ADAPTIVE_FRAME_FIELD_FLAG);
 	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_DIRECT_8X8_INFERENCE),
 		  DIRECT_8X8_INFERENCE_FLAG);
+//	WRITE_PPS(1, NUM_VIEWS);
 
 	WRITE_PPS(1, MVC_EXTENSION_ENABLE);
 
@@ -497,6 +540,7 @@ static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 
 	scaling_distance = offsetof(struct rkvdec_h264_priv_tbl, scaling_list);
 	scaling_list_address = h264_ctx->priv_tbl.dma + scaling_distance;
+	pr_info("%s:%i scaling_list_address %pad\n", __func__, __LINE__, &scaling_list_address);
 	WRITE_PPS(scaling_list_address, SCALING_LIST_ADDRESS);
 
 	for (i = 0; i < 16; i++) {
@@ -510,6 +554,7 @@ static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 		rkvdec_set_field((u32 *)hw_ps, IS_LONG_TERM_OFF(i),
 				 IS_LONG_TERM_LEN, is_longterm);
 	}
+	rkvdec_dump_spspps(priv_tbl);
 }
 
 static void assemble_hw_rps(struct rkvdec_ctx *ctx,
@@ -580,6 +625,7 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 					 */
 		}
 	}
+	rkvdec_dump_rps(priv_tbl);
 }
 
 /*
@@ -887,6 +933,15 @@ static void rkvdec_h264_stop(struct v4l2_m2m_codec_ctx *codec_ctx)
 	kfree(h264_ctx);
 }
 
+static void rkvdec_dump_regs(struct rkvdec_dev *rkvdec)
+{
+	unsigned int i;
+
+	return;
+	for (i = 0; i < 78; i++)
+		pr_info("reg[%02d] %08x\n", i, readl(rkvdec->regs + (i * 4)));
+}
+
 static int rkvdec_h264_run(struct v4l2_m2m_codec_ctx *codec_ctx)
 {
 	struct rkvdec_h264_reflist_builder reflist_builder;
@@ -917,10 +972,14 @@ static int rkvdec_h264_run(struct v4l2_m2m_codec_ctx *codec_ctx)
 	writel(0xffffffff, rkvdec->regs + RKVDEC_REG_H264_ERR_E);
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_LUMA_CACHE_COMMAND);
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
+	//writel(0, rkvdec->regs + 0x41c);
+	//writel(0, rkvdec->regs + 0x45c);
+	//writel(0xff, rkvdec->regs + RKVDEC_REG_FPGADEBUG_RESET);
 
+	rkvdec_dump_regs(rkvdec);
 	/* Start decoding! */
-	writel(RKVDEC_INTERRUPT_DEC_E /*| RKVDEC_CONFIG_DEC_CLK_GATE_E |*/
-	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E,
+	writel(RKVDEC_INTERRUPT_DEC_E | /*| RKVDEC_CONFIG_DEC_CLK_GATE_E |*/
+	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E /* | RKVDEC_H264ORVP9_ERR_MODE*/,
 	       rkvdec->regs + RKVDEC_REG_INTERRUPT);
 
 	return 0;
