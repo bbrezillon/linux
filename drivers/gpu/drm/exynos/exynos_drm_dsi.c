@@ -252,10 +252,10 @@ struct exynos_dsi_driver_data {
 
 struct exynos_dsi {
 	struct drm_encoder encoder;
+	struct drm_bridge bridge;
 	struct mipi_dsi_host dsi_host;
 	struct drm_connector connector;
 	struct drm_panel *panel;
-	struct drm_bridge *out_bridge;
 	struct device *dev;
 
 	void __iomem *reg_base;
@@ -289,6 +289,11 @@ struct exynos_dsi {
 static inline struct exynos_dsi *encoder_to_dsi(struct drm_encoder *e)
 {
 	return container_of(e, struct exynos_dsi, encoder);
+}
+
+static inline struct exynos_dsi *bridge_to_dsi(struct drm_bridge *b)
+{
+	return container_of(b, struct exynos_dsi, bridge);
 }
 
 enum reg_idx {
@@ -1374,24 +1379,37 @@ static void exynos_dsi_unregister_te_irq(struct exynos_dsi *dsi)
 	}
 }
 
-static void exynos_dsi_enable(struct drm_encoder *encoder)
+static void exynos_dsi_pre_enable(struct drm_bridge *bridge)
 {
-	struct exynos_dsi *dsi = encoder_to_dsi(encoder);
+	struct exynos_dsi *dsi = bridge_to_dsi(bridge);
 	int ret;
 
 	if (dsi->state & DSIM_STATE_ENABLED)
 		return;
 
 	pm_runtime_get_sync(dsi->dev);
-	dsi->state |= DSIM_STATE_ENABLED;
 
 	if (dsi->panel) {
 		ret = drm_panel_prepare(dsi->panel);
 		if (ret < 0)
 			goto err_put_sync;
-	} else {
-		drm_bridge_pre_enable(dsi->out_bridge);
 	}
+
+	dsi->state |= DSIM_STATE_ENABLED;
+	return;
+
+err_put_sync:
+	pm_runtime_put(dsi->dev);
+}
+
+static void exynos_dsi_enable(struct drm_bridge *bridge)
+{
+	struct exynos_dsi *dsi = bridge_to_dsi(bridge);
+	int ret;
+
+	if (!(dsi->state & DSIM_STATE_ENABLED) ||
+	    (dsi->state & DSIM_STATE_VIDOUT_AVAILABLE))
+		return;
 
 	exynos_dsi_set_display_mode(dsi);
 	exynos_dsi_set_display_enable(dsi, true);
@@ -1400,8 +1418,6 @@ static void exynos_dsi_enable(struct drm_encoder *encoder)
 		ret = drm_panel_enable(dsi->panel);
 		if (ret < 0)
 			goto err_display_disable;
-	} else {
-		drm_bridge_enable(dsi->out_bridge);
 	}
 
 	dsi->state |= DSIM_STATE_VIDOUT_AVAILABLE;
@@ -1410,28 +1426,30 @@ static void exynos_dsi_enable(struct drm_encoder *encoder)
 err_display_disable:
 	exynos_dsi_set_display_enable(dsi, false);
 	drm_panel_unprepare(dsi->panel);
-
-err_put_sync:
-	dsi->state &= ~DSIM_STATE_ENABLED;
-	pm_runtime_put(dsi->dev);
 }
 
-static void exynos_dsi_disable(struct drm_encoder *encoder)
+static void exynos_dsi_disable(struct drm_bridge *bridge)
 {
-	struct exynos_dsi *dsi = encoder_to_dsi(encoder);
+	struct exynos_dsi *dsi = bridge_to_dsi(bridge);
+
+	if (!(dsi->state & DSIM_STATE_VIDOUT_AVAILABLE))
+		return;
+
+	drm_panel_disable(dsi->panel);
+	exynos_dsi_set_display_enable(dsi, false);
+	dsi->state &= ~DSIM_STATE_VIDOUT_AVAILABLE;
+}
+
+static void exynos_dsi_post_disable(struct drm_bridge *bridge)
+{
+	struct exynos_dsi *dsi = bridge_to_dsi(bridge);
 
 	if (!(dsi->state & DSIM_STATE_ENABLED))
 		return;
 
-	dsi->state &= ~DSIM_STATE_VIDOUT_AVAILABLE;
-
-	drm_panel_disable(dsi->panel);
-	drm_bridge_disable(dsi->out_bridge);
-	exynos_dsi_set_display_enable(dsi, false);
 	drm_panel_unprepare(dsi->panel);
-	drm_bridge_post_disable(dsi->out_bridge);
-	dsi->state &= ~DSIM_STATE_ENABLED;
 	pm_runtime_put_sync(dsi->dev);
+	dsi->state &= ~DSIM_STATE_ENABLED;
 }
 
 static enum drm_connector_status
@@ -1499,9 +1517,11 @@ static int exynos_dsi_create_connector(struct drm_encoder *encoder)
 	return 0;
 }
 
-static const struct drm_encoder_helper_funcs exynos_dsi_encoder_helper_funcs = {
+static const struct drm_bridge_funcs exynos_dsi_bridge_funcs = {
+	.pre_enable = exynos_dsi_pre_enable,
 	.enable = exynos_dsi_enable,
 	.disable = exynos_dsi_disable,
+	.post_disable = exynos_dsi_post_disable,
 };
 
 static const struct drm_encoder_funcs exynos_dsi_encoder_funcs = {
@@ -1520,9 +1540,7 @@ static int exynos_dsi_host_attach(struct mipi_dsi_host *host,
 
 	out_bridge  = of_drm_find_bridge(device->dev.of_node);
 	if (out_bridge) {
-		drm_bridge_attach(encoder, out_bridge, NULL);
-		dsi->out_bridge = out_bridge;
-		encoder->bridge = NULL;
+		drm_bridge_attach(encoder, out_bridge, &dsi->bridge);
 	} else {
 		int ret = exynos_dsi_create_connector(encoder);
 
@@ -1575,19 +1593,19 @@ static int exynos_dsi_host_detach(struct mipi_dsi_host *host,
 				  struct mipi_dsi_device *device)
 {
 	struct exynos_dsi *dsi = host_to_dsi(host);
+	struct drm_bridge *out_bridge = dsi->bridge.next;
 	struct drm_device *drm = dsi->encoder.dev;
 
 	if (dsi->panel) {
 		mutex_lock(&drm->mode_config.mutex);
-		exynos_dsi_disable(&dsi->encoder);
+		exynos_dsi_disable(&dsi->bridge);
+		exynos_dsi_post_disable(&dsi->bridge);
 		drm_panel_detach(dsi->panel);
 		dsi->panel = NULL;
 		dsi->connector.status = connector_status_disconnected;
 		mutex_unlock(&drm->mode_config.mutex);
-	} else {
-		if (dsi->out_bridge->funcs->detach)
-			dsi->out_bridge->funcs->detach(dsi->out_bridge);
-		dsi->out_bridge = NULL;
+	} else if (out_bridge && out_bridge->funcs->detach) {
+		out_bridge->funcs->detach(out_bridge);
 	}
 
 	if (drm->mode_config.poll_enabled)
@@ -1687,16 +1705,18 @@ static int exynos_dsi_bind(struct device *dev, struct device *master,
 	drm_encoder_init(drm_dev, encoder, &exynos_dsi_encoder_funcs,
 			 DRM_MODE_ENCODER_TMDS, NULL);
 
-	drm_encoder_helper_add(encoder, &exynos_dsi_encoder_helper_funcs);
-
 	ret = exynos_drm_set_possible_crtcs(encoder, EXYNOS_DISPLAY_TYPE_LCD);
 	if (ret < 0)
 		return ret;
 
+	/* Declare ourself as the first bridge element. */
+	dsi->bridge.funcs = &exynos_dsi_bridge_funcs;
+	drm_bridge_attach(encoder, &dsi->bridge, NULL);
+
 	if (dsi->in_bridge_node) {
 		in_bridge = of_drm_find_bridge(dsi->in_bridge_node);
 		if (in_bridge)
-			drm_bridge_attach(encoder, in_bridge, NULL);
+			drm_bridge_attach(encoder, in_bridge, &dsi->bridge);
 	}
 
 	return mipi_dsi_host_register(&dsi->dsi_host);
@@ -1708,7 +1728,8 @@ static void exynos_dsi_unbind(struct device *dev, struct device *master,
 	struct drm_encoder *encoder = dev_get_drvdata(dev);
 	struct exynos_dsi *dsi = encoder_to_dsi(encoder);
 
-	exynos_dsi_disable(encoder);
+	exynos_dsi_disable(&dsi->bridge);
+	exynos_dsi_post_disable(&dsi->bridge);
 
 	mipi_dsi_host_unregister(&dsi->dsi_host);
 }
