@@ -752,9 +752,9 @@ static void vc4_dsi_encoder_disable(struct drm_encoder *encoder)
 	struct vc4_dsi *dsi = vc4_encoder->dsi;
 	struct device *dev = &dsi->pdev->dev;
 
-	drm_bridge_disable(encoder->bridge);
+	drm_bridge_chain_disable(encoder);
 	vc4_dsi_ulps(dsi, true);
-	drm_bridge_post_disable(encoder->bridge);
+	drm_bridge_chain_post_disable(encoder);
 
 	clk_disable_unprepare(dsi->pll_phy_clock);
 	clk_disable_unprepare(dsi->escape_clock);
@@ -1054,7 +1054,7 @@ static void vc4_dsi_encoder_enable(struct drm_encoder *encoder)
 
 	vc4_dsi_ulps(dsi, false);
 
-	drm_bridge_pre_enable(encoder->bridge);
+	drm_bridge_chain_pre_enable(encoder);
 
 	if (dsi->mode_flags & MIPI_DSI_MODE_VIDEO) {
 		DSI_PORT_WRITE(DISP0_CTRL,
@@ -1071,7 +1071,7 @@ static void vc4_dsi_encoder_enable(struct drm_encoder *encoder)
 			       DSI_DISP0_ENABLE);
 	}
 
-	drm_bridge_enable(encoder->bridge);
+	drm_bridge_chain_enable(encoder);
 
 	if (debug_dump_regs) {
 		struct drm_printer p = drm_info_printer(&dsi->pdev->dev);

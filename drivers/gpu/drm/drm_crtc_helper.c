@@ -161,7 +161,7 @@ drm_encoder_disable(struct drm_encoder *encoder)
 		return;
 
 	if (!encoder->custom_bridge_enable_disable_seq)
-		drm_bridge_disable(encoder->bridge);
+		drm_bridge_chain_disable(encoder);
 
 	if (encoder_funcs->disable)
 		(*encoder_funcs->disable)(encoder);
@@ -169,7 +169,7 @@ drm_encoder_disable(struct drm_encoder *encoder)
 		(*encoder_funcs->dpms)(encoder, DRM_MODE_DPMS_OFF);
 
 	if (!encoder->custom_bridge_enable_disable_seq)
-		drm_bridge_post_disable(encoder->bridge);
+		drm_bridge_chain_post_disable(encoder);
 }
 
 static void __drm_helper_disable_unused_functions(struct drm_device *dev)
@@ -329,8 +329,8 @@ bool drm_crtc_helper_set_mode(struct drm_crtc *crtc,
 		if (!encoder_funcs)
 			continue;
 
-		ret = drm_bridge_mode_fixup(encoder->bridge,
-			mode, adjusted_mode);
+		ret = drm_bridge_chain_mode_fixup(encoder, mode,
+						  adjusted_mode);
 		if (!ret) {
 			DRM_DEBUG_KMS("Bridge fixup failed\n");
 			goto done;
@@ -368,14 +368,14 @@ bool drm_crtc_helper_set_mode(struct drm_crtc *crtc,
 			continue;
 
 		if (!encoder->custom_bridge_enable_disable_seq)
-			drm_bridge_disable(encoder->bridge);
+			drm_bridge_chain_disable(encoder);
 
 		/* Disable the encoders as the first thing we do. */
 		if (encoder_funcs->prepare)
 			encoder_funcs->prepare(encoder);
 
 		if (!encoder->custom_bridge_enable_disable_seq)
-			drm_bridge_post_disable(encoder->bridge);
+			drm_bridge_chain_post_disable(encoder);
 	}
 
 	drm_crtc_prepare_encoders(dev);
@@ -403,7 +403,7 @@ bool drm_crtc_helper_set_mode(struct drm_crtc *crtc,
 		if (encoder_funcs->mode_set)
 			encoder_funcs->mode_set(encoder, mode, adjusted_mode);
 
-		drm_bridge_mode_set(encoder->bridge, mode, adjusted_mode);
+		drm_bridge_chain_mode_set(encoder, mode, adjusted_mode);
 	}
 
 	/* Now enable the clocks, plane, pipe, and connectors that we set up. */
@@ -419,13 +419,13 @@ bool drm_crtc_helper_set_mode(struct drm_crtc *crtc,
 			continue;
 
 		if (!encoder->custom_bridge_enable_disable_seq)
-			drm_bridge_pre_enable(encoder->bridge);
+			drm_bridge_chain_pre_enable(encoder);
 
 		if (encoder_funcs->commit)
 			encoder_funcs->commit(encoder);
 
 		if (!encoder->custom_bridge_enable_disable_seq)
-			drm_bridge_enable(encoder->bridge);
+			drm_bridge_chain_enable(encoder);
 	}
 
 	/* Calculate and store various constants which
@@ -824,7 +824,6 @@ static int drm_helper_choose_encoder_dpms(struct drm_encoder *encoder)
 /* Helper which handles bridge ordering around encoder dpms */
 static void drm_helper_encoder_dpms(struct drm_encoder *encoder, int mode)
 {
-	struct drm_bridge *bridge = encoder->bridge;
 	const struct drm_encoder_helper_funcs *encoder_funcs;
 
 	encoder_funcs = encoder->helper_private;
@@ -833,9 +832,9 @@ static void drm_helper_encoder_dpms(struct drm_encoder *encoder, int mode)
 
 	if (!encoder->custom_bridge_enable_disable_seq) {
 		if (mode == DRM_MODE_DPMS_ON)
-			drm_bridge_pre_enable(bridge);
+			drm_bridge_chain_pre_enable(encoder);
 		else
-			drm_bridge_disable(bridge);
+			drm_bridge_chain_disable(encoder);
 	}
 
 	if (encoder_funcs->dpms)
@@ -843,9 +842,9 @@ static void drm_helper_encoder_dpms(struct drm_encoder *encoder, int mode)
 
 	if (!encoder->custom_bridge_enable_disable_seq) {
 		if (mode == DRM_MODE_DPMS_ON)
-			drm_bridge_enable(bridge);
+			drm_bridge_chain_enable(encoder);
 		else
-			drm_bridge_post_disable(bridge);
+			drm_bridge_chain_post_disable(encoder);
 	}
 }
 
