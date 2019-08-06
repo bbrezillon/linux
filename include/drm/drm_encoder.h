@@ -175,6 +175,15 @@ struct drm_encoder {
 	struct drm_bridge *bridge;
 	const struct drm_encoder_funcs *funcs;
 	const struct drm_encoder_helper_funcs *helper_private;
+
+	/**
+	 * @custom_bridge_enable_disable_seq: Set to true if the encoder needs
+	 * a custom bridge/encoder enable/disable sequence. In that case the
+	 * driver is responsible for calling the
+	 * drm[_atomic]_bridge_{pre_enable,enable,disable,post_disable}()
+	 * functions as part of its encoder enable/disable handling.
+	 */
+	uint32_t custom_bridge_enable_disable_seq : 1;
 };
 
 #define obj_to_encoder(x) container_of(x, struct drm_encoder, base)
