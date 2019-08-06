@@ -7,6 +7,8 @@
 #ifndef __HDMI_CONNECTOR_H__
 #define __HDMI_CONNECTOR_H__
 
+#include <drm/drm_bridge.h>
+
 #include <linux/i2c.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
