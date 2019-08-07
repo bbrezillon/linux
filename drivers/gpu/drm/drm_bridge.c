@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 
+#include <drm/drm_atomic_state_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_encoder.h>
 
@@ -89,6 +90,38 @@ void drm_bridge_remove(struct drm_bridge *bridge)
 }
 EXPORT_SYMBOL(drm_bridge_remove);
 
+static struct drm_private_state *
+drm_bridge_atomic_duplicate_priv_state(struct drm_private_obj *obj)
+{
+	struct drm_bridge *bridge = drm_priv_to_bridge(obj);
+	struct drm_bridge_state *state;
+
+	if (bridge->funcs->atomic_duplicate_state)
+		state = bridge->funcs->atomic_duplicate_state(bridge);
+	else
+		state = drm_atomic_helper_bridge_duplicate_state(bridge);
+
+	return &state->base;
+}
+
+static void
+drm_bridge_atomic_destroy_priv_state(struct drm_private_obj *obj,
+				     struct drm_private_state *s)
+{
+	struct drm_bridge_state *state = drm_priv_to_bridge_state(s);
+	struct drm_bridge *bridge = drm_priv_to_bridge(obj);
+
+	if (bridge->funcs->atomic_destroy_state)
+		bridge->funcs->atomic_destroy_state(bridge, state);
+	else
+		drm_atomic_helper_bridge_destroy_state(bridge, state);
+}
+
+static const struct drm_private_state_funcs drm_bridge_priv_state_funcs = {
+	.atomic_duplicate_state = drm_bridge_atomic_duplicate_priv_state,
+	.atomic_destroy_state = drm_bridge_atomic_destroy_priv_state,
+};
+
 /**
  * drm_bridge_attach - attach the bridge to an encoder's chain
  *
@@ -114,6 +147,7 @@ EXPORT_SYMBOL(drm_bridge_remove);
 int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 		      struct drm_bridge *previous)
 {
+	struct drm_bridge_state *state;
 	LIST_HEAD(tmp_list);
 	int ret;
 
@@ -132,12 +166,23 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 
 	if (bridge->funcs->attach) {
 		ret = bridge->funcs->attach(bridge);
-		if (ret < 0) {
-			bridge->dev = NULL;
-			bridge->encoder = NULL;
-			return ret;
-		}
+		if (ret < 0)
+			goto err_reset_bridge;
 	}
+
+	if (bridge->funcs->atomic_reset)
+		state = bridge->funcs->atomic_reset(bridge);
+	else
+		state = drm_atomic_helper_bridge_reset(bridge);
+
+	if (IS_ERR(state)) {
+		ret = PTR_ERR(state);
+		goto err_detach_bridge;
+	}
+
+	drm_atomic_private_obj_init(bridge->dev, &bridge->base,
+				    &state->base,
+				    &drm_bridge_priv_state_funcs);
 
 	if (previous)
 		list_splice(&tmp_list, &previous->chain_node);
@@ -145,6 +190,15 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 		list_splice(&tmp_list, &encoder->bridge_chain);
 
 	return 0;
+
+err_detach_bridge:
+	if (bridge->funcs->detach)
+		bridge->funcs->detach(bridge);
+
+err_reset_bridge:
+	bridge->dev = NULL;
+	bridge->encoder = NULL;
+	return ret;
 }
 EXPORT_SYMBOL(drm_bridge_attach);
 
@@ -155,6 +209,8 @@ void drm_bridge_detach(struct drm_bridge *bridge)
 
 	if (WARN_ON(!bridge->dev))
 		return;
+
+	drm_atomic_private_obj_fini(&bridge->base);
 
 	if (bridge->funcs->detach)
 		bridge->funcs->detach(bridge);
@@ -521,6 +577,108 @@ void drm_atomic_bridge_chain_enable(struct drm_bridge *bridge,
 	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_enable);
+
+/**
+ * drm_atomic_helper_bridge_destroy_state() - Default destroy state helper
+ * @bridge: the bridge this state refers to
+ * @state: state object to destroy
+ *
+ * Just a simple kfree() for now.
+ */
+void drm_atomic_helper_bridge_destroy_state(struct drm_bridge *bridge,
+					    struct drm_bridge_state *state)
+{
+	kfree(state);
+}
+EXPORT_SYMBOL(drm_atomic_helper_bridge_destroy_state);
+
+/**
+ * __drm_atomic_helper_bridge_reset() - Initialize a bridge state to its
+ *					default
+ * @bridge: the bridge this state is refers to
+ * @state: bridge state to initialize
+ *
+ * For now it's just a memset(0) plus a state->bridge assignment. Might
+ * be extended in the future.
+ */
+void __drm_atomic_helper_bridge_reset(struct drm_bridge *bridge,
+				      struct drm_bridge_state *state)
+{
+	memset(state, 0, sizeof(*state));
+	state->bridge = bridge;
+}
+EXPORT_SYMBOL(__drm_atomic_helper_bridge_reset);
+
+/**
+ * drm_atomic_helper_bridge_reset() - default &drm_plane_funcs.reset hook for
+ *				      bridges
+ * @bridge: the bridge to reset state on
+ *
+ * Resets the atomic state for @bridge by freeing the state pointer (which
+ * might be NULL, e.g. at driver load time) and allocating a new empty state
+ * object.
+ *
+ * RETURNS:
+ * A valid drm_bridge_state object in case of success, an ERR_PTR()
+ * giving the reaon of the failure otherwise.
+ */
+struct drm_bridge_state *
+drm_atomic_helper_bridge_reset(struct drm_bridge *bridge)
+{
+	struct drm_bridge_state *bridge_state;
+
+	bridge_state = kzalloc(sizeof(*bridge_state), GFP_KERNEL);
+	if (!bridge_state)
+		return ERR_PTR(-ENOMEM);
+
+	__drm_atomic_helper_bridge_reset(bridge, bridge_state);
+	return bridge_state;
+}
+EXPORT_SYMBOL(drm_atomic_helper_bridge_reset);
+
+/**
+ * __drm_atomic_helper_bridge_duplicate_state() - Copy the content of the
+ *						  current bridge state into a
+ *						  new one
+ * @bridge: bridge element the old and new states are referring to
+ * @new: new bridge state to copy to
+ *
+ * Should be used by custom &drm_bridge_funcs.atomic_duplicate() implementation
+ * to copy the previous state into the new object.
+ */
+void __drm_atomic_helper_bridge_duplicate_state(struct drm_bridge *bridge,
+						struct drm_bridge_state *new)
+{
+	__drm_atomic_helper_private_obj_duplicate_state(&bridge->base,
+							&new->base);
+	new->bridge = bridge;
+}
+EXPORT_SYMBOL(__drm_atomic_helper_bridge_duplicate_state);
+
+/**
+ * drm_atomic_helper_duplicate_bridge_state() - Default duplicate state helper
+ * @bridge: bridge containing the state to duplicate
+ *
+ * Default implementation of &drm_bridge_funcs.atomic_duplicate().
+ *
+ * RETURNS:
+ * a valid state object or NULL if the allocation fails.
+ */
+struct drm_bridge_state *
+drm_atomic_helper_bridge_duplicate_state(struct drm_bridge *bridge)
+{
+	struct drm_bridge_state *new;
+
+	if (WARN_ON(!bridge->base.state))
+		return NULL;
+
+	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	if (new)
+		__drm_atomic_helper_bridge_duplicate_state(bridge, new);
+
+	return new;
+}
+EXPORT_SYMBOL(drm_atomic_helper_bridge_duplicate_state);
 
 #ifdef CONFIG_OF
 /**
