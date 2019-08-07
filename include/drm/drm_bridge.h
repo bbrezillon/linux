@@ -484,6 +484,8 @@ struct drm_bridge *
 drm_bridge_chain_get_last_bridge(struct drm_encoder *encoder);
 struct drm_bridge *
 drm_bridge_chain_get_next_bridge(struct drm_bridge *bridge);
+struct drm_bridge *
+drm_bridge_chain_get_prev_bridge(struct drm_bridge *bridge);
 bool drm_bridge_chain_mode_fixup(struct drm_encoder *encoder,
 				 const struct drm_display_mode *mode,
 				 struct drm_display_mode *adjusted_mode);

@@ -268,6 +268,25 @@ drm_bridge_chain_get_next_bridge(struct drm_bridge *bridge)
 EXPORT_SYMBOL(drm_bridge_chain_get_next_bridge);
 
 /**
+ * drm_bridge_chain_get_prev_bridge() - Get the previous bridge in the chain
+ * @bridge: bridge object
+ *
+ * RETURNS:
+ * the previous bridge in the chain, or NULL if there's @bridge is the
+ * last.
+ */
+struct drm_bridge *
+drm_bridge_chain_get_prev_bridge(struct drm_bridge *bridge)
+{
+	if (!bridge || !bridge->encoder ||
+	    list_is_first(&bridge->encoder->bridge_chain, &bridge->chain_node))
+                return NULL;
+
+	return list_prev_entry(bridge, chain_node);
+}
+EXPORT_SYMBOL(drm_bridge_chain_get_prev_bridge);
+
+/**
  * DOC: bridge callbacks
  *
  * The &drm_bridge_funcs ops are populated by the bridge driver. The DRM
