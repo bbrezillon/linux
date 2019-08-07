@@ -383,8 +383,8 @@ struct drm_bridge {
 	struct drm_device *dev;
 	/** @encoder: encoder to which this bridge is connected */
 	struct drm_encoder *encoder;
-	/** @next: the next bridge in the encoder chain */
-	struct drm_bridge *next;
+	/** @chain_node: used to form a bridge chain */
+	struct list_head chain_node;
 #ifdef CONFIG_OF
 	/** @of_node: device node pointer to the bridge */
 	struct device_node *of_node;

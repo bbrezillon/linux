@@ -55,7 +55,7 @@
  * just provide additional hooks to get the desired output at the end of the
  * encoder chain.
  *
- * Bridges can also be chained up using the &drm_bridge.next pointer.
+ * Bridges can also be chained up using the &drm_bridge.chain_node field.
  *
  * Both legacy CRTC helpers and the new atomic modeset helpers support bridges.
  */
@@ -138,9 +138,9 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 	}
 
 	if (previous)
-		previous->next = bridge;
+		list_add(&bridge->chain_node, &previous->chain_node);
 	else
-		encoder->bridge = bridge;
+		list_add(&bridge->chain_node, &encoder->bridge_chain);
 
 	return 0;
 }
@@ -157,6 +157,7 @@ void drm_bridge_detach(struct drm_bridge *bridge)
 	if (bridge->funcs->detach)
 		bridge->funcs->detach(bridge);
 
+	list_del(&bridge->chain_node);
 	bridge->dev = NULL;
 }
 
@@ -171,7 +172,8 @@ void drm_bridge_detach(struct drm_bridge *bridge)
 struct drm_bridge *
 drm_bridge_chain_get_first_bridge(struct drm_encoder *encoder)
 {
-	return encoder->bridge;
+	return list_first_entry_or_null(&encoder->bridge_chain,
+					struct drm_bridge, chain_node);
 }
 EXPORT_SYMBOL(drm_bridge_chain_get_first_bridge);
 
@@ -186,12 +188,11 @@ EXPORT_SYMBOL(drm_bridge_chain_get_first_bridge);
 struct drm_bridge *
 drm_bridge_chain_get_last_bridge(struct drm_encoder *encoder)
 {
-	struct drm_bridge *bridge = encoder->bridge;
+	if (list_empty(&encoder->bridge_chain))
+		return NULL;
 
-	while(bridge && bridge->next)
-		bridge = bridge->next;
-
-	return bridge;
+	return list_last_entry(&encoder->bridge_chain, struct drm_bridge,
+			       chain_node);
 }
 EXPORT_SYMBOL(drm_bridge_chain_get_last_bridge);
 
@@ -205,10 +206,11 @@ EXPORT_SYMBOL(drm_bridge_chain_get_last_bridge);
 struct drm_bridge *
 drm_bridge_chain_get_next_bridge(struct drm_bridge *bridge)
 {
-	if (!bridge || !bridge->encoder)
-		return NULL;
+	if (!bridge || !bridge->encoder ||
+	    list_is_last(&bridge->encoder->bridge_chain, &bridge->chain_node))
+                return NULL;
 
-	return bridge->next;
+	return list_next_entry(bridge, chain_node);
 }
 EXPORT_SYMBOL(drm_bridge_chain_get_next_bridge);
 
@@ -222,98 +224,6 @@ EXPORT_SYMBOL(drm_bridge_chain_get_next_bridge);
  *
  * For detailed specification of the bridge callbacks see &drm_bridge_funcs.
  */
-
-static bool drm_bridge_mode_fixup(struct drm_bridge *bridge,
-				  const struct drm_display_mode *mode,
-				  struct drm_display_mode *adjusted_mode)
-{
-	bool ret = true;
-
-	if (!bridge)
-		return true;
-
-	if (bridge->funcs->mode_fixup)
-		ret = bridge->funcs->mode_fixup(bridge, mode, adjusted_mode);
-
-	ret = ret && drm_bridge_mode_fixup(bridge->next, mode, adjusted_mode);
-
-	return ret;
-}
-
-static enum drm_mode_status
-drm_bridge_mode_valid(struct drm_bridge *bridge,
-		      const struct drm_display_mode *mode)
-{
-	enum drm_mode_status ret = MODE_OK;
-
-	if (!bridge)
-		return ret;
-
-	if (bridge->funcs->mode_valid)
-		ret = bridge->funcs->mode_valid(bridge, mode);
-
-	if (ret != MODE_OK)
-		return ret;
-
-	return drm_bridge_mode_valid(bridge->next, mode);
-}
-
-static void drm_bridge_disable(struct drm_bridge *bridge)
-{
-	if (!bridge)
-		return;
-
-	drm_bridge_disable(bridge->next);
-
-	if (bridge->funcs->disable)
-		bridge->funcs->disable(bridge);
-}
-
-static void drm_bridge_post_disable(struct drm_bridge *bridge)
-{
-	if (!bridge)
-		return;
-
-	if (bridge->funcs->post_disable)
-		bridge->funcs->post_disable(bridge);
-
-	drm_bridge_post_disable(bridge->next);
-}
-
-static void drm_bridge_mode_set(struct drm_bridge *bridge,
-				const struct drm_display_mode *mode,
-				const struct drm_display_mode *adjusted_mode)
-{
-	if (!bridge)
-		return;
-
-	if (bridge->funcs->mode_set)
-		bridge->funcs->mode_set(bridge, mode, adjusted_mode);
-
-	drm_bridge_mode_set(bridge->next, mode, adjusted_mode);
-}
-
-static void drm_bridge_pre_enable(struct drm_bridge *bridge)
-{
-	if (!bridge)
-		return;
-
-	drm_bridge_pre_enable(bridge->next);
-
-	if (bridge->funcs->pre_enable)
-		bridge->funcs->pre_enable(bridge);
-}
-
-static void drm_bridge_enable(struct drm_bridge *bridge)
-{
-	if (!bridge)
-		return;
-
-	if (bridge->funcs->enable)
-		bridge->funcs->enable(bridge);
-
-	drm_bridge_enable(bridge->next);
-}
 
 /**
  * drm_bridge_chain_mode_fixup - fixup proposed mode for all bridges in the
@@ -332,7 +242,17 @@ bool drm_bridge_chain_mode_fixup(struct drm_encoder *encoder,
 				 const struct drm_display_mode *mode,
 				 struct drm_display_mode *adjusted_mode)
 {
-	return drm_bridge_mode_fixup(encoder->bridge, mode, adjusted_mode);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		if (!bridge->funcs->mode_fixup)
+			continue;
+
+		if (!bridge->funcs->mode_fixup(bridge, mode, adjusted_mode))
+			return false;
+	}
+
+	return true;
 }
 EXPORT_SYMBOL(drm_bridge_chain_mode_fixup);
 
@@ -353,7 +273,20 @@ enum drm_mode_status
 drm_bridge_chain_mode_valid(struct drm_encoder *encoder,
 			    const struct drm_display_mode *mode)
 {
-	return drm_bridge_mode_valid(encoder->bridge, mode);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		enum drm_mode_status ret;
+
+		if (!bridge->funcs->mode_valid)
+			continue;
+
+		ret = bridge->funcs->mode_valid(bridge, mode);
+		if (ret != MODE_OK)
+			return ret;
+	}
+
+	return MODE_OK;
 }
 EXPORT_SYMBOL(drm_bridge_chain_mode_valid);
 
@@ -367,7 +300,13 @@ EXPORT_SYMBOL(drm_bridge_chain_mode_valid);
  */
 void drm_bridge_chain_disable(struct drm_encoder *encoder)
 {
-	drm_bridge_disable(encoder->bridge);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry_reverse(bridge, &encoder->bridge_chain,
+				    chain_node) {
+		if (bridge->funcs->disable)
+			bridge->funcs->disable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_bridge_chain_disable);
 
@@ -382,7 +321,12 @@ EXPORT_SYMBOL(drm_bridge_chain_disable);
  */
 void drm_bridge_chain_post_disable(struct drm_encoder *encoder)
 {
-	drm_bridge_post_disable(encoder->bridge);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		if (bridge->funcs->post_disable)
+			bridge->funcs->post_disable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_bridge_chain_post_disable);
 
@@ -400,7 +344,12 @@ void drm_bridge_chain_mode_set(struct drm_encoder *encoder,
 			       const struct drm_display_mode *mode,
 			       const struct drm_display_mode *adjusted_mode)
 {
-	drm_bridge_mode_set(encoder->bridge, mode, adjusted_mode);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		if (bridge->funcs->mode_set)
+			bridge->funcs->mode_set(bridge, mode, adjusted_mode);
+	}
 }
 EXPORT_SYMBOL(drm_bridge_chain_mode_set);
 
@@ -415,7 +364,13 @@ EXPORT_SYMBOL(drm_bridge_chain_mode_set);
  */
 void drm_bridge_chain_pre_enable(struct drm_encoder *encoder)
 {
-	drm_bridge_pre_enable(encoder->bridge);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry_reverse(bridge, &encoder->bridge_chain,
+				    chain_node) {
+		if (bridge->funcs->pre_enable)
+			bridge->funcs->pre_enable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_bridge_chain_pre_enable);
 
@@ -429,65 +384,14 @@ EXPORT_SYMBOL(drm_bridge_chain_pre_enable);
  */
 void drm_bridge_chain_enable(struct drm_encoder *encoder)
 {
-	drm_bridge_enable(encoder->bridge);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		if (bridge->funcs->enable)
+			bridge->funcs->enable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_bridge_chain_enable);
-
-static void drm_atomic_bridge_disable(struct drm_bridge *bridge,
-				      struct drm_atomic_state *state)
-{
-	if (!bridge)
-		return;
-
-	drm_atomic_bridge_disable(bridge->next, state);
-
-	if (bridge->funcs->atomic_disable)
-		bridge->funcs->atomic_disable(bridge, state);
-	else if (bridge->funcs->disable)
-		bridge->funcs->disable(bridge);
-}
-
-static void drm_atomic_bridge_post_disable(struct drm_bridge *bridge,
-					   struct drm_atomic_state *state)
-{
-	if (!bridge)
-		return;
-
-	if (bridge->funcs->atomic_post_disable)
-		bridge->funcs->atomic_post_disable(bridge, state);
-	else if (bridge->funcs->post_disable)
-		bridge->funcs->post_disable(bridge);
-
-	drm_atomic_bridge_post_disable(bridge->next, state);
-}
-
-static void drm_atomic_bridge_pre_enable(struct drm_bridge *bridge,
-					 struct drm_atomic_state *state)
-{
-	if (!bridge)
-		return;
-
-	drm_atomic_bridge_pre_enable(bridge->next, state);
-
-	if (bridge->funcs->atomic_pre_enable)
-		bridge->funcs->atomic_pre_enable(bridge, state);
-	else if (bridge->funcs->pre_enable)
-		bridge->funcs->pre_enable(bridge);
-}
-
-static void drm_atomic_bridge_enable(struct drm_bridge *bridge,
-				     struct drm_atomic_state *state)
-{
-	if (!bridge)
-		return;
-
-	if (bridge->funcs->atomic_enable)
-		bridge->funcs->atomic_enable(bridge, state);
-	else if (bridge->funcs->enable)
-		bridge->funcs->enable(bridge);
-
-	drm_atomic_bridge_enable(bridge->next, state);
-}
 
 /**
  * drm_atomic_bridge_chain_disable - disables all bridges in the encoder chain
@@ -502,7 +406,15 @@ static void drm_atomic_bridge_enable(struct drm_bridge *bridge,
 void drm_atomic_bridge_chain_disable(struct drm_encoder *encoder,
 				     struct drm_atomic_state *state)
 {
-	drm_atomic_bridge_disable(encoder->bridge, state);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry_reverse(bridge, &encoder->bridge_chain,
+				    chain_node) {
+		if (bridge->funcs->atomic_disable)
+			bridge->funcs->atomic_disable(bridge, state);
+		else if (bridge->funcs->disable)
+			bridge->funcs->disable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_disable);
 
@@ -520,7 +432,14 @@ EXPORT_SYMBOL(drm_atomic_bridge_chain_disable);
 void drm_atomic_bridge_chain_post_disable(struct drm_encoder *encoder,
 					  struct drm_atomic_state *state)
 {
-	drm_atomic_bridge_post_disable(encoder->bridge, state);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		if (bridge->funcs->atomic_post_disable)
+			bridge->funcs->atomic_post_disable(bridge, state);
+		else if (bridge->funcs->post_disable)
+			bridge->funcs->post_disable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_post_disable);
 
@@ -538,7 +457,15 @@ EXPORT_SYMBOL(drm_atomic_bridge_chain_post_disable);
 void drm_atomic_bridge_chain_pre_enable(struct drm_encoder *encoder,
 					struct drm_atomic_state *state)
 {
-	drm_atomic_bridge_pre_enable(encoder->bridge, state);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry_reverse(bridge, &encoder->bridge_chain,
+				    chain_node) {
+		if (bridge->funcs->atomic_pre_enable)
+			bridge->funcs->atomic_pre_enable(bridge, state);
+		else if (bridge->funcs->pre_enable)
+			bridge->funcs->pre_enable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_pre_enable);
 
@@ -555,7 +482,14 @@ EXPORT_SYMBOL(drm_atomic_bridge_chain_pre_enable);
 void drm_atomic_bridge_chain_enable(struct drm_encoder *encoder,
 				    struct drm_atomic_state *state)
 {
-	drm_atomic_bridge_enable(encoder->bridge, state);
+	struct drm_bridge *bridge;
+
+	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+		if (bridge->funcs->atomic_enable)
+			bridge->funcs->atomic_enable(bridge, state);
+		else if (bridge->funcs->enable)
+			bridge->funcs->enable(bridge);
+	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_enable);
 

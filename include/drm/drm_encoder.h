@@ -89,7 +89,7 @@ struct drm_encoder_funcs {
  * @head: list management
  * @base: base KMS object
  * @name: human readable name, can be overwritten by the driver
- * @bridge: bridge associated to the encoder
+ * @bridge_chain: bridges associated to the encoder
  * @funcs: control functions
  * @helper_private: mid-layer private data
  *
@@ -172,7 +172,7 @@ struct drm_encoder {
 	 * &drm_connector_state.crtc.
 	 */
 	struct drm_crtc *crtc;
-	struct drm_bridge *bridge;
+	struct list_head bridge_chain;
 	const struct drm_encoder_funcs *funcs;
 	const struct drm_encoder_helper_funcs *helper_private;
 
