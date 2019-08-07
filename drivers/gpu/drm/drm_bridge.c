@@ -641,13 +641,251 @@ static int drm_atomic_bridge_check(struct drm_bridge *bridge,
 	return 0;
 }
 
+static int select_bus_fmt_recursive(struct drm_bridge *first,
+				    struct drm_bridge *cur,
+				    struct drm_crtc_state *crtc_state,
+				    struct drm_connector_state *conn_state,
+				    u32 out_bus_fmt)
+{
+	struct drm_bridge_state *cur_state;
+	unsigned int num_in_bus_fmts, i;
+	struct drm_bridge *prev;
+	u32 *in_bus_fmts;
+	int ret;
+
+	prev = drm_bridge_chain_get_prev_bridge(cur);
+	cur_state = drm_atomic_get_new_bridge_state(crtc_state->state, cur);
+	if (WARN_ON(!cur_state))
+		return -EINVAL;
+
+	/*
+	 * Bus format negotiation is not supported by this bridge, let's pass
+	 * MEDIA_BUS_FMT_FIXED to the previous bridge in the chain and hope
+	 * that it can handle this situation gracefully (by providing
+	 * appropriate default values).
+	 */
+	if (!cur->funcs->atomic_get_input_bus_fmts) {
+		if (cur != first) {
+			ret = select_bus_fmt_recursive(first, prev, crtc_state,
+						       conn_state,
+						       MEDIA_BUS_FMT_FIXED);
+			if (ret)
+				return ret;
+		}
+
+		cur_state->input_bus_cfg.fmt = MEDIA_BUS_FMT_FIXED;
+		cur_state->output_bus_cfg.fmt = out_bus_fmt;
+		return 0;
+	}
+
+	in_bus_fmts = cur->funcs->atomic_get_input_bus_fmts(cur, cur_state,
+							    crtc_state,
+							    conn_state,
+							    out_bus_fmt,
+							    &num_in_bus_fmts);
+	if (!num_in_bus_fmts)
+		return -ENOTSUPP;
+	else if (!in_bus_fmts)
+		return -ENOMEM;
+
+	if (first == cur) {
+		cur_state->input_bus_cfg.fmt = in_bus_fmts[0];
+		cur_state->output_bus_cfg.fmt = out_bus_fmt;
+		kfree(in_bus_fmts);
+		return 0;
+	}
+
+	for (i = 0; i < num_in_bus_fmts; i++) {
+		ret = select_bus_fmt_recursive(first, prev, crtc_state,
+					       conn_state, in_bus_fmts[i]);
+		if (ret != -ENOTSUPP)
+			break;
+	}
+
+	if (!ret) {
+		cur_state->input_bus_cfg.fmt = in_bus_fmts[i];
+		cur_state->output_bus_cfg.fmt = out_bus_fmt;
+	}
+
+	kfree(in_bus_fmts);
+	return ret;
+}
+
+/*
+ * This function is called by &drm_atomic_bridge_chain_check() just before
+ * calling &drm_bridge_funcs.atomic_check() on all elements of the chain.
+ * It's providing bus format negotiation between bridge elements. The
+ * negotiation happens in reverse order, starting from the last element in
+ * the chain up to @bridge.
+ *
+ * Negotiation starts by retrieving supported output bus formats on the last
+ * bridge element and testing them one by one. The test is recursive, meaning
+ * that for each tested output format, the whole chain will be walked backward,
+ * and each element will have to choose an input bus format that can be
+ * transcoded to the requested output format. When a bridge element does not
+ * support transcoding into a specific output format -ENOTSUPP is returned and
+ * the next bridge element will have to try a different format. If none of the
+ * combinations worked, -ENOTSUPP is returned and the atomic modeset will fail.
+ *
+ * This implementation is relying on
+ * &drm_bridge_funcs.atomic_get_output_bus_fmts() and
+ * &drm_bridge_funcs.atomic_get_input_bus_fmts() to gather supported
+ * input/output formats.
+ * When &drm_bridge_funcs.atomic_get_output_bus_fmts() is not implemented by
+ * the last element of the chain, &drm_atomic_bridge_chain_select_bus_fmts()
+ * tries a single format: &drm_connector.display_info.bus_formats[0] if
+ * available, MEDIA_BUS_FMT_FIXED otherwise.
+ * When &drm_bridge_funcs.atomic_get_input_bus_fmts() is not implemented,
+ * &drm_atomic_bridge_chain_select_bus_fmts() skips the negotiation on the
+ * bridge element that lacks this hook and asks the previous element in the
+ * chain to try MEDIA_BUS_FMT_FIXED. It's up to bridge drivers to decide what
+ * to do in that case (fail if they want to enforce bus format negotiation, or
+ * provide a reasonable default if they need to support pipelines where not
+ * all elements support bus format negotiation).
+ */
+static int
+drm_atomic_bridge_chain_select_bus_fmts(struct drm_bridge *bridge,
+					struct drm_crtc_state *crtc_state,
+					struct drm_connector_state *conn_state)
+{
+	struct drm_connector *conn = conn_state->connector;
+	struct drm_encoder *encoder = bridge->encoder;
+	struct drm_bridge_state *last_bridge_state;
+	unsigned int i, num_out_bus_fmts;
+	struct drm_bridge *last_bridge;
+	u32 *out_bus_fmts;
+	int ret = 0;
+
+	last_bridge = list_last_entry(&encoder->bridge_chain,
+				      struct drm_bridge, chain_node);
+	last_bridge_state = drm_atomic_get_new_bridge_state(crtc_state->state,
+							    last_bridge);
+	if (WARN_ON(!last_bridge_state))
+		return -EINVAL;
+
+	if (last_bridge->funcs->atomic_get_output_bus_fmts) {
+		const struct drm_bridge_funcs *funcs = last_bridge->funcs;
+
+		out_bus_fmts = funcs->atomic_get_output_bus_fmts(last_bridge,
+							last_bridge_state,
+							crtc_state,
+							conn_state,
+							&num_out_bus_fmts);
+		if (!num_out_bus_fmts)
+			return -ENOTSUPP;
+		else if (!out_bus_fmts)
+			return -ENOMEM;
+	} else {
+		num_out_bus_fmts = 1;
+		out_bus_fmts = kzalloc(sizeof(*out_bus_fmts), GFP_KERNEL);
+		if (!out_bus_fmts)
+			return -ENOMEM;
+
+		if (conn->display_info.num_bus_formats &&
+		    conn->display_info.bus_formats)
+			out_bus_fmts[0] = conn->display_info.bus_formats[0];
+		else
+			out_bus_fmts[0] = MEDIA_BUS_FMT_FIXED;
+	}
+
+	for (i = 0; i < num_out_bus_fmts; i++) {
+		ret = select_bus_fmt_recursive(bridge, last_bridge, crtc_state,
+					       conn_state, out_bus_fmts[i]);
+		if (ret != -ENOTSUPP)
+			break;
+	}
+
+	kfree(out_bus_fmts);
+
+	return ret;
+}
+
+static void
+drm_atomic_bridge_propagate_bus_flags(struct drm_bridge *bridge,
+				      struct drm_connector *conn,
+				      struct drm_atomic_state *state)
+{
+	struct drm_bridge_state *bridge_state, *next_bridge_state;
+	struct drm_bridge *next_bridge;
+	u32 output_flags;
+
+	bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
+	next_bridge = drm_bridge_chain_get_next_bridge(bridge);
+
+	/*
+	 * Let's try to apply the most common case here, that is, propagate
+	 * display_info flags for the last bridge, and propagate the input
+	 * flags of the next bridge element to the output end of the current
+	 * bridge when the bridge is not the last one.
+	 * There are exceptions to this rule, like when signal inversion is
+	 * happening at the board level, but that's something drivers can deal
+	 * with from their &drm_bridge_funcs.atomic_check() implementation by
+	 * simply overriding the flags value we've set here.
+	 */
+	if (!next_bridge) {
+		output_flags = conn->display_info.bus_flags;
+	} else {
+		next_bridge_state = drm_atomic_get_new_bridge_state(state,
+								next_bridge);
+		output_flags = next_bridge_state->input_bus_cfg.flags;
+	}
+
+	bridge_state->output_bus_cfg.flags = output_flags;
+
+	/*
+	 * Propage the output flags to the input end of the bridge. Again, it's
+	 * not necessarily what all bridges want, but that's what most of them
+	 * do, and by doing that by default we avoid forcing drivers to
+	 * duplicate the "dummy propagation" logic.
+	 */
+	bridge_state->input_bus_cfg.flags = output_flags;
+}
+
+/**
+ * drm_atomic_helper_bridge_propagate_bus_fmt() - Propagate output format to
+ *						  the input end of a bridge
+ * @bridge: bridge control structure
+ * @bridge_state: new bridge state
+ * @crtc_state: new CRTC state
+ * @conn_state: new connector state
+ * @output_fmt: tested output bus format
+ * @num_input_fmts: will contain the size of the returned array
+ *
+ * Helper that propagate the output format to the input end of bridge.
+ * Particularly useful for dummy bridge elements like the panel_bridge.
+ *
+ * RETURNS:
+ * a valid format array of size @num_input_fmts, or NULL if the allocation
+ * failed or if @num_input_fmts is set to 0
+ */
+u32 *
+drm_atomic_helper_bridge_propagate_bus_fmt(struct drm_bridge *bridge,
+					struct drm_bridge_state *bridge_state,
+					struct drm_crtc_state *crtc_state,
+					struct drm_connector_state *conn_state,
+					u32 output_fmt,
+					unsigned int *num_input_fmts)
+{
+	u32 *input_fmts;
+
+	*num_input_fmts = 1;
+	input_fmts = kzalloc(sizeof(*input_fmts), GFP_KERNEL);
+	if (!input_fmts)
+		return NULL;
+
+	input_fmts[0] = output_fmt;
+	return input_fmts;
+}
+EXPORT_SYMBOL(drm_atomic_helper_bridge_propagate_bus_fmt);
+
 /**
  * drm_atomic_bridge_chain_check() - Do an atomic check on the bridge chain
  * @bridge: bridge control structure
  * @crtc_state: new CRTC state
  * @conn_state: new connector state
  *
- * Calls &drm_bridge_funcs.atomic_check() (falls back on
+ * First trigger a bus format negotiation before calling
+ * &drm_bridge_funcs.atomic_check() (falls back on
  * &drm_bridge_funcs.mode_fixup()) op for all the bridges in the encoder chain,
  * starting from the last bridge to the first. These are called before calling
  * &drm_encoder_helper_funcs.atomic_check()
@@ -659,11 +897,28 @@ int drm_atomic_bridge_chain_check(struct drm_bridge *bridge,
 				  struct drm_crtc_state *crtc_state,
 				  struct drm_connector_state *conn_state)
 {
+	struct drm_connector *conn = conn_state->connector;
 	struct drm_encoder *encoder = bridge->encoder;
 	struct drm_bridge *iter;
+	int ret;
+
+	ret = drm_atomic_bridge_chain_select_bus_fmts(bridge, crtc_state,
+						      conn_state);
+	if (ret)
+		return ret;
 
 	list_for_each_entry_reverse(iter, &encoder->bridge_chain, chain_node) {
 		int ret;
+
+		/*
+		 * Bus flags are propagated by default. If a bridge needs to
+		 * tweak the input bus flags for any reason, it should happen
+		 * in its &drm_bridge_funcs.atomic_check() implementation such
+		 * that preceding bridges in the chain can propagate the new
+		 * bus flags.
+		 */
+		drm_atomic_bridge_propagate_bus_flags(iter, conn,
+						      crtc_state->state);
 
 		ret = drm_atomic_bridge_check(iter, crtc_state, conn_state);
 		if (ret)
