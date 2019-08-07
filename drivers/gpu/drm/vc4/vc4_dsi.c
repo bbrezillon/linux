@@ -1629,8 +1629,10 @@ static void vc4_dsi_unbind(struct device *dev, struct device *master,
 	struct drm_device *drm = dev_get_drvdata(master);
 	struct vc4_dev *vc4 = to_vc4_dev(drm);
 	struct vc4_dsi *dsi = dev_get_drvdata(dev);
+	struct drm_bridge *bridge;
 
-	if (dsi->encoder->bridge)
+	bridge = drm_bridge_chain_get_first_bridge(dsi->encoder);
+	if (bridge)
 		pm_runtime_disable(dev);
 
 	vc4_dsi_encoder_destroy(dsi->encoder);

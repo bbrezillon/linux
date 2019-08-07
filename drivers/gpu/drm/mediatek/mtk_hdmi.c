@@ -1243,7 +1243,7 @@ static int mtk_hdmi_conn_mode_valid(struct drm_connector *conn,
 		mode->hdisplay, mode->vdisplay, mode->vrefresh,
 		!!(mode->flags & DRM_MODE_FLAG_INTERLACE), mode->clock * 1000);
 
-	if (hdmi->bridge.next) {
+	if (drm_bridge_chain_get_next_bridge(&hdmi->bridge)) {
 		struct drm_display_mode adjusted_mode;
 
 		drm_mode_copy(&adjusted_mode, mode);

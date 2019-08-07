@@ -215,11 +215,10 @@ static int omap_display_id(struct omap_dss_device *output)
 		node = display->dev->of_node;
 		omapdss_device_put(display);
 	} else if (output->bridge) {
-		struct drm_bridge *bridge = output->bridge;
+		struct drm_encoder *encoder = output->bridge->encoder;
+		struct drm_bridge *bridge;
 
-		while (bridge->next)
-			bridge = bridge->next;
-
+		bridge = drm_bridge_chain_get_last_bridge(encoder);
 		node = bridge->of_node;
 	} else if (output->panel) {
 		node = output->panel->dev->of_node;

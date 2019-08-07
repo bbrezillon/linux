@@ -409,6 +409,12 @@ struct drm_bridge *of_drm_find_bridge(struct device_node *np);
 int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 		      struct drm_bridge *previous);
 
+struct drm_bridge *
+drm_bridge_chain_get_first_bridge(struct drm_encoder *encoder);
+struct drm_bridge *
+drm_bridge_chain_get_last_bridge(struct drm_encoder *encoder);
+struct drm_bridge *
+drm_bridge_chain_get_next_bridge(struct drm_bridge *bridge);
 bool drm_bridge_chain_mode_fixup(struct drm_encoder *encoder,
 				 const struct drm_display_mode *mode,
 				 struct drm_display_mode *adjusted_mode);

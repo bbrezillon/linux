@@ -161,6 +161,58 @@ void drm_bridge_detach(struct drm_bridge *bridge)
 }
 
 /**
+ * drm_bridge_chain_get_first_bridge() - Get the first bridge in the chain
+ * @encoder: encoder object
+ *
+ * RETURNS:
+ * the first bridge in the encoder chain, or NULL if there's no bridge
+ * attached to this encoder.
+ */
+struct drm_bridge *
+drm_bridge_chain_get_first_bridge(struct drm_encoder *encoder)
+{
+	return encoder->bridge;
+}
+EXPORT_SYMBOL(drm_bridge_chain_get_first_bridge);
+
+/**
+ * drm_bridge_chain_get_last_bridge() - Get the last bridge in the chain
+ * @encoder: encoder object
+ *
+ * RETURNS:
+ * the last bridge in the encoder chain, or NULL if there's no bridge
+ * attached to this encoder.
+ */
+struct drm_bridge *
+drm_bridge_chain_get_last_bridge(struct drm_encoder *encoder)
+{
+	struct drm_bridge *bridge = encoder->bridge;
+
+	while(bridge && bridge->next)
+		bridge = bridge->next;
+
+	return bridge;
+}
+EXPORT_SYMBOL(drm_bridge_chain_get_last_bridge);
+
+/**
+ * drm_bridge_chain_get_next_bridge() - Get the next bridge in the chain
+ * @bridge: bridge object
+ *
+ * RETURNS:
+ * the next bridge in the chain, or NULL if there's @bridge is the last.
+ */
+struct drm_bridge *
+drm_bridge_chain_get_next_bridge(struct drm_bridge *bridge)
+{
+	if (!bridge || !bridge->encoder)
+		return NULL;
+
+	return bridge->next;
+}
+EXPORT_SYMBOL(drm_bridge_chain_get_next_bridge);
+
+/**
  * DOC: bridge callbacks
  *
  * The &drm_bridge_funcs ops are populated by the bridge driver. The DRM

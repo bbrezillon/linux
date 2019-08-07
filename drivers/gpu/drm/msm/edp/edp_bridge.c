@@ -56,7 +56,7 @@ static void edp_bridge_mode_set(struct drm_bridge *bridge,
 
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
 		if ((connector->encoder != NULL) &&
-			(connector->encoder->bridge == bridge)) {
+		    (drm_bridge_chain_get_first_bridge(connector->encoder) == bridge)) {
 			msm_edp_ctrl_timing_cfg(edp->ctrl,
 				adjusted_mode, &connector->display_info);
 			break;
