@@ -6,6 +6,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
 
@@ -16,6 +17,8 @@ struct lvds_encoder {
 	struct drm_bridge bridge;
 	struct drm_bridge *panel_bridge;
 	struct gpio_desc *powerdown_gpio;
+	u32 output_fmt;
+	u32 input_fmt;
 };
 
 static int lvds_encoder_attach(struct drm_bridge *bridge)
@@ -48,10 +51,40 @@ static void lvds_encoder_disable(struct drm_bridge *bridge)
 		gpiod_set_value_cansleep(lvds_encoder->powerdown_gpio, 1);
 }
 
+static u32 *lvds_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
+					   struct drm_bridge_state *bridge_state,
+					   struct drm_crtc_state *crtc_state,
+					   struct drm_connector_state *conn_state,
+					   u32 output_fmt,
+					   unsigned int *num_input_fmts)
+{
+	struct lvds_encoder *lvds_encoder = container_of(bridge,
+							 struct lvds_encoder,
+							 bridge);
+	u32 *input_fmts;
+
+	if (output_fmt == MEDIA_BUS_FMT_FIXED ||
+	    output_fmt == lvds_encoder->output_fmt)
+		*num_input_fmts = 1;
+	else
+		*num_input_fmts = 0;
+
+	if (!*num_input_fmts)
+		return NULL;
+
+	input_fmts = kcalloc(*num_input_fmts, sizeof(*input_fmts), GFP_KERNEL);
+	if (!input_fmts)
+		return NULL;
+
+	input_fmts[0] = lvds_encoder->input_fmt;
+	return input_fmts;
+}
+
 static struct drm_bridge_funcs funcs = {
 	.attach = lvds_encoder_attach,
 	.enable = lvds_encoder_enable,
 	.disable = lvds_encoder_disable,
+	.atomic_get_input_bus_fmts = lvds_atomic_get_input_bus_fmts,
 };
 
 static int lvds_encoder_probe(struct platform_device *pdev)
@@ -62,10 +95,15 @@ static int lvds_encoder_probe(struct platform_device *pdev)
 	struct device_node *panel_node;
 	struct drm_panel *panel;
 	struct lvds_encoder *lvds_encoder;
+	const char *output_data_mapping = NULL;
+	u32 input_bus_width = 0;
 
 	lvds_encoder = devm_kzalloc(dev, sizeof(*lvds_encoder), GFP_KERNEL);
 	if (!lvds_encoder)
 		return -ENOMEM;
+
+	lvds_encoder->input_fmt = MEDIA_BUS_FMT_FIXED;
+	lvds_encoder->output_fmt = MEDIA_BUS_FMT_FIXED;
 
 	lvds_encoder->powerdown_gpio = devm_gpiod_get_optional(dev, "powerdown",
 							       GPIOD_OUT_HIGH);
@@ -77,11 +115,45 @@ static int lvds_encoder_probe(struct platform_device *pdev)
 		return err;
 	}
 
+	port = of_graph_get_port_by_id(dev->of_node, 0);
+	if (!port) {
+		dev_dbg(dev, "port 0 not found\n");
+		return -ENXIO;
+	}
+
+	of_node_put(port);
+
+	if (of_property_read_u32(port, "bus-width", &input_bus_width)) {
+		lvds_encoder->input_fmt = MEDIA_BUS_FMT_FIXED;
+	} else if (input_bus_width == 18) {
+		lvds_encoder->input_fmt = MEDIA_BUS_FMT_RGB666_1X18;
+	} else if (input_bus_width == 24) {
+		lvds_encoder->input_fmt = MEDIA_BUS_FMT_RGB888_1X24;
+	} else {
+		dev_dbg(dev, "unsupported bus-width)\n");
+		return -ENOTSUPP;
+	}
+
 	/* Locate the panel DT node. */
 	port = of_graph_get_port_by_id(dev->of_node, 1);
 	if (!port) {
 		dev_dbg(dev, "port 1 not found\n");
 		return -ENXIO;
+	}
+
+	of_property_read_string(port, "data-mapping", &output_data_mapping);
+	if (!output_data_mapping) {
+		lvds_encoder->output_fmt = MEDIA_BUS_FMT_FIXED;
+	} else if (!strcmp(output_data_mapping, "jeida-18")) {
+		lvds_encoder->output_fmt = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG;
+	} else if (!strcmp(output_data_mapping, "jeida-24")) {
+		lvds_encoder->output_fmt = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA;
+	} else if (!strcmp(output_data_mapping, "vesa-24")) {
+		lvds_encoder->output_fmt = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG;
+	} else {
+		of_node_put(port);
+		dev_dbg(dev, "unsupported output data-mapping\n");
+		return -ENOTSUPP;
 	}
 
 	endpoint = of_get_child_by_name(port, "endpoint");
