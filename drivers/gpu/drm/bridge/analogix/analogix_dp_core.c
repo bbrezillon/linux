@@ -1290,8 +1290,9 @@ struct drm_crtc *analogix_dp_get_new_crtc(struct analogix_dp_device *dp,
 }
 
 static void analogix_dp_bridge_atomic_pre_enable(struct drm_bridge *bridge,
-						 struct drm_atomic_state *state)
+						 struct drm_bridge_state *bstate)
 {
+	struct drm_atomic_state *state = bstate->base.state;
 	struct analogix_dp_device *dp = bridge->driver_private;
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *old_crtc_state;
@@ -1367,8 +1368,9 @@ out_dp_clk_pre:
 }
 
 static void analogix_dp_bridge_atomic_enable(struct drm_bridge *bridge,
-					     struct drm_atomic_state *state)
+					     struct drm_bridge_state *bstate)
 {
+	struct drm_atomic_state *state = bstate->base.state;
 	struct analogix_dp_device *dp = bridge->driver_private;
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *old_crtc_state;
@@ -1441,8 +1443,9 @@ static void analogix_dp_bridge_disable(struct drm_bridge *bridge)
 }
 
 static void analogix_dp_bridge_atomic_disable(struct drm_bridge *bridge,
-					      struct drm_atomic_state *state)
+					      struct drm_bridge_state *bstate)
 {
+	struct drm_atomic_state *state = bstate->base.state;
 	struct analogix_dp_device *dp = bridge->driver_private;
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *new_crtc_state = NULL;
@@ -1465,8 +1468,9 @@ out:
 
 static
 void analogix_dp_bridge_atomic_post_disable(struct drm_bridge *bridge,
-					    struct drm_atomic_state *state)
+					    struct drm_bridge_state *bstate)
 {
+	struct drm_atomic_state *state = bstate->base.state;
 	struct analogix_dp_device *dp = bridge->driver_private;
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *new_crtc_state;

@@ -463,10 +463,14 @@ void drm_atomic_bridge_chain_disable(struct drm_encoder *encoder,
 
 	list_for_each_entry_reverse(bridge, &encoder->bridge_chain,
 				    chain_node) {
-		if (bridge->funcs->atomic_disable)
-			bridge->funcs->atomic_disable(bridge, state);
-		else if (bridge->funcs->disable)
+		if (bridge->funcs->atomic_disable) {
+			struct drm_bridge_state *bridge_state;
+
+			bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
+			bridge->funcs->atomic_disable(bridge, bridge_state);
+		} else if (bridge->funcs->disable) {
 			bridge->funcs->disable(bridge);
+		}
 	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_disable);
@@ -488,10 +492,14 @@ void drm_atomic_bridge_chain_post_disable(struct drm_encoder *encoder,
 	struct drm_bridge *bridge;
 
 	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
-		if (bridge->funcs->atomic_post_disable)
-			bridge->funcs->atomic_post_disable(bridge, state);
-		else if (bridge->funcs->post_disable)
+		if (bridge->funcs->atomic_post_disable) {
+			struct drm_bridge_state *bridge_state;
+
+			bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
+			bridge->funcs->atomic_post_disable(bridge, bridge_state);
+		} else if (bridge->funcs->post_disable) {
 			bridge->funcs->post_disable(bridge);
+		}
 	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_post_disable);
@@ -514,10 +522,14 @@ void drm_atomic_bridge_chain_pre_enable(struct drm_encoder *encoder,
 
 	list_for_each_entry_reverse(bridge, &encoder->bridge_chain,
 				    chain_node) {
-		if (bridge->funcs->atomic_pre_enable)
-			bridge->funcs->atomic_pre_enable(bridge, state);
-		else if (bridge->funcs->pre_enable)
+		if (bridge->funcs->atomic_pre_enable) {
+			struct drm_bridge_state *bridge_state;
+
+			bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
+			bridge->funcs->atomic_pre_enable(bridge, bridge_state);
+		} else if (bridge->funcs->pre_enable) {
 			bridge->funcs->pre_enable(bridge);
+		}
 	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_pre_enable);
@@ -538,10 +550,14 @@ void drm_atomic_bridge_chain_enable(struct drm_encoder *encoder,
 	struct drm_bridge *bridge;
 
 	list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
-		if (bridge->funcs->atomic_enable)
-			bridge->funcs->atomic_enable(bridge, state);
-		else if (bridge->funcs->enable)
+		if (bridge->funcs->atomic_enable) {
+			struct drm_bridge_state *bridge_state;
+
+			bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
+			bridge->funcs->atomic_enable(bridge, bridge_state);
+		} else if (bridge->funcs->enable) {
 			bridge->funcs->enable(bridge);
+		}
 	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_enable);
