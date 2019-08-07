@@ -1593,9 +1593,10 @@ static int exynos_dsi_host_detach(struct mipi_dsi_host *host,
 				  struct mipi_dsi_device *device)
 {
 	struct exynos_dsi *dsi = host_to_dsi(host);
-	struct drm_bridge *out_bridge = dsi->bridge.next;
 	struct drm_device *drm = dsi->encoder.dev;
+	struct drm_bridge *out_bridge;
 
+	out_bridge = drm_bridge_chain_get_next_bridge(&dsi->bridge);
 	if (dsi->panel) {
 		mutex_lock(&drm->mode_config.mutex);
 		exynos_dsi_disable(&dsi->bridge);
