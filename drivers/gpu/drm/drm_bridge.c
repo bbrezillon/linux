@@ -89,6 +89,38 @@ void drm_bridge_remove(struct drm_bridge *bridge)
 }
 EXPORT_SYMBOL(drm_bridge_remove);
 
+static struct drm_private_state *
+drm_bridge_atomic_duplicate_priv_state(struct drm_private_obj *obj)
+{
+	struct drm_bridge *bridge = drm_priv_to_bridge(obj);
+	struct drm_bridge_state *state;
+
+	if (bridge->funcs->atomic_duplicate_state)
+		state = bridge->funcs->atomic_duplicate_state(bridge);
+	else
+		state = drm_atomic_helper_duplicate_bridge_state(bridge);
+
+	return &state->base;
+}
+
+static void
+drm_bridge_atomic_destroy_priv_state(struct drm_private_obj *obj,
+                                     struct drm_private_state *s)
+{
+	struct drm_bridge_state *state = drm_priv_to_bridge_state(s);
+	struct drm_bridge *bridge = drm_priv_to_bridge(obj);
+
+	if (bridge->funcs->atomic_destroy_state)
+		bridge->funcs->atomic_destroy_state(bridge, state);
+	else
+		drm_atomic_helper_destroy_bridge_state(bridge, state);
+}
+
+static const struct drm_private_state_funcs drm_bridge_priv_state_funcs = {
+	.atomic_duplicate_state = drm_bridge_atomic_duplicate_priv_state,
+	.atomic_destroy_state = drm_bridge_atomic_destroy_priv_state,
+};
+
 /**
  * drm_bridge_attach - attach the bridge to an encoder's chain
  *
@@ -114,6 +146,7 @@ EXPORT_SYMBOL(drm_bridge_remove);
 int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 		      struct drm_bridge *previous)
 {
+	struct drm_bridge_state *state;
 	int ret;
 
 	if (!encoder || !bridge)
@@ -130,12 +163,23 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 
 	if (bridge->funcs->attach) {
 		ret = bridge->funcs->attach(bridge);
-		if (ret < 0) {
-			bridge->dev = NULL;
-			bridge->encoder = NULL;
-			return ret;
-		}
+		if (ret < 0)
+			goto err_reset_bridge;
 	}
+
+	if (bridge->funcs->atomic_duplicate_state)
+		state = bridge->funcs->atomic_duplicate_state(bridge);
+	else
+		state = drm_atomic_helper_duplicate_bridge_state(bridge);
+
+	if (!state) {
+		ret = -ENOMEM;
+		goto err_detach_bridge;
+	}
+
+	drm_atomic_private_obj_init(bridge->dev, &bridge->base,
+				    &state->base,
+				    &drm_bridge_priv_state_funcs);
 
 	if (previous)
 		list_add(&bridge->chain_node, &previous->chain_node);
@@ -143,6 +187,15 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 		list_add(&bridge->chain_node, &encoder->bridge_chain);
 
 	return 0;
+
+err_detach_bridge:
+	if (bridge->funcs->detach)
+		bridge->funcs->detach(bridge);
+
+err_reset_bridge:
+	bridge->dev = NULL;
+	bridge->encoder = NULL;
+	return ret;
 }
 EXPORT_SYMBOL(drm_bridge_attach);
 
@@ -492,6 +545,82 @@ void drm_atomic_bridge_chain_enable(struct drm_encoder *encoder,
 	}
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_enable);
+
+/**
+ * drm_atomic_helper_init_bridge_state() - Initializes a bridge state
+ * @bridge this state is referring to
+ * @state: bridge state to initialize
+ *
+ * For now it's just a memset(0) plus a state->bridge assignment. Might
+ * be extended in the future.
+ */
+void drm_atomic_helper_init_bridge_state(struct drm_bridge *bridge,
+					 struct drm_bridge_state *state)
+{
+	memset(state, 0, sizeof(*state));
+	state->bridge = bridge;
+}
+EXPORT_SYMBOL(drm_atomic_helper_init_bridge_state);
+
+/**
+ * drm_atomic_helper_copy_bridge_state() - Copy the content of a bridge state
+ * @bridge: bridge the old and new state are referring to
+ * @old: previous bridge state to copy from
+ * @new: new bridge state to copy to
+ *
+ * Should be used by custom &drm_bridge_funcs.atomic_duplicate() implementation
+ * to copy the previous state into the new object.
+ */
+void drm_atomic_helper_copy_bridge_state(struct drm_bridge *bridge,
+					 const struct drm_bridge_state *old,
+					 struct drm_bridge_state *new)
+{
+	*new = *old;
+}
+EXPORT_SYMBOL(drm_atomic_helper_copy_bridge_state);
+
+/**
+ * drm_atomic_helper_duplicate_bridge_state() - Default duplicate state helper
+ * @bridge: bridge containing the state to duplicate
+ *
+ * Default implementation of &drm_bridge_funcs.atomic_duplicate().
+ *
+ * RETURNS:
+ * a valid state object or NULL if the allocation fails.
+ */
+struct drm_bridge_state *
+drm_atomic_helper_duplicate_bridge_state(struct drm_bridge *bridge)
+{
+	struct drm_bridge_state *old = NULL, *new;
+
+	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	if (!new)
+		return NULL;
+
+	if (bridge->base.state) {
+		old = drm_priv_to_bridge_state(bridge->base.state);
+		drm_atomic_helper_copy_bridge_state(bridge, old, new);
+	} else {
+		drm_atomic_helper_init_bridge_state(bridge, new);
+	}
+
+	return new;
+}
+EXPORT_SYMBOL(drm_atomic_helper_duplicate_bridge_state);
+
+/**
+ * drm_atomic_helper_destroy_bridge_state() - Default destroy state helper
+ * @bridge: the bridge this state refers to
+ * @state: state object to destroy
+ *
+ * Just a simple kfree() for now.
+ */
+void drm_atomic_helper_destroy_bridge_state(struct drm_bridge *bridge,
+					    struct drm_bridge_state *state)
+{
+	kfree(state);
+}
+EXPORT_SYMBOL(drm_atomic_helper_destroy_bridge_state);
 
 #ifdef CONFIG_OF
 /**

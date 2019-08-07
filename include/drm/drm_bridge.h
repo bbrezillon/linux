@@ -25,12 +25,29 @@
 
 #include <linux/list.h>
 #include <linux/ctype.h>
+#include <drm/drm_atomic.h>
 #include <drm/drm_mode_object.h>
 #include <drm/drm_modes.h>
 
 struct drm_bridge;
 struct drm_bridge_timings;
 struct drm_panel;
+
+/**
+ * struct drm_bridge_state - Atomic bridge state object
+ * @base: inherit from &drm_private_state
+ * @bridge: the bridge this state refers to
+struct drm_bridge_state {
+	struct drm_private_state base;
+
+	struct drm_bridge *bridge;
+};
+
+static inline struct drm_bridge_state *
+drm_priv_to_bridge_state(struct drm_private_state *priv)
+{
+	return container_of(priv, struct drm_bridge_state, base);
+}
 
 /**
  * struct drm_bridge_funcs - drm_bridge control functions
@@ -337,6 +354,30 @@ struct drm_bridge_funcs {
 	 */
 	void (*atomic_post_disable)(struct drm_bridge *bridge,
 				    struct drm_atomic_state *state);
+
+	/**
+	 * @atomic_duplicate_state:
+	 *
+	 * Duplicate the current bridge state object.
+	 *
+	 * Note that this function can be called when current bridge state is
+	 * NULL. In this case, implementations should either implement HW
+	 * readback or initialize the state with sensible default values.
+	 *
+	 * RETURNS:
+	 * A valid drm_bridge_state object or NULL if the allocation fails.
+	 */
+	struct drm_bridge_state *(*atomic_duplicate_state)(struct drm_bridge *bridge);
+
+	/**
+	 * @atomic_duplicate_state:
+	 *
+	 * Destroy a bridge state object previously allocated by
+	 * &drm_bridge_funcs.atomic_duplicate_state() or
+	 * &drm_bridge_funcs.atomic_get_initial_state().
+	 */
+	void (*atomic_destroy_state)(struct drm_bridge *bridge,
+				     struct drm_bridge_state *state);
 };
 
 /**
@@ -379,6 +420,8 @@ struct drm_bridge_timings {
  * struct drm_bridge - central DRM bridge control structure
  */
 struct drm_bridge {
+	/** @base: inherit from &drm_private_object */
+	struct drm_private_obj base;
 	/** @dev: DRM device this bridge belongs to */
 	struct drm_device *dev;
 	/** @encoder: encoder to which this bridge is connected */
@@ -402,6 +445,12 @@ struct drm_bridge {
 	/** @driver_private: pointer to the bridge driver's internal context */
 	void *driver_private;
 };
+
+static inline struct drm_bridge *
+drm_priv_to_bridge(struct drm_private_obj *priv)
+{
+	return container_of(priv, struct drm_bridge, base);
+}
 
 void drm_bridge_add(struct drm_bridge *bridge);
 void drm_bridge_remove(struct drm_bridge *bridge);
@@ -437,6 +486,55 @@ void drm_atomic_bridge_chain_pre_enable(struct drm_encoder *encoder,
 					struct drm_atomic_state *state);
 void drm_atomic_bridge_chain_enable(struct drm_encoder *encoder,
 				    struct drm_atomic_state *state);
+
+void drm_atomic_helper_init_bridge_state(struct drm_bridge *bridge,
+					 struct drm_bridge_state *state);
+void drm_atomic_helper_copy_bridge_state(struct drm_bridge *bridge,
+					 const struct drm_bridge_state *old,
+					 struct drm_bridge_state *new);
+struct drm_bridge_state *
+drm_atomic_helper_duplicate_bridge_state(struct drm_bridge *bridge);
+void drm_atomic_helper_destroy_bridge_state(struct drm_bridge *bridge,
+					    struct drm_bridge_state *state);
+
+static inline struct drm_bridge_state *
+drm_atomic_get_bridge_state(struct drm_atomic_state *state,
+			    struct drm_bridge *bridge)
+{
+	struct drm_private_state *obj_state;
+
+	obj_state = drm_atomic_get_private_obj_state(state, &bridge->base);
+	if (!obj_state)
+		return NULL;
+
+	return drm_priv_to_bridge_state(obj_state);
+}
+
+static inline struct drm_bridge_state *
+drm_atomic_get_old_bridge_state(struct drm_atomic_state *state,
+				struct drm_bridge *bridge)
+{
+	struct drm_private_state *obj_state;
+
+	obj_state = drm_atomic_get_old_private_obj_state(state, &bridge->base);
+	if (!obj_state)
+		return NULL;
+
+	return drm_priv_to_bridge_state(obj_state);
+}
+
+static inline struct drm_bridge_state *
+drm_atomic_get_new_bridge_state(struct drm_atomic_state *state,
+				struct drm_bridge *bridge)
+{
+	struct drm_private_state *obj_state;
+
+	obj_state = drm_atomic_get_new_private_obj_state(state, &bridge->base);
+	if (!obj_state)
+		return NULL;
+
+	return drm_priv_to_bridge_state(obj_state);
+}
 
 #ifdef CONFIG_DRM_PANEL_BRIDGE
 struct drm_bridge *drm_panel_bridge_add(struct drm_panel *panel,
