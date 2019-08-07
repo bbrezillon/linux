@@ -115,8 +115,18 @@ static int imx_pd_encoder_atomic_check(struct drm_encoder *encoder,
 	struct imx_crtc_state *imx_crtc_state = to_imx_crtc_state(crtc_state);
 	struct drm_display_info *di = &conn_state->connector->display_info;
 	struct imx_parallel_display *imxpd = enc_to_imxpd(encoder);
+	struct drm_bridge_state *bridge_state = NULL;
+	struct drm_bridge *bridge;
 
-	if (!imxpd->bus_format && di->num_bus_formats) {
+	bridge = drm_bridge_chain_get_first_bridge(encoder);
+	if (bridge)
+		bridge_state = drm_atomic_get_new_bridge_state(crtc_state->state,
+							       bridge);
+
+	if (bridge_state && bridge_state->input_bus_cfg.fmt) {
+		imx_crtc_state->bus_format = bridge_state->input_bus_cfg.fmt;
+		imx_crtc_state->bus_flags = bridge_state->input_bus_cfg.flags;
+	} else if (!imxpd->bus_format && di->num_bus_formats) {
 		imx_crtc_state->bus_flags = di->bus_flags;
 		imx_crtc_state->bus_format = di->bus_formats[0];
 	} else {
@@ -152,10 +162,18 @@ static const struct drm_encoder_helper_funcs imx_pd_encoder_helper_funcs = {
 	.atomic_check = imx_pd_encoder_atomic_check,
 };
 
+static const u32 imx_pd_bus_fmts[] = {
+	MEDIA_BUS_FMT_RGB888_1X24,
+	MEDIA_BUS_FMT_RGB565_1X16,
+	MEDIA_BUS_FMT_RGB666_1X18,
+	MEDIA_BUS_FMT_RGB666_1X24_CPADHI,
+};
+
 static int imx_pd_register(struct drm_device *drm,
 	struct imx_parallel_display *imxpd)
 {
 	struct drm_encoder *encoder = &imxpd->encoder;
+	struct drm_bus_caps *bus_caps = &encoder->output_bus_caps;
 	int ret;
 
 	ret = imx_drm_encoder_parse_of(drm, encoder, imxpd->dev->of_node);
@@ -172,6 +190,14 @@ static int imx_pd_register(struct drm_device *drm,
 	drm_encoder_helper_add(encoder, &imx_pd_encoder_helper_funcs);
 	drm_encoder_init(drm, encoder, &imx_pd_encoder_funcs,
 			 DRM_MODE_ENCODER_NONE, NULL);
+
+	if (imxpd->bus_format) {
+		bus_caps->supported_fmts = &imxpd->bus_format;
+		bus_caps->num_supported_fmts = 1;
+	} else {
+		bus_caps->supported_fmts = imx_pd_bus_fmts;
+		bus_caps->num_supported_fmts = ARRAY_SIZE(imx_pd_bus_fmts);
+	}
 
 	if (!imxpd->bridge) {
 		drm_connector_helper_add(&imxpd->connector,
