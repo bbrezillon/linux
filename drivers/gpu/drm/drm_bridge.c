@@ -581,6 +581,193 @@ void drm_atomic_bridge_chain_enable(struct drm_encoder *encoder,
 }
 EXPORT_SYMBOL(drm_atomic_bridge_chain_enable);
 
+int drm_find_best_bus_format(const struct drm_bus_caps *a,
+			     const struct drm_bus_caps *b,
+			     const struct drm_display_mode *mode,
+			     u32 *selected_bus_fmt)
+{
+	unsigned int i, j;
+
+	/*
+	 * Some drm_bridge/drm_encoder don't care about the input/output bus
+	 * format, let's set the format to zero in that case (this is only
+	 * valid if both side of the link don't care).
+	 */
+	if (!a->num_supported_fmts && !b->num_supported_fmts) {
+		*selected_bus_fmt = 0;
+		return 0;
+	} else if (b->num_supported_fmts > 1 && b->supported_fmts) {
+		*selected_bus_fmt = b->supported_fmts[0];
+		return 0;
+	} else if (a->num_supported_fmts > 1 && a->supported_fmts) {
+		*selected_bus_fmt = a->supported_fmts[0];
+		return 0;
+	} else if (!a->num_supported_fmts || !a->supported_fmts ||
+		   !b->num_supported_fmts || !b->supported_fmts) {
+		return -EINVAL;
+	}
+
+	/*
+	 * TODO:
+	 * Dummy algo picking the first match. We probably want something
+	 * smarter where the narrowest format (in term of bus width) that
+	 * does not incur data loss is picked, and if all possible formats
+	 * are lossy, pick the one that's less lossy among all the choices
+	 * we have. In order to do that we'd need to convert MEDIA_BUS_FMT_
+	 * modes into something like drm_format_info.
+	 */
+	for (i = 0; i < a->num_supported_fmts; i++) {
+		for (j = 0; j < b->num_supported_fmts; j++) {
+			if (a->supported_fmts[i] == b->supported_fmts[j]) {
+				*selected_bus_fmt = a->supported_fmts[i];
+				return 0;
+			}
+		}
+	}
+
+	return -EINVAL;
+}
+EXPORT_SYMBOL(drm_find_best_bus_format);
+
+/**
+ * drm_atomic_bridge_choose_input_bus_cfg() - Choose bus config for the input
+ *					      end
+ * @bridge_state: bridge state
+ * @crtc_state: CRTC state
+ * @conn_state: connector state
+ *
+ * Choose a bus format for the input side of a bridge based on what the
+ * previous bridge in the chain and this bridge support. Can be called from
+ * bridge drivers' &drm_bridge_funcs.atomic_check() implementation.
+ *
+ * RETURNS:
+ * 0 if a matching format was found, a negative error code otherwise
+ */
+int
+drm_atomic_bridge_choose_input_bus_cfg(struct drm_bridge_state *bridge_state,
+				       struct drm_crtc_state *crtc_state,
+				       struct drm_connector_state *conn_state)
+{
+	struct drm_bridge *self = bridge_state->bridge;
+	struct drm_bus_caps *prev_output_bus_caps;
+	struct drm_bridge *prev;
+	int ret;
+
+	prev = drm_bridge_chain_get_prev_bridge(self);
+	if (!prev)
+		prev_output_bus_caps = &self->encoder->output_bus_caps;
+	else
+		prev_output_bus_caps = &prev->output_bus_caps;
+
+	ret = drm_find_best_bus_format(prev_output_bus_caps,
+				       &self->input_bus_caps, &crtc_state->mode,
+				       &bridge_state->input_bus_cfg.fmt);
+	if (ret)
+		return ret;
+
+	/*
+	 * TODO:
+	 * Should we fill/check the ->flag field too?
+	 */
+	return 0;
+}
+EXPORT_SYMBOL(drm_atomic_bridge_choose_input_bus_cfg);
+
+/**
+ * drm_atomic_bridge_choose_output_bus_cfg() - Choose bus config for the output
+ *					       end
+ * @bridge_state: bridge state
+ * @crtc_state: CRTC state
+ * @conn_state: connector state
+ *
+ * Choose a bus format for the output side of a bridge based on what the next
+ * bridge in the chain and this bridge support. Can be called from bridge
+ * drivers' &drm_bridge_funcs.atomic_check() implementation.
+ *
+ * RETURNS:
+ * 0 if a matching format was found, a negative error code otherwise
+ */
+int
+drm_atomic_bridge_choose_output_bus_cfg(struct drm_bridge_state *bridge_state,
+					struct drm_crtc_state *crtc_state,
+					struct drm_connector_state *conn_state)
+{
+	struct drm_atomic_state *state = crtc_state->state;
+	struct drm_bridge *self = bridge_state->bridge;
+	struct drm_bridge_state *next_bridge_state;
+	struct drm_bridge *next;
+	u32 fmt;
+
+	next = drm_bridge_chain_get_next_bridge(self);
+	if (!next) {
+		struct drm_connector *conn = conn_state->connector;
+		struct drm_display_info *di = &conn->display_info;
+
+		/*
+		 * FIXME:
+		 * We currently pick the first supported format
+		 * unconditionally. It seems to fit all current use cases but
+		 * might be too limited for panels/displays that can configure
+		 * the bus format dynamically.
+		 */
+		if (di->num_bus_formats && di->bus_formats)
+			bridge_state->output_bus_cfg.fmt = di->bus_formats[0];
+		else
+			bridge_state->output_bus_cfg.fmt = 0;
+
+		bridge_state->output_bus_cfg.flags = di->bus_flags;
+		return 0;
+	}
+
+	/*
+	 * We expect output_bus_caps to contain at least one format. Note
+	 * that don't care about bus format negotiation can simply not
+	 * call this helper.
+	 */
+	if (!self->output_bus_caps.num_supported_fmts ||!
+	    !self->output_bus_caps.supported_fmts)
+		return -EINVAL;
+
+	next_bridge_state = drm_atomic_get_new_bridge_state(state, next);
+
+	/*
+	 * The next bridge is expected to have called
+	 * &drm_atomic_bridge_choose_input_bus_cfg() as part of its
+	 * &drm_bridge_funcs.atomic_check() implementation, but this hook is
+	 * optional, and even if it's implemented, calling
+	 * &drm_atomic_bridge_choose_input_bus_cfg() is not mandated.
+	 * If fmt is zero, that means the next element in the chain doesn't
+	 * care about bus format negotiation (probably because there's only
+	 * one possible setting). In that case, we still have to select one
+	 * bus format for the output port of our bridge, and this is only
+	 * possible if the bridge supports only one format.
+	 */
+	fmt = next_bridge_state->input_bus_cfg.fmt;
+	if (fmt) {
+		unsigned int i;
+
+		for (i = 0; i < self->output_bus_caps.num_supported_fmts; i++) {
+			if (self->output_bus_caps.supported_fmts[i] == fmt)
+				break;
+		}
+
+		if (i == self->output_bus_caps.num_supported_fmts)
+			return -ENOTSUPP;
+	} else if (self->output_bus_caps.num_supported_fmts == 1) {
+		fmt = self->output_bus_caps.supported_fmts[0];
+	} else {
+		return -EINVAL;
+	}
+
+	/*
+	 * TODO:
+	 * Should we fill/check the ->flag field too?
+	 */
+	bridge_state->output_bus_cfg.fmt = fmt;
+	return 0;
+}
+EXPORT_SYMBOL(drm_atomic_bridge_choose_output_bus_cfg);
+
 static int drm_atomic_bridge_check(struct drm_bridge *bridge,
 				   struct drm_crtc_state *crtc_state,
 				   struct drm_connector_state *conn_state)

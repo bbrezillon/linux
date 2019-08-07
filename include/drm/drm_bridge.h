@@ -34,13 +34,44 @@ struct drm_bridge_timings;
 struct drm_panel;
 
 /**
+ * struct drm_bus_cfg - bus configuration
+ * @fmt: format used on this bus
+ * @flags: DRM_BUS_ flags used on this bus
+ *
+ * Encodes the bus format and bus flags used by one end of the bridge or
+ * by the encoder output.
+ */
+struct drm_bus_cfg {
+	u32 fmt;
+	u32 flags;
+};
+
+/**
+ * struct drm_bus_caps - bus capabilities
+ * @supported_fmts: array of MEDIA_BUS_FMT_ formats
+ * @num_supported_fmts: size of the supported_fmts array
+ *
+ * Used by the core to negotiate the bus format at runtime.
+ */
+struct drm_bus_caps {
+	const u32 *supported_fmts;
+	unsigned int num_supported_fmts;
+};
+
+/**
  * struct drm_bridge_state - Atomic bridge state object
  * @base: inherit from &drm_private_state
  * @bridge: the bridge this state refers to
+ * @input_bus_info: input bus information
+ * @output_bus_info: output bus information
+ */
 struct drm_bridge_state {
 	struct drm_private_state base;
 
 	struct drm_bridge *bridge;
+
+	struct drm_bus_cfg input_bus_cfg;
+	struct drm_bus_cfg output_bus_cfg;
 };
 
 static inline struct drm_bridge_state *
@@ -464,6 +495,9 @@ struct drm_bridge {
 	const struct drm_bridge_funcs *funcs;
 	/** @driver_private: pointer to the bridge driver's internal context */
 	void *driver_private;
+
+	struct drm_bus_caps input_bus_caps;
+	struct drm_bus_caps output_bus_caps;
 };
 
 static inline struct drm_bridge *
@@ -478,6 +512,14 @@ struct drm_bridge *of_drm_find_bridge(struct device_node *np);
 int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 		      struct drm_bridge *previous);
 
+int
+drm_atomic_bridge_choose_input_bus_cfg(struct drm_bridge_state *bridge_state,
+				       struct drm_crtc_state *crtc_state,
+				       struct drm_connector_state *conn_state);
+int
+drm_atomic_bridge_choose_output_bus_cfg(struct drm_bridge_state *bridge_state,
+					struct drm_crtc_state *crtc_state,
+					struct drm_connector_state *conn_state);
 struct drm_bridge *
 drm_bridge_chain_get_first_bridge(struct drm_encoder *encoder);
 struct drm_bridge *
@@ -560,6 +602,11 @@ drm_atomic_get_new_bridge_state(struct drm_atomic_state *state,
 
 	return drm_priv_to_bridge_state(obj_state);
 }
+
+int drm_find_best_bus_format(const struct drm_bus_caps *a,
+			     const struct drm_bus_caps *b,
+			     const struct drm_display_mode *mode,
+			     u32 *selected_bus_fmt);
 
 #ifdef CONFIG_DRM_PANEL_BRIDGE
 struct drm_bridge *drm_panel_bridge_add(struct drm_panel *panel,

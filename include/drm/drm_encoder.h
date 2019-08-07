@@ -25,6 +25,7 @@
 
 #include <linux/list.h>
 #include <linux/ctype.h>
+#include <drm/drm_bridge.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_mode_object.h>
@@ -184,6 +185,11 @@ struct drm_encoder {
 	 * functions as part of its encoder enable/disable handling.
 	 */
 	uint32_t custom_bridge_enable_disable_seq : 1;
+
+	/**
+	 * @output_bus_caps: Supported output bus caps
+	 */
+	struct drm_bus_caps output_bus_caps;
 };
 
 #define obj_to_encoder(x) container_of(x, struct drm_encoder, base)
