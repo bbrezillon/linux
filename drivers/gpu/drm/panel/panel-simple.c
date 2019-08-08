@@ -2937,6 +2937,39 @@ static const struct panel_desc toshiba_lt089ac29000 = {
 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
 };
 
+static const struct drm_display_mode toshiba_lta089ac29000_mode = {
+	.clock = 79500,
+	.hdisplay = 1280,
+	.hsync_start = 1280 + 192,
+	.hsync_end = 1280 + 192 + 128,
+	.htotal = 1280 + 192 + 128 + 64,
+	.vdisplay = 768,
+	.vsync_start = 768 + 20,
+	.vsync_end = 768 + 20 + 7,
+	.vtotal = 768 + 20 + 7 + 3,
+	.vrefresh = 60,
+};
+
+static const struct panel_desc toshiba_lta089ac29000 = {
+	.modes = &toshiba_lta089ac29000_mode,
+	.num_modes = 1,
+	.size = {
+		.width = 194,
+		.height = 116,
+	},
+	/*
+	 * FIXME:
+	 * The panel supports 2 bus formats: jeida-24 and jeida-18. The
+	 * mode is selected through the 8b6b_SEL pin. If anyone ever needs
+	 * support for jeida-18 we should probably parse the 'data-mapping'
+	 * property.
+	 * In the unlikely event where 8b6b_SEL is connected to a GPIO, we'd
+	 * need a new infra to allow bus format negotiation at the panel level.
+	 */
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
+	.bus_flags = DRM_BUS_FLAG_DE_HIGH | DRM_BUS_FLAG_PIXDATA_DRIVE_POSEDGE,
+};
+
 static const struct drm_display_mode tpk_f07a_0102_mode = {
 	.clock = 33260,
 	.hdisplay = 800,
@@ -3392,6 +3425,9 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "toshiba,lt089ac29000",
 		.data = &toshiba_lt089ac29000,
+	}, {
+		.compatible = "toshiba,lta089ac29000",
+		.data = &toshiba_lta089ac29000,
 	}, {
 		.compatible = "tpk,f07a-0102",
 		.data = &tpk_f07a_0102,
