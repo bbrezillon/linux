@@ -3424,7 +3424,7 @@ static const struct of_device_id platform_of_match[] = {
 		.data = &ti_nspire_classic_lcd_panel,
 	}, {
 		.compatible = "toshiba,lt089ac29000",
-		.data = &toshiba_lt089ac29000,
+		.data = &toshiba_lta089ac29000,
 	}, {
 		.compatible = "toshiba,lta089ac29000",
 		.data = &toshiba_lta089ac29000,
