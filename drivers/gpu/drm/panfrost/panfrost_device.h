@@ -52,7 +52,7 @@ struct panfrost_devfreq_slot {
 	ktime_t busy_time;
 	ktime_t idle_time;
 	ktime_t time_last_update;
-	bool busy;
+	int busy;
 };
 
 struct panfrost_device {
@@ -76,7 +76,7 @@ struct panfrost_device {
 	struct panfrost_mmu *mmu;
 	struct panfrost_job_slot *js;
 
-	struct panfrost_job *jobs[NUM_JOB_SLOTS];
+	struct panfrost_job *jobs[NUM_JOB_SLOTS][2];
 	struct list_head scheduled_jobs;
 
 	struct panfrost_perfcnt *perfcnt;
