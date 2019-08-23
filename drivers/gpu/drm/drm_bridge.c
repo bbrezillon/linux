@@ -879,6 +879,39 @@ drm_atomic_helper_bridge_propagate_bus_fmt(struct drm_bridge *bridge,
 EXPORT_SYMBOL(drm_atomic_helper_bridge_propagate_bus_fmt);
 
 /**
+ * drm_atomic_helper_bridge_get_input_bus_fmts() - Helper for
+ *		&drm_bridge_funcs.get_input_bus_fmts()
+ * @num_xcoding: number of trancoding entries
+ * @xcoding: array of transcoding caps
+ * @output_fmt: the output format tested by the core
+ * @num_input_fmts: will contain the number of input formats that can be
+ *		    converted into @output_fmt by the bridge
+ * @input_fmts: input formats that can be converted into @output_fmt
+ *
+ * This helper simply iterates over all @xcoding entries gathering input
+ * formats that can be converted into the requested @output_fmt.
+ */
+void drm_atomic_helper_bridge_get_input_bus_fmts(unsigned int num_xcoding,
+				const struct drm_bus_fmt_xcoding *xcoding,
+				u32 output_fmt,
+				unsigned int *num_input_fmts,
+				u32 *input_fmts)
+{
+	unsigned int i, j;
+
+	for (i = 0, j = 0; i < num_xcoding; i++) {
+		if (xcoding[i].output_fmt == output_fmt) {
+			if (input_fmts)
+				input_fmts[j] = xcoding[i].input_fmt;
+			j++;
+		}
+	}
+
+	*num_input_fmts = j;
+}
+EXPORT_SYMBOL(drm_atomic_helper_bridge_get_input_bus_fmts);
+
+/**
  * drm_atomic_bridge_chain_check() - Do an atomic check on the bridge chain
  * @bridge: bridge control structure
  * @crtc_state: new CRTC state

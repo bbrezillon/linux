@@ -35,6 +35,19 @@ struct drm_bridge_timings;
 struct drm_panel;
 
 /**
+ * struct drm_bus_fmt_xcoding - bus format transcoding descriptor
+ * @input_fmt: input format
+ * @output_fmt: output format
+ *
+ * Defines a transcoding capability. Drivers can pass an array of
+ * transcoding definitions to &drm_atomic_helper_bridge_get_input_bus_fmts().
+ */
+struct drm_bus_fmt_xcoding {
+	u32 input_fmt;
+	u32 output_fmt;
+};
+
+/**
  * struct drm_bus_cfg - bus configuration
  * @fmt: format used on this bus. This field should not be directly modified
  *	 by drivers (&drm_atomic_bridge_chain_select_bus_fmts() takes care of
@@ -710,6 +723,11 @@ void __drm_atomic_helper_bridge_duplicate_state(struct drm_bridge *bridge,
 						struct drm_bridge_state *new);
 struct drm_bridge_state *
 drm_atomic_helper_bridge_duplicate_state(struct drm_bridge *bridge);
+void drm_atomic_helper_bridge_get_input_bus_fmts(unsigned int num_xcoding,
+                                const struct drm_bus_fmt_xcoding *xcoding,
+                                u32 output_fmt,
+                                unsigned int *num_input_fmts,
+                                u32 *input_fmts);
 
 static inline struct drm_bridge_state *
 drm_atomic_get_bridge_state(struct drm_atomic_state *state,
