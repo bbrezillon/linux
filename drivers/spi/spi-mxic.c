@@ -12,6 +12,7 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
+#include <linux/mtd/nand-ecc-mxic.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/spi/spi.h>
@@ -147,6 +148,8 @@
 #define DMAS_CTRL		0x9c
 #define DMAS_CTRL_EN		BIT(31)
 #define DMAS_CTRL_DIR_READ	BIT(30)
+#define DMAS_CTRL_DIR_WRITE	0
+#define DMAS_CTRL_DATA_BUS_IO(width) (((fls(width) - 1) & 0x7) << 6)
 
 #define DATA_STROB		0xa0
 #define DATA_STROB_EDO_EN	BIT(2)
@@ -167,6 +170,7 @@
 #define HW_TEST(x)		(0xe0 + ((x) * 4))
 
 struct mxic_spi {
+	struct device *dev;
 	struct clk *ps_clk;
 	struct clk *send_clk;
 	struct clk *send_dly_clk;
@@ -350,7 +354,7 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 {
 	struct mxic_spi *mxic = spi_master_get_devdata(mem->spi->master);
 	int nio = 1, i, ret;
-	u32 ss_ctrl;
+	u32 ss_ctrl, sts;
 	u8 addr[8];
 
 	ret = mxic_spi_set_freq(mxic, mem->spi->max_speed_hz);
@@ -404,12 +408,32 @@ static int mxic_spi_mem_exec_op(struct spi_mem *mem,
 	if (ret)
 		goto out;
 
-	ret = mxic_spi_data_xfer(mxic,
-				 op->data.dir == SPI_MEM_DATA_OUT ?
-				 op->data.buf.out : NULL,
-				 op->data.dir == SPI_MEM_DATA_IN ?
-				 op->data.buf.in : NULL,
-				 op->data.nbytes);
+	/* Only use ECC when accessing page/OOB data  */
+	if (op->data.nbytes > 1 && mxic_ecc_use_engine(mxic->dev)) {
+		u32 dma_dir = op->data.dir == SPI_MEM_DATA_IN ?
+			      DMAS_CTRL_DIR_READ : DMAS_CTRL_DIR_WRITE;
+
+		/* Enable DMA slave mode before starting ECC operation */
+		writel(DMAS_CTRL_EN | DMAS_CTRL_DATA_BUS_IO(1) | dma_dir,
+		       mxic->regs + DMAS_CTRL);
+		ret = mxic_ecc_data_xfer(mxic->dev);
+		if (!ret) {
+			/* Wait the SPI controller to be ready */
+			ret = readl_poll_timeout(mxic->regs + INT_STS, sts,
+						 sts & INT_TX_EMPTY, 0,
+						 USEC_PER_SEC);
+		}
+
+		/* Disable DMA slave mode if enabled */
+		writel(0, mxic->regs + DMAS_CTRL);
+	} else {
+		ret = mxic_spi_data_xfer(mxic,
+					 op->data.dir == SPI_MEM_DATA_OUT ?
+					 op->data.buf.out : NULL,
+					 op->data.dir == SPI_MEM_DATA_IN ?
+					 op->data.buf.in : NULL,
+					 op->data.nbytes);
+	}
 
 out:
 	writel(readl(mxic->regs + HC_CFG) & ~HC_CFG_MAN_CS_ASSERT,
@@ -531,6 +555,7 @@ static int mxic_spi_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, master);
 
 	mxic = spi_master_get_devdata(master);
+	mxic->dev = &pdev->dev;
 
 	master->dev.of_node = pdev->dev.of_node;
 
