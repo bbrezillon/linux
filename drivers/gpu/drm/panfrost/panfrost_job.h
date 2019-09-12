@@ -11,6 +11,14 @@ struct panfrost_device;
 struct panfrost_gem_object;
 struct panfrost_file_priv;
 
+struct panfrost_job_bo_desc {
+	struct drm_gem_object *obj;
+	struct dma_fence *excl;
+	struct dma_fence **shared;
+	unsigned int shared_count;
+	u32 flags;
+};
+
 struct panfrost_job {
 	struct drm_sched_job base;
 
@@ -31,8 +39,7 @@ struct panfrost_job {
 	__u32 flush_id;
 
 	/* Exclusive fences we have taken from the BOs to wait for */
-	struct dma_fence **implicit_fences;
-	struct drm_gem_object **bos;
+	struct panfrost_job_bo_desc *bos;
 	u32 bo_count;
 
 	/* Fence to be signaled by drm-sched once its done with the job */

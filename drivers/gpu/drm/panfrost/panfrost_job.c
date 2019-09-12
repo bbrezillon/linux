@@ -192,24 +192,118 @@ end:
 	pm_runtime_put_autosuspend(pfdev->dev);
 }
 
-static void panfrost_acquire_object_fences(struct drm_gem_object **bos,
-					   int bo_count,
-					   struct dma_fence **implicit_fences)
+static int panfrost_acquire_object_fences(struct panfrost_job *job)
 {
-	int i;
+	int i, ret;
 
-	for (i = 0; i < bo_count; i++)
-		implicit_fences[i] = reservation_object_get_excl_rcu(bos[i]->resv);
+	for (i = 0; i < job->bo_count; i++) {
+		struct panfrost_job_bo_desc *bo = &job->bos[i];
+		struct reservation_object *robj = bo->obj->resv;
+
+		if (!(job->bos[i].flags & PANFROST_SUBMIT_BO_WRITE)) {
+			ret = reservation_object_reserve_shared(robj, 1);
+			if (ret)
+				return ret;
+		}
+
+		if (bo->flags & PANFROST_SUBMIT_BO_NO_IMPLICIT_FENCE)
+			continue;
+
+		if (!(bo->flags & PANFROST_SUBMIT_BO_WRITE)) {
+			bo->excl = reservation_object_get_excl_rcu(robj);
+			continue;
+		}
+
+		ret = reservation_object_get_fences_rcu(robj,
+							&bo->excl,
+							&bo->shared_count,
+							&bo->shared);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
-static void panfrost_attach_object_fences(struct drm_gem_object **bos,
-					  int bo_count,
-					  struct dma_fence *fence)
+static void panfrost_attach_object_fences(struct panfrost_job *job)
 {
 	int i;
 
-	for (i = 0; i < bo_count; i++)
-		reservation_object_add_excl_fence(bos[i]->resv, fence);
+	for (i = 0; i < job->bo_count; i++) {
+		struct drm_gem_object *obj = job->bos[i].obj;
+
+		if (job->bos[i].flags & PANFROST_SUBMIT_BO_WRITE)
+			reservation_object_add_excl_fence(obj->resv,
+						job->render_done_fence);
+		else
+			reservation_object_add_shared_fence(obj->resv,
+						job->render_done_fence);
+	}
+}
+
+static int panfrost_job_lock_bos(struct panfrost_job *job,
+				 struct ww_acquire_ctx *acquire_ctx)
+{
+	int contended = -1;
+	int i, ret;
+
+	ww_acquire_init(acquire_ctx, &reservation_ww_class);
+
+retry:
+	if (contended != -1) {
+		struct drm_gem_object *obj = job->bos[contended].obj;
+
+		ret = ww_mutex_lock_slow_interruptible(&obj->resv->lock,
+						       acquire_ctx);
+		if (ret) {
+			ww_acquire_done(acquire_ctx);
+			return ret;
+		}
+	}
+
+	for (i = 0; i < job->bo_count; i++) {
+		if (i == contended)
+			continue;
+
+		ret = ww_mutex_lock_interruptible(&job->bos[i].obj->resv->lock,
+						  acquire_ctx);
+		if (ret) {
+			int j;
+
+			for (j = 0; j < i; j++)
+				ww_mutex_unlock(&job->bos[j].obj->resv->lock);
+
+			if (contended != -1 && contended >= i) {
+				struct drm_gem_object *contended_obj;
+
+				contended_obj = job->bos[contended].obj;
+				ww_mutex_unlock(&contended_obj->resv->lock);
+			}
+
+			if (ret == -EDEADLK) {
+				contended = i;
+				goto retry;
+			}
+
+			ww_acquire_done(acquire_ctx);
+			return ret;
+		}
+	}
+
+	ww_acquire_done(acquire_ctx);
+
+	return 0;
+}
+
+static void panfrost_job_unlock_bos(struct panfrost_job *job,
+				    struct ww_acquire_ctx *acquire_ctx)
+{
+	int i;
+
+	for (i = 0; i < job->bo_count; i++)
+		ww_mutex_unlock(&job->bos[i].obj->resv->lock);
+
+	ww_acquire_fini(acquire_ctx);
 }
 
 int panfrost_job_push(struct panfrost_job *job)
@@ -222,8 +316,7 @@ int panfrost_job_push(struct panfrost_job *job)
 
 	mutex_lock(&pfdev->sched_lock);
 
-	ret = drm_gem_lock_reservations(job->bos, job->bo_count,
-					    &acquire_ctx);
+	ret = panfrost_job_lock_bos(job, &acquire_ctx);
 	if (ret) {
 		mutex_unlock(&pfdev->sched_lock);
 		return ret;
@@ -239,18 +332,16 @@ int panfrost_job_push(struct panfrost_job *job)
 
 	kref_get(&job->refcount); /* put by scheduler job completion */
 
-	panfrost_acquire_object_fences(job->bos, job->bo_count,
-				       job->implicit_fences);
+	panfrost_acquire_object_fences(job);
 
 	drm_sched_entity_push_job(&job->base, entity);
 
 	mutex_unlock(&pfdev->sched_lock);
 
-	panfrost_attach_object_fences(job->bos, job->bo_count,
-				      job->render_done_fence);
+	panfrost_attach_object_fences(job);
 
 unlock:
-	drm_gem_unlock_reservations(job->bos, job->bo_count, &acquire_ctx);
+	panfrost_job_unlock_bos(job, &acquire_ctx);
 
 	return ret;
 }
@@ -266,20 +357,22 @@ static void panfrost_job_cleanup(struct kref *ref)
 			dma_fence_put(job->in_fences[i]);
 		kvfree(job->in_fences);
 	}
-	if (job->implicit_fences) {
-		for (i = 0; i < job->bo_count; i++)
-			dma_fence_put(job->implicit_fences[i]);
-		kvfree(job->implicit_fences);
+
+	for (i = 0; i < job->bo_count; i++) {
+		unsigned int j;
+
+		dma_fence_put(job->bos[i].excl);
+		for (j = 0; j < job->bos[i].shared_count; j++)
+			dma_fence_put(job->bos[i].shared[j]);
 	}
+
 	dma_fence_put(job->done_fence);
 	dma_fence_put(job->render_done_fence);
 
-	if (job->bos) {
-		for (i = 0; i < job->bo_count; i++)
-			drm_gem_object_put_unlocked(job->bos[i]);
-		kvfree(job->bos);
-	}
+	for (i = 0; i < job->bo_count; i++)
+		drm_gem_object_put_unlocked(job->bos[i].obj);
 
+	kvfree(job->bos);
 	kfree(job);
 }
 
@@ -313,11 +406,22 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 		}
 	}
 
-	/* Implicit fences, max. one per BO */
+	/* Implicit fences */
 	for (i = 0; i < job->bo_count; i++) {
-		if (job->implicit_fences[i]) {
-			fence = job->implicit_fences[i];
-			job->implicit_fences[i] = NULL;
+		unsigned int j;
+
+		if (job->bos[i].excl) {
+			fence = job->bos[i].excl;
+			job->bos[i].excl = NULL;
+			return fence;
+		}
+
+		for (j = 0; j < job->bos[i].shared_count; j++) {
+			if (!job->bos[i].shared[j])
+				continue;
+
+			fence = job->bos[i].shared[j];
+			job->bos[i].shared[j] = NULL;
 			return fence;
 		}
 	}
