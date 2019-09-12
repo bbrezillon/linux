@@ -293,15 +293,19 @@ panfrost_ioctl_wait_bo(struct drm_device *dev, void *data,
 	struct drm_panfrost_wait_bo *args = data;
 	struct drm_gem_object *gem_obj;
 	unsigned long timeout = drm_timeout_abs_to_jiffies(args->timeout_ns);
+	bool wait_all = !(args->flags & PANFROST_WAIT_BO_WRITERS);
 
 	if (args->pad)
+		return -EINVAL;
+
+	if (args->flags & ~PANFROST_WAIT_BO_WRITERS)
 		return -EINVAL;
 
 	gem_obj = drm_gem_object_lookup(file_priv, args->handle);
 	if (!gem_obj)
 		return -ENOENT;
 
-	ret = reservation_object_wait_timeout_rcu(gem_obj->resv, true,
+	ret = reservation_object_wait_timeout_rcu(gem_obj->resv, wait_all,
 						  true, timeout);
 	if (!ret)
 		ret = timeout ? -ETIMEDOUT : -EBUSY;
