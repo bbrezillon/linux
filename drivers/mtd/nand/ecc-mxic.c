@@ -322,19 +322,32 @@ static int mxic_ecc_init_ctx(struct nand_device *nand)
 	writel(ECC_TYP(idx), eng->regs + DP_CONFIG);
 	conf->strength = possible_strength[idx];
 
-	/* Trigger each step manually in external mode */
-	writel(1, eng->regs + CHUNK_CNT);
+	/*
+	 * Trigger each step manually in external mode, while all steps should
+	 * be handled in one go directly by the internal DMA in pipelined mode.
+	 */
+	if (eng->drvdata->external)
+		writel(1, eng->regs + CHUNK_CNT);
+	else
+		writel(steps, eng->regs + CHUNK_CNT);
 
 	eng->steps = steps;
 	eng->data_step_sz = mtd->writesize / steps;
 	eng->oob_step_sz = mtd->oobsize / steps;
 
 	/*
-	 * Use a linear layout in external ECC engine mode (also called
-	 * 'integrated' in the spec) which is easy to handle.
+	 * Use a syndrome layout in pipelined mode to reduce the complexity of
+	 * the interaction between the ECC engine and the bus controller (also
+	 * called 'distributed' in the spec) while a linear layout is much more
+	 * easy to handle when in external ECC engine mode (also called
+	 * 'integrated' in the spec)
 	 */
-	writel(BURST_TYP_INCREASING | LAYOUT_TYP_INTEGRATED |
-	       TRANS_TYP_IO, eng->regs + HC_CONFIG);
+	if (eng->drvdata->external)
+		writel(BURST_TYP_INCREASING | LAYOUT_TYP_INTEGRATED |
+		       TRANS_TYP_IO, eng->regs + HC_CONFIG);
+	else
+		writel(BURST_TYP_INCREASING | LAYOUT_TYP_DISTRIBUTED |
+		       TRANS_TYP_DMA, eng->regs + HC_CONFIG);
 
 	sz = mtd->writesize + mtd->oobsize;
 	eng->databuf = kmalloc(sz, GFP_KERNEL);
@@ -595,11 +608,205 @@ static int mxic_ecc_finish_io_req_external(struct nand_device *nand,
 	return mxic_ecc_check_sum(eng, mtd);
 }
 
+/* Pipelined ECC engine (distributed layout) helpers */
+static int mxic_ecc_prepare_io_req_pipelined(struct nand_device *nand,
+					     struct nand_page_io_req *req)
+{
+	struct mxic_ecc_engine *eng = nand->ecc.ctx.priv;
+	struct mtd_info *mtd = nanddev_to_mtd(nand);
+	int nents;
+
+	if (req->mode != MTD_OPS_RAW ||
+	    (req->mode == MTD_OPS_RAW  && req->type == NAND_PAGE_READ)) {
+		eng->req = req;
+		eng->actual_req = *req;
+
+		/*
+		 * Ensure the full page is read/written (including OOB and the
+		 * additional status bytes) otherwise the correction and
+		 * the buffers reconstruction won't be effective.
+		 */
+		req->datalen = nanddev_page_size(nand);
+		req->ooblen = nanddev_per_page_oobsize(nand);
+		if (eng->actual_req.datalen < mtd->writesize) {
+			req->databuf.in = eng->databuf;
+			memset(req->databuf.in, 0xff, req->datalen);
+		}
+		if (eng->actual_req.ooblen < mtd->oobsize) {
+			req->oobbuf.in = eng->oobwithstat;
+			memset(req->oobbuf.in, 0xff,
+			       req->ooblen + eng->steps * STAT_BYTES);
+		}
+	}
+
+	if (req->mode == MTD_OPS_RAW)
+		return 0;
+
+	if (req->type == NAND_PAGE_READ) {
+		sg_set_buf(&eng->sg[0], req->databuf.in, req->datalen);
+		sg_set_buf(&eng->sg[1], eng->oobwithstat,
+			   req->ooblen + (eng->steps * STAT_BYTES));
+	} else {
+		sg_set_buf(&eng->sg[0], req->databuf.out, req->datalen);
+		sg_set_buf(&eng->sg[1], req->oobbuf.out, req->ooblen);
+	}
+	nents = dma_map_sg(eng->dev, eng->sg, 2, DMA_BIDIRECTIONAL);
+	if (!nents)
+		return -EINVAL;
+
+	writel(sg_dma_address(&eng->sg[0]), eng->regs + SDMA_MAIN_ADDR);
+	writel(sg_dma_address(&eng->sg[1]), eng->regs + SDMA_SPARE_ADDR);
+
+	mxic_ecc_enable_engine(eng);
+
+	return 0;
+}
+
+static struct mxic_ecc_engine *host_dev_to_eng(struct device *host_dev)
+{
+	struct device_node *eng_node;
+	struct platform_device *pdev;
+	struct nand_ecc_engine *ecceng;
+
+	eng_node = of_parse_phandle(host_dev->of_node, "ecc-engine", 0);
+	pdev = eng_node ? of_find_device_by_node(eng_node) : NULL;
+	ecceng = pdev ? nand_ecc_match_hw_engine(&pdev->dev) : NULL;
+
+	return ecceng ? ecceng->priv : NULL;
+}
+
+bool mxic_ecc_use_engine(struct device *host_dev)
+{
+	struct mxic_ecc_engine *eng = host_dev_to_eng(host_dev);
+
+	return eng ? eng->enabled : false;
+}
+
+int mxic_ecc_data_xfer(struct device *host_dev)
+{
+	struct mxic_ecc_engine *eng = host_dev_to_eng(host_dev);
+
+	return mxic_ecc_process_data(eng);
+}
+
+static int mxic_ecc_reconstruct_raw_buffers(struct mxic_ecc_engine *eng)
+{
+	unsigned int chunk_sz = eng->data_step_sz + eng->oob_step_sz;
+	unsigned int data_sz = eng->data_step_sz * eng->steps;
+	unsigned int tmp_sz = eng->oob_step_sz * eng->steps;
+	u8 *data_src = eng->req->databuf.in, *oob_src = eng->req->oobbuf.in;
+	int step;
+	u8 *tmp;
+
+	tmp = kmalloc(tmp_sz, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	/*
+	 * In raw mode, data and OOB are mixed with a syndrome layout across the
+	 * data and OOB buffer, reconstruct the data for the end user by:
+	 * 1- rebuilding the OOB area in a tmp buffer
+	 */
+	memcpy(tmp, oob_src, tmp_sz);
+	for (step = 0; step < eng->steps - 1; step++)
+		memcpy(tmp + (eng->oob_step_sz * step),
+		       data_src + eng->data_step_sz + (chunk_sz * step),
+		       eng->oob_step_sz);
+
+	/* 2- rebuilding the data area in the original data buffer */
+	for (step = 1; step < eng->steps - 1; step++)
+		memcpy(data_src + (eng->data_step_sz * step),
+		       data_src + (chunk_sz * step),
+		       eng->data_step_sz);
+	memcpy(data_src + data_sz - eng->data_step_sz,
+	       data_src + (chunk_sz * (eng->steps - 1)),
+	       eng->data_step_sz - eng->oob_step_sz);
+	memcpy(data_src + data_sz - eng->oob_step_sz, oob_src,
+	       eng->oob_step_sz);
+
+	/* 3- copying back the tmp buffer in the original OOB buffer */
+	memcpy(oob_src, tmp, tmp_sz);
+	kfree(tmp);
+
+	return 0;
+}
+
+static int mxic_ecc_finish_io_req_pipelined(struct nand_device *nand,
+					    struct nand_page_io_req *req)
+{
+	struct mxic_ecc_engine *eng = nand->ecc.ctx.priv;
+	struct mtd_info *mtd = nanddev_to_mtd(nand);
+	int ret = 0;
+
+	if (req->mode == MTD_OPS_RAW) {
+		if (req->type == NAND_PAGE_READ) {
+			ret = mxic_ecc_reconstruct_raw_buffers(eng);
+
+			req->datalen = eng->actual_req.datalen;
+			req->ooblen = eng->actual_req.ooblen;
+			if (eng->actual_req.datalen &&
+			    req->databuf.in != eng->actual_req.databuf.in)
+				memcpy(eng->actual_req.databuf.in,
+				       req->databuf.in + eng->actual_req.dataoffs,
+				       eng->actual_req.datalen);
+			if (eng->actual_req.ooblen &&
+			    req->oobbuf.in != eng->actual_req.oobbuf.in)
+				memcpy(eng->actual_req.oobbuf.in,
+				       req->oobbuf.in + eng->actual_req.ooboffs,
+				       eng->actual_req.ooblen);
+			req->databuf.in = eng->actual_req.databuf.in;
+			req->oobbuf.in = eng->actual_req.oobbuf.in;
+		}
+
+		return ret;
+	}
+
+	mxic_ecc_disable_engine(eng);
+
+	dma_unmap_sg(eng->dev, eng->sg, 2, DMA_BIDIRECTIONAL);
+
+	if (req->type == NAND_PAGE_READ) {
+		mxic_ecc_reconstruct_raw_buffers(eng);
+		mxic_ecc_reconstruct_oob(eng);
+
+		if (eng->actual_req.ooblen)
+			memcpy(eng->actual_req.oobbuf.in, req->oobbuf.in,
+			       eng->actual_req.ooblen);
+
+		ret = mxic_ecc_check_sum(eng, mtd);
+
+		if (eng->actual_req.datalen &&
+		    req->databuf.in != eng->actual_req.databuf.in)
+			memcpy(eng->actual_req.databuf.in,
+			       req->databuf.in + eng->actual_req.dataoffs,
+			       eng->actual_req.datalen);
+		if (eng->actual_req.ooblen &&
+		    req->oobbuf.in != eng->actual_req.oobbuf.in)
+			memcpy(eng->actual_req.oobbuf.in,
+			       req->oobbuf.in + eng->actual_req.ooboffs,
+			       eng->actual_req.ooblen);
+	}
+
+	req->datalen = eng->actual_req.datalen;
+	req->ooblen = eng->actual_req.ooblen;
+	req->databuf.in = eng->actual_req.databuf.in;
+	req->oobbuf.in = eng->actual_req.oobbuf.in;
+
+	return ret;
+}
+
 static struct nand_ecc_engine_ops mxic_ecc_engine_external_ops = {
 	.init_ctx = mxic_ecc_init_ctx,
 	.cleanup_ctx = mxic_ecc_cleanup_ctx,
 	.prepare_io_req = mxic_ecc_prepare_io_req_external,
 	.finish_io_req = mxic_ecc_finish_io_req_external,
+};
+
+static struct nand_ecc_engine_ops mxic_ecc_engine_pipelined_ops = {
+	.init_ctx = mxic_ecc_init_ctx,
+	.cleanup_ctx = mxic_ecc_cleanup_ctx,
+	.prepare_io_req = mxic_ecc_prepare_io_req_pipelined,
+	.finish_io_req = mxic_ecc_finish_io_req_pipelined,
 };
 
 int mxic_ecc_probe(struct platform_device *pdev)
@@ -618,7 +825,11 @@ int mxic_ecc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	ecceng->dev = dev;
-	ecceng->ops = &mxic_ecc_engine_external_ops;
+
+	if (d->external)
+		ecceng->ops = &mxic_ecc_engine_external_ops;
+	else
+		ecceng->ops = &mxic_ecc_engine_pipelined_ops;
 
 	nand_ecc_register_hw_engine(ecceng);
 
@@ -640,10 +851,19 @@ static const struct mxic_ecc_drvdata mxic_ecc_spi_external_data = {
 	.bus_ctrl_axi_slave_region = 0xA0000000,
 };
 
+static const struct mxic_ecc_drvdata mxic_ecc_spi_pipelined_data = {
+	.external = false,
+	.bus_ctrl_axi_slave_region = 0xA0000000,
+};
+
 static const struct of_device_id mxic_ecc_of_ids[] = {
 	{
 		.compatible = "mxic,spi-external-ecc-engine",
 		.data = &mxic_ecc_spi_external_data,
+	},
+	{
+		.compatible = "mxic,spi-pipelined-ecc-engine",
+		.data = &mxic_ecc_spi_pipelined_data,
 	},
 	{ /* sentinel */ },
 };
