@@ -109,9 +109,6 @@ struct drm_panfrost_submit {
 	__u32 pad;
 };
 
-#define PANFROST_WAIT_ALL_BO_USERS	(0 << 0)
-#define PANFROST_WAIT_BO_WRITERS	(1 << 0)
-
 /**
  * struct drm_panfrost_wait_bo - ioctl argument for waiting for
  * completion of the last DRM_PANFROST_SUBMIT on a BO.
@@ -124,7 +121,6 @@ struct drm_panfrost_wait_bo {
 	__u32 handle;
 	__u32 pad;
 	__s64 timeout_ns;	/* absolute */
-	__u64 flags;
 };
 
 /**
