@@ -138,37 +138,6 @@ static void panfrost_job_write_affinity(struct panfrost_device *pfdev,
 	job_write(pfdev, JS_AFFINITY_NEXT_HI(js), affinity >> 32);
 }
 
-static int panfrost_job_count(struct panfrost_device *pfdev, int slot)
-{
-	if (pfdev->jobs[slot][0] == NULL)
-		return 0;
-	if (pfdev->jobs[slot][1] == NULL)
-		return 1;
-	return 2;
-}
-
-static struct panfrost_job *panfrost_dequeue_job(
-		struct panfrost_device *pfdev, int slot)
-{
-	struct panfrost_job *job = pfdev->jobs[slot][0];
-
-	pfdev->jobs[slot][0] = pfdev->jobs[slot][1];
-	pfdev->jobs[slot][1] = NULL;
-
-	return job;
-}
-
-static void panfrost_enqueue_job(struct panfrost_device *pfdev, int slot,
-				 struct panfrost_job *job)
-{
-	if (pfdev->jobs[slot][0] == NULL) {
-		pfdev->jobs[slot][0] = job;
-		return;
-	}
-	WARN_ON(pfdev->jobs[slot][1] != NULL);
-	pfdev->jobs[slot][1] = job;
-}
-
 static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 {
 	struct panfrost_device *pfdev = job->pfdev;
@@ -181,14 +150,11 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 	if (ret < 0)
 		return;
 
-	spin_lock_irqsave(&pfdev->hwaccess_lock, flags);
-	panfrost_enqueue_job(pfdev, js, job);
-
 	if (WARN_ON(job_read(pfdev, JS_COMMAND_NEXT(js))))
 		goto end;
 
-	if (panfrost_job_count(pfdev, js) == 1)
-		panfrost_devfreq_record_transition(pfdev, js);
+	panfrost_devfreq_record_transition(pfdev, js);
+	spin_lock_irqsave(&pfdev->hwaccess_lock, flags);
 
 	job_write(pfdev, JS_HEAD_NEXT_LO(js), jc_head & 0xFFFFFFFF);
 	job_write(pfdev, JS_HEAD_NEXT_HI(js), jc_head >> 32);
@@ -219,8 +185,9 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 
 	job_write(pfdev, JS_COMMAND_NEXT(js), JS_COMMAND_START);
 
-end:
 	spin_unlock_irqrestore(&pfdev->hwaccess_lock, flags);
+
+end:
 	pm_runtime_mark_last_busy(pfdev->dev);
 	pm_runtime_put_autosuspend(pfdev->dev);
 }
@@ -472,6 +439,8 @@ static struct dma_fence *panfrost_job_run(struct drm_sched_job *sched_job)
 	if (unlikely(job->base.s_fence->finished.error))
 		return NULL;
 
+	pfdev->jobs[slot] = job;
+
 	fence = panfrost_fence_create(pfdev, slot);
 	if (IS_ERR(fence))
 		return NULL;
@@ -558,7 +527,6 @@ static irqreturn_t panfrost_job_irq_handler(int irq, void *data)
 {
 	struct panfrost_device *pfdev = data;
 	u32 status = job_read(pfdev, JOB_INT_STAT);
-	unsigned long flags;
 	int j;
 
 	dev_dbg(pfdev->dev, "jobslot irq status=%x\n", status);
@@ -566,29 +534,15 @@ static irqreturn_t panfrost_job_irq_handler(int irq, void *data)
 	if (!status)
 		return IRQ_NONE;
 
-	spin_lock_irqsave(&pfdev->hwaccess_lock, flags);
-
 	pm_runtime_mark_last_busy(pfdev->dev);
 
 	for (j = 0; status; j++) {
 		u32 mask = MK_JS_MASK(j);
-		int jobs = panfrost_job_count(pfdev, j);
-		int active;
 
 		if (!(status & mask))
 			continue;
 
 		job_write(pfdev, JOB_INT_CLEAR, mask);
-		active = (job_read(pfdev, JOB_INT_JS_STATE) &
-			  JOB_INT_MASK_DONE(j)) ? 1 : 0;
-
-		if (!(status & JOB_INT_MASK_ERR(j))) {
-			/* Recheck RAWSTAT to check if there's a newly
-			 * failed job (since JOB_INT_STAT was read)
-			 */
-			status |= job_read(pfdev, JOB_INT_RAWSTAT) &
-				JOB_INT_MASK_ERR(j);
-		}
 
 		if (status & JOB_INT_MASK_ERR(j)) {
 			job_write(pfdev, JS_COMMAND_NEXT(j), JS_COMMAND_NOP);
@@ -600,22 +554,15 @@ static irqreturn_t panfrost_job_irq_handler(int irq, void *data)
 				job_read(pfdev, JS_TAIL_LO(j)));
 
 			drm_sched_fault(&pfdev->js->queue[j].sched);
-			jobs--;
 		}
 
-		while (jobs-- > active) {
-			struct panfrost_job *job =
-				panfrost_dequeue_job(pfdev, j);
-			dma_fence_signal(job->done_fence);
-		}
-
-		if (!active)
+		if (status & JOB_INT_MASK_DONE(j)) {
 			panfrost_devfreq_record_transition(pfdev, j);
+			dma_fence_signal(pfdev->jobs[j]->done_fence);
+		}
 
 		status &= ~mask;
 	}
-
-	spin_unlock_irqrestore(&pfdev->hwaccess_lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -647,7 +594,7 @@ int panfrost_job_init(struct panfrost_device *pfdev)
 
 		ret = drm_sched_init(&js->queue[j].sched,
 				     &panfrost_sched_ops,
-				     2, 0, msecs_to_jiffies(500),
+				     1, 0, msecs_to_jiffies(500),
 				     "pan_js");
 		if (ret) {
 			dev_err(pfdev->dev, "Failed to create scheduler: %d.", ret);
