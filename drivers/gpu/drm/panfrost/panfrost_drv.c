@@ -90,76 +90,20 @@ panfrost_lookup_bos(struct drm_device *dev,
 		  struct drm_panfrost_submit *args,
 		  struct panfrost_job *job)
 {
-	struct drm_panfrost_submit_bo *bo_descs = NULL;
-	u32 *handles = NULL;
-	u32 i, bo_count;
-	int ret = 0;
+	job->bo_count = args->bo_handle_count;
 
-	bo_count = args->bo_desc_count ?
-		   args->bo_desc_count : args->bo_handle_count;
-	if (!bo_count)
+	if (!job->bo_count)
 		return 0;
 
-	job->bos = kvmalloc_array(bo_count, sizeof(*job->bos),
+	job->implicit_fences = kvmalloc_array(job->bo_count,
+				  sizeof(struct dma_fence *),
 				  GFP_KERNEL | __GFP_ZERO);
-	if (!job->bos)
+	if (!job->implicit_fences)
 		return -ENOMEM;
 
-	job->bo_count = bo_count;
-	bo_descs = kvmalloc_array(bo_count, sizeof(*bo_descs),
-				  GFP_KERNEL | __GFP_ZERO);
-	if (!bo_descs) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	if (!args->bo_desc_count) {
-		handles = kvmalloc_array(bo_count, sizeof(*handles),
-					 GFP_KERNEL);
-		if (!handles) {
-			ret =-ENOMEM;
-			goto out;
-		}
-
-		if (copy_from_user(handles,
-				   (void __user *)(uintptr_t)args->bo_handles,
-				   job->bo_count * sizeof(*handles))) {
-			ret = -EFAULT;
-			goto out;
-		}
-
-		for (i = 0; i < job->bo_count; i++) {
-			bo_descs[i].handle = handles[i];
-			bo_descs[i].flags = PANFROST_SUBMIT_BO_WRITE |
-					    PANFROST_SUBMIT_BO_READ;
-		}
-	} else if (copy_from_user(bo_descs,
-				  (void __user *)(uintptr_t)args->bo_descs,
-				  job->bo_count * sizeof(*bo_descs))) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	for (i = 0; i < job->bo_count; i++) {
-		if ((bo_descs[i].flags & ~PANFROST_SUBMIT_BO_VALID_FLAGS) ||
-                    !(bo_descs[i].flags & PANFROST_SUBMIT_BO_RW)) {
-			ret = -EINVAL;
-			goto out;
-		}
-
-		job->bos[i].flags = bo_descs[i].flags;
-		job->bos[i].obj = drm_gem_object_lookup(file_priv,
-							bo_descs[i].handle);
-		if (!job->bos[i].obj) {
-			ret = -ENOENT;
-			goto out;
-		}
-	}
-
-out:
-	kvfree(handles);
-	kvfree(bo_descs);
-	return ret;
+	return drm_gem_objects_lookup(file_priv,
+				      (void __user *)(uintptr_t)args->bo_handles,
+				      job->bo_count, &job->bos);
 }
 
 /**

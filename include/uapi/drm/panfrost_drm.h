@@ -38,28 +38,6 @@ extern "C" {
 #define DRM_IOCTL_PANFROST_PERFCNT_DUMP		DRM_IOW(DRM_COMMAND_BASE + DRM_PANFROST_PERFCNT_DUMP, struct drm_panfrost_perfcnt_dump)
 
 #define PANFROST_JD_REQ_FS (1 << 0)
-
-#define PANFROST_SUBMIT_BO_READ			(1 << 0)
-#define PANFROST_SUBMIT_BO_WRITE		(1 << 1)
-#define PANFROST_SUBMIT_BO_RW			(PANFROST_SUBMIT_BO_READ | \
-						 PANFROST_SUBMIT_BO_WRITE)
-#define PANFROST_SUBMIT_BO_NO_IMPLICIT_FENCE	(1 << 2)
-#define PANFROST_SUBMIT_BO_VALID_FLAGS		\
-	(PANFROST_SUBMIT_BO_RW | PANFROST_SUBMIT_BO_NO_IMPLICIT_FENCE)
-
-/**
- * struct drm_panfrost_submit_bo - BO descriptor passed to the submit ioctl.
- *
- * Useful to give detailed information about BOs used by a given job.
- *
- * @handle: the GEM handle
- * @flags: a combination of PANFROST_SUBMIT_BO_*
- */
-struct drm_panfrost_submit_bo {
-	__u32 handle;
-	__u32 flags;
-};
-
 /**
  * struct drm_panfrost_submit - ioctl argument for submitting commands to the 3D
  * engine.
@@ -88,25 +66,6 @@ struct drm_panfrost_submit {
 
 	/** A combination of PANFROST_JD_REQ_* */
 	__u32 requirements;
-
-	/**
-	 * Pointer to a u32 array of &drm_panfrost_submit_bo_desc objects. This
-	 * field is meant to replace &drm_panfrost_submit.bo_handles which did
-	 * not provide enough information to relax synchronization between
-	 * jobs that only only read the BO they share. When both
-	 * &drm_panfrost_submit.bo_handles and &drm_panfrost_submit.bo_descs
-	 * are provided, drm_panfrost_submit.bo_handles is ignored.
-	 */
-	__u64 bo_descs;
-
-	/**
-	 * Number of BO descriptors passed in (size is that times
-	 * sizeof(drm_panfrost_submit_bo_desc)).
-	 */
-	__u32 bo_desc_count;
-
-	/** Padding, must be 0. */
-	__u32 pad;
 };
 
 /**
