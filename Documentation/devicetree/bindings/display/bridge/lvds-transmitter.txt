@@ -36,6 +36,19 @@ graph bindings specified in Documentation/devicetree/bindings/graph.txt.
 - Video port 0 for parallel input
 - Video port 1 for LVDS output
 
+Optional port 0 node properties:
+
+- bus-width: number of data lines use to transmit the RGB data.
+	     Can be 18 or 24.
+
+Optional port 1 node properties:
+
+- data-mapping: see Documentation/devicetree/bindings/display/panel/lvds.yaml
+		for more details about this LVDS data-mapping property.
+		Supported values:
+		"jeida-18"
+		"jeida-24"
+		"vesa-24"
 
 Example
 -------
