@@ -695,9 +695,9 @@ static u32 poc_reg_tbl_bottom_field[16] = {
 	RKVDEC_REG_H264_POC_REFER2(1)
 };
 
-struct vb2_buffer *get_ref_buf(struct rkvdec_ctx *ctx,
-			       struct rkvdec_h264_run *run,
-			       unsigned int dpb_idx)
+static struct vb2_buffer *
+get_ref_buf(struct rkvdec_ctx *ctx, struct rkvdec_h264_run *run,
+	    unsigned int dpb_idx)
 {
 	struct v4l2_m2m_ctx *m2m_ctx = ctx->fh.m2m_ctx;
 	const struct v4l2_h264_dpb_entry *dpb = run->decode_params->dpb;
@@ -887,7 +887,10 @@ err_free_ctx:
 static void rkvdec_h264_stop(struct rkvdec_ctx *ctx)
 {
 	struct rkvdec_h264_ctx *h264_ctx = ctx->priv;
+	struct rkvdec_dev *rkvdec = ctx->dev;
 
+	dma_free_coherent(rkvdec->dev, h264_ctx->priv_tbl.size,
+			  h264_ctx->priv_tbl.cpu, h264_ctx->priv_tbl.dma);
 	kfree(h264_ctx);
 }
 

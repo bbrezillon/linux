@@ -78,6 +78,35 @@ static const struct rkvdec_ctrls rkvdec_h264_ctrls = {
 	.num_ctrls = ARRAY_SIZE(rkvdec_h264_ctrl_descs),
 };
 
+static const struct rkvdec_ctrl_desc rkvdec_vp9_ctrl_descs[] = {
+	{
+		.per_request = true,
+		.mandatory = true,
+		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_FRAME_DECODE_PARAMS,
+	},
+	{
+		.mandatory = true,
+		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(0),
+	},
+	{
+		.mandatory = true,
+		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(1),
+	},
+	{
+		.mandatory = true,
+		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(2),
+	},
+	{
+		.mandatory = true,
+		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(3),
+	},
+};
+
+static const struct rkvdec_ctrls rkvdec_vp9_ctrls = {
+	.ctrls = rkvdec_vp9_ctrl_descs,
+	.num_ctrls = ARRAY_SIZE(rkvdec_vp9_ctrl_descs),
+};
+
 static const struct rkvdec_coded_fmt_desc rkvdec_coded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_H264_SLICE,
@@ -91,6 +120,19 @@ static const struct rkvdec_coded_fmt_desc rkvdec_coded_fmts[] = {
 		},
 		.ctrls = &rkvdec_h264_ctrls,
 		.ops = &rkvdec_h264_fmt_ops,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_VP9_FRAME,
+		.frmsize = {
+			.min_width = 48,
+			.max_width = 3840,
+			.step_width = 64,
+			.min_height = 48,
+			.max_height = 2176,
+			.step_height = 64,
+		},
+		.ctrls = &rkvdec_vp9_ctrls,
+		.ops = &rkvdec_vp9_fmt_ops,
 	}
 };
 
@@ -574,6 +616,9 @@ static void rkvdec_job_finish_no_pm(struct rkvdec_ctx *ctx,
 	else
 		dst_buf->planes[0].bytesused = 0;
 
+	if (ctx->coded_fmt_desc->ops->done)
+		ctx->coded_fmt_desc->ops->done(ctx, src_buf, dst_buf, result);
+
 	v4l2_m2m_buf_done(src_buf, result);
 	v4l2_m2m_buf_done(dst_buf, result);
 	v4l2_m2m_job_finish(ctx->dev->m2m_dev, m2m_ctx);
@@ -665,10 +710,6 @@ static int rkvdec_queue_init(void *priv,
 	src_vq->supports_requests = true;
 	src_vq->requires_requests = true;
 
-	ret = vb2_queue_init(src_vq);
-	if (ret)
-		return ret;
-
 	dst_vq->bidirectional = true;
 	dst_vq->mem_ops = &vb2_dma_contig_memops;
 	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
@@ -681,6 +722,14 @@ static int rkvdec_queue_init(void *priv,
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->lock = &rkvdec->vdev_lock;
 	dst_vq->dev = rkvdec->v4l2_dev.dev;
+
+	if (ctx->coded_fmt_desc->ops->queue_init)
+		ctx->coded_fmt_desc->ops->queue_init(ctx, src_vq, dst_vq);
+
+	ret = vb2_queue_init(src_vq);
+	if (ret)
+		return ret;
+
 
 	return vb2_queue_init(dst_vq);
 }

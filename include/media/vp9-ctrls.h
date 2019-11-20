@@ -15,9 +15,10 @@
 
 #define V4L2_PIX_FMT_VP9_FRAME v4l2_fourcc('V', 'P', '9', 'F')
 
-#define V4L2_CID_MPEG_VIDEO_VP9_FRAME_HEADER	(V4L2_CID_MPEG_BASE + 4000)
-#define V4L2_CTRL_TYPE_VP9_FRAME_DECODE_PARAMS	0x400
-#define V4L2_CTRL_TYPE_VP9_FRAME_CONTEXT	0x401
+#define V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(i)	(V4L2_CID_MPEG_BASE + 4000 + (i))
+#define V4L2_CID_MPEG_VIDEO_VP9_FRAME_DECODE_PARAMS	(V4L2_CID_MPEG_BASE + 4004)
+#define V4L2_CTRL_TYPE_VP9_FRAME_CONTEXT		0x400
+#define V4L2_CTRL_TYPE_VP9_FRAME_DECODE_PARAMS		0x404
 
 #define V4L2_VP9_LOOP_FILTER_FLAG_DELTA_ENABLED		(1 << 0)
 #define V4L2_VP9_LOOP_FILTER_FLAG_DELTA_UPDATE		(1 << 1)
@@ -48,13 +49,42 @@ struct v4l2_vp9_quantization {
 #define V4L2_VP9_SEGMENTATION_FLAG_UPDATE_DATA		(1 << 3)
 #define V4L2_VP9_SEGMENTATION_FLAG_ABS_OR_DELTA_UPDATE	(1 << 4)
 
+#define V4L2_VP9_SEGMENTATION_FEATURE_ENABLED(id)	(1 << (id))
+#define V4L2_VP9_SEGMENTATION_FEATURE_ENABLED_MASK	0xf
+
+enum v4l2_vp9_segmentation_feature {
+	V4L2_VP9_SEGMENTATION_FEATURE_QP_DELTA,
+	V4L2_VP9_SEGMENTATION_FEATURE_LF_VAL,
+	V4L2_VP9_SEGMENTATION_FEATURE_REFERINFO,
+	V4L2_VP9_SEGMENTATION_FEATURE_FRAME_SKIP,
+	V4L2_VP9_SEGMENTATION_FEATURE_CNT,
+};
+
 struct v4l2_vp9_segmentation {
 	__u8 flags;
 	__u8 tree_probs[7];
 	__u8 pred_probs[3];
 	__u8 padding[5];
-	__u8 feature_enabled[8][4];
+	__u8 feature_enabled[8];
 	__s16 feature_data[8][4];
+};
+
+/**
+ * enum v4l2_vp9_intra_prediction_mode - Intra prediction modes
+ *
+ * @V4L2_VP9_INTRA_PRED_DC:
+ */
+enum v4l2_vp9_intra_prediction_mode {
+	V4L2_VP9_INTRA_PRED_MODE_DC,
+	V4L2_VP9_INTRA_PRED_MODE_V,
+	V4L2_VP9_INTRA_PRED_MODE_H,
+	V4L2_VP9_INTRA_PRED_MODE_D45,
+	V4L2_VP9_INTRA_PRED_MODE_D135,
+	V4L2_VP9_INTRA_PRED_MODE_D117,
+	V4L2_VP9_INTRA_PRED_MODE_D153,
+	V4L2_VP9_INTRA_PRED_MODE_D207,
+	V4L2_VP9_INTRA_PRED_MODE_D63,
+	V4L2_VP9_INTRA_PRED_MODE_TM,
 };
 
 struct v4l2_vp9_probs {
@@ -88,16 +118,16 @@ struct v4l2_vp9_probs {
 	__u8 mv_hp_prob[2];
 };
 
-#define V4L2_VP9_FRAME_FLAG_KEY_FRAME		(1 << 0)
-#define V4L2_VP9_FRAME_FLAG_SHOW_FRAME		(1 << 1)
-#define V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT	(1 << 2)
-#define V4L2_VP9_FRAME_FLAG_INTRA_ONLY		(1 << 3)
-#define V4L2_VP9_FRAME_FLAG_ALLOW_HIGH_PREC_MV	(1 << 4)
-#define V4L2_VP9_FRAME_FLAG_REFRESH_FRAME_CTX	(1 << 5)
-#define V4L2_VP9_FRAME_FLAG_PARALLEL_DEC_MODE	(1 << 6)
-#define V4L2_VP9_FRAME_FLAG_X_SUBSAMPLING	(1 << 7)
-#define V4L2_VP9_FRAME_FLAG_Y_SUBSAMPLING	(1 << 8)
-#define V4L2_VP9_FRAME_COLOR_RANGE_FULL_SWING	(1 << 9)
+#define V4L2_VP9_FRAME_FLAG_KEY_FRAME			(1 << 0)
+#define V4L2_VP9_FRAME_FLAG_SHOW_FRAME			(1 << 1)
+#define V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT		(1 << 2)
+#define V4L2_VP9_FRAME_FLAG_INTRA_ONLY			(1 << 3)
+#define V4L2_VP9_FRAME_FLAG_ALLOW_HIGH_PREC_MV		(1 << 4)
+#define V4L2_VP9_FRAME_FLAG_REFRESH_FRAME_CTX		(1 << 5)
+#define V4L2_VP9_FRAME_FLAG_PARALLEL_DEC_MODE		(1 << 6)
+#define V4L2_VP9_FRAME_FLAG_X_SUBSAMPLING		(1 << 7)
+#define V4L2_VP9_FRAME_FLAG_Y_SUBSAMPLING		(1 << 8)
+#define V4L2_VP9_FRAME_FLAG_COLOR_RANGE_FULL_SWING	(1 << 9)
 
 #define VP9_PROFILE_MAX		3
 
@@ -119,7 +149,7 @@ enum v4l2_vp9_reset_frame_context {
 	V4L2_VP9_RESET_FRAME_CTX_NONE_ALT,
 	V4L2_VP9_RESET_FRAME_CTX_SPEC,
 	V4L2_VP9_RESET_FRAME_CTX_ALL,
-}
+};
 
 /**
  * enum v4l2_vp9_color_space - Valid values for
@@ -222,6 +252,13 @@ struct v4l2_vp9_reference_frame {
 	__u8 padding[7];
 };
 
+enum v4l2_vp9_ref_id {
+	V4L2_REF_ID_LAST,
+	V4L2_REF_ID_GOLDEN,
+	V4L2_REF_ID_ALTREF,
+	V4L2_REF_ID_CNT,
+};
+
 /**
  * struct v4l2_ctrl_vp9_frame_decode_params - VP9 frame decoding control
  *
@@ -245,11 +282,11 @@ struct v4l2_vp9_reference_frame {
  *		    (where the height is measured in units of 8x8 blocks)
  * @reference_mode: specifies the type of inter prediction to be used. See
  *		    &v4l2_vp9_reference_mode for more details
- * @frame_witdh_minus_1: add 1 to it and you'll get the frame width expressed
+ * @frame_width_minus_1: add 1 to it and you'll get the frame width expressed
  *			 in pixels
  * @frame_height_minus_1: add 1 to it and you'll get the frame height expressed
  *			  in pixels
- * @frame_witdh_minus_1: add 1 to it and you'll get the expected render width
+ * @frame_width_minus_1: add 1 to it and you'll get the expected render width
  *			 expressed in pixels. This is not used during the
  *			 decoding process but might be used by HW scalers to
  *			 prepare a frame that's ready for scanout
@@ -277,20 +314,18 @@ struct v4l2_ctrl_vp9_frame_decode_params {
 	__u8 tile_rows_log2;
 	__u8 tx_mode;
 	__u8 reference_mode;
-	__u16 frame_witdh_minus_1;
+	__u16 frame_width_minus_1;
 	__u16 frame_height_minus_1;
-	__u16 render_witdh_minus_1;
+	__u16 render_width_minus_1;
 	__u16 render_height_minus_1;
-	struct v4l2_vp9_reference_frame last_frame;
-	struct v4l2_vp9_reference_frame golden_frame;
-	struct v4l2_vp9_reference_frame alt_frame;
+	__u64 refs[V4L2_REF_ID_CNT];
 	struct v4l2_vp9_loop_filter lf;
 	struct v4l2_vp9_quantization quant;
 	struct v4l2_vp9_segmentation seg;
 	struct v4l2_vp9_probs probs; 
 };
 
-#define V4L2_CTRL_VP9_NUM_FRAME_CTX	4
+#define V4L2_VP9_NUM_FRAME_CTX	4
 
 /**
  * struct v4l2_ctrl_vp9_frame_ctx - VP9 frame context control

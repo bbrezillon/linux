@@ -11,91 +11,156 @@
 
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
+#include <media/v4l2-mem2mem.h>
 
-#include "rockchip_vpu_common.h"
+#include "rkvdec.h"
+#include "rkvdec-regs.h"
 
-#include "rk3399_vdec_regs.h"
-#include "rockchip_vpu_hw.h"
+#define RKVDEC_VP9_PROBE_SIZE		4864
+#define RKVDEC_VP9_COUNT_SIZE		13232
+#define RKVDEC_VP9_MAX_SEGMAP_SIZE	73728
 
-#define RKV_VP9D_PROBE_SIZE		4864
-#define RKV_VP9D_COUNT_SIZE		13232
-#define RKV_VP9D_MAX_SEGMAP_SIZE	73728
+struct rkvdec_vp9_decoded_buffer {
+	/* Must be the first field in this struct. */
+	struct v4l2_m2m_buffer base;
+
+	/* Info needed when the decoded frame serves as a reference frame. */
+	struct v4l2_ctrl_vp9_frame_decode_params info;
+
+	u32 segmapid : 1;
+};
+
+static struct rkvdec_vp9_decoded_buffer *
+vb2_to_vp9_decoded_buf(struct vb2_buffer *buf)
+{
+	return container_of(buf, struct rkvdec_vp9_decoded_buffer,
+			    base.vb.vb2_buf);
+}
+
+struct rkvdec_vp9_intra_mode_probs {
+	u8 y_mode_prob[105];
+	u8 uv_mode_prob[23];
+
+};
+
+struct rkvdec_vp9_intra_only_frame_probs {
+	u8 coef_probs_intra[4][2][128];
+	struct rkvdec_vp9_intra_mode_probs intra_mode[10];
+};
+
+struct rkvdec_vp9_inter_frame_probs {
+	u8 y_mode_probs[4][9];
+	u8 comp_mode_prob[5];
+	u8 comp_ref_prob[5];
+	u8 single_ref_prob[5][2];
+	u8 inter_mode_probs[7][3];
+	u8 interp_filter_probs[4][2];
+	u8 padding0[11];
+	u8 coef_probs[2][4][2][128];
+	u8 uv_mode_prob_0_2[3][9];
+	u8 padding1[5];
+	u8 uv_mode_prob_3_5[3][9];
+	u8 padding2[5];
+	u8 uv_mode_prob_6_8[3][9];
+	u8 padding3[5];
+	u8 uv_mode_prob_9[9];
+	u8 padding4[7];
+	u8 padding5[16];
+	u8 mv_joint_probs[3];
+	u8 mv_sign_prob[2];
+	u8 mv_class_probs[2][10];
+	u8 mv_class0_bit_prob[2];
+	u8 mv_bits_prob[2][10];
+	u8 mv_class0_fr_probs[2][2][3];
+	u8 mv_fr_probs[2][3];
+	u8 mv_class0_hp_prob[2];
+	u8 mv_hp_prob[2];
+};
+
+struct rkvdec_vp9_probs {
+	u8 partition_probs[16][3];
+	u8 pred_probs[3];
+	u8 tree_probs[7];
+	u8 skip_prob[3];
+	u8 tx_probs_32x32[2][3];
+	u8 tx_probs_16x16[2][2];
+	u8 tx_probs_8x8[2][1];
+	u8 is_inter_prob[4];
+	/* 128 bit alignment */
+	u8 padding0[3];
+	union {
+		struct rkvdec_vp9_inter_frame_probs inter_probs;
+		struct rkvdec_vp9_intra_only_frame_probs intra_only_probs;
+	};
+
+	/* Is this really needed? */
+	u8 padding1[2416];
+};
 
 /* Data structure describing auxiliary buffer format. */
 struct rkvdec_vp9_priv_tbl {
-	u8 prob_table[RKV_VP9D_PROBE_SIZE];
-	u8 segmap[RKV_VP9D_MAX_SEGMAP_SIZE];
-	u8 segmap_last[RKV_VP9D_MAX_SEGMAP_SIZE];
+	struct rkvdec_vp9_probs probs;
+	u8 segmap[2][RKVDEC_VP9_MAX_SEGMAP_SIZE];
+};
+
+struct rkvdec_vp9_refs_counts {
+	u32 eob[2];
+	u32 coeff[3];
+};
+
+struct rkvdec_vp9_inter_frame_symbol_counts {
+	u32 partition[16][4];
+	u32 skip[3][2];
+	u32 inter[4][2];
+	u32 tx32p[2][4];
+	u32 tx16p[2][4];
+	u32 tx8p[2][2];
+	u32 y_mode[4][10];
+	u32 uv_mode[10][10];
+	u32 comp[5][2];
+	u32 comp_ref[5][2];
+	u32 single_ref[5][2][2];
+	u32 mv_mode[7][4];
+	u32 filter[4][3];
+	u32 mv_joint[4];
+	u32 sign[2][2];
+	/* add 1 element for align */
+	u32 classes[2][11 + 1];
+	u32 class0[2][2];
+	u32 bits[2][10][2];
+	u32 class0_fp[2][2][4];
+	u32 fp[2][4];
+	u32 class0_hp[2][2];
+	u32 hp[2][2];
+	struct rkvdec_vp9_refs_counts ref_cnt[2][4][2][6][6];
+};
+
+struct rkvdec_vp9_intra_frame_symbol_counts {
+	u32 partition[4][4][4];
+	u32 skip[3][2];
+	u32 intra[4][2];
+	u32 tx32p[2][4];
+	u32 tx16p[2][4];
+	u32 tx8p[2][2];
+	struct rkvdec_vp9_refs_counts ref_cnt[2][4][2][6][6];
 };
 
 struct rkvdec_vp9_run {
 	struct rkvdec_run base;
 	const struct v4l2_ctrl_vp9_frame_decode_params *decode_params;
+	const struct v4l2_ctrl_vp9_frame_ctx *frame_context;
 };
 
 struct rkvdec_vp9_ctx {
 	struct rkvdec_aux_buf priv_tbl;
+	struct rkvdec_aux_buf count_tbl;
 };
-
-/*
-
-enum {
-	TX_4X4,
-	TX_8X8,
-	TX_16X16,
-	TX_32X32,
-	N_TXFM_SIZES,
-	TX_SWITCHABLE = N_TXFM_SIZES,
-	N_TXFM_MODES
-};
-
-enum {
-	DCT_DCT,
-	DCT_ADST,
-	ADST_DCT,
-	ADST_ADST,
-	N_TXFM_TYPES
-};
-
-enum {
-	VERT_PRED,
-	HOR_PRED,
-	DC_PRED,
-	DIAG_DOWN_LEFT_PRED,
-	DIAG_DOWN_RIGHT_PRED,
-	VERT_RIGHT_PRED,
-	HOR_DOWN_PRED,
-	VERT_LEFT_PRED,
-	HOR_UP_PRED,
-	TM_VP8_PRED,
-	LEFT_DC_PRED,
-	TOP_DC_PRED,
-	DC_128_PRED,
-	DC_127_PRED,
-	DC_129_PRED,
-	N_INTRA_PRED_MODES
-};
-
-enum {
-	FILTER_8TAP_SMOOTH,
-	FILTER_8TAP_REGULAR,
-	FILTER_8TAP_SHARP,
-	FILTER_BILINEAR,
-	FILTER_SWITCHABLE,
-};
-
-enum {
-	PRED_SINGLEREF,
-	PRED_COMPREF,
-	PRED_SWITCHABLE,
-};
-*/
 
 #ifndef FASTDIV
-#define FASTDIV(a, b) ((u32)((((u64)a) * vp9_inverse[b]) >> 32))
+#define FASTDIV(a, b) ((u32)((((u64)a) * inverse[b]) >> 32))
 #endif /* FASTDIV */
 
-const u32 vp9_inverse[] = {
+static const u32 inverse[] = {
 	0, 4294967295U, 2147483648U, 1431655766, 1073741824,  858993460,
 	715827883,  613566757,	536870912,  477218589,  429496730,  390451573,
 	357913942,  330382100,  306783379,  286331154,	268435456,  252645136,
@@ -141,7 +206,7 @@ const u32 vp9_inverse[] = {
 	17043522,   16976156,   16909321,   16843010,   16777216
 };
 
-static u8 vp9_kf_y_mode_prob[INTRA_MODES][INTRA_MODES][INTRA_MODES - 1] = {
+static u8 vp9_kf_y_mode_prob[10][10][9] = {
 	{
 		/* above = dc */
 		{ 137,  30,  42, 148, 151, 207,  70,  52,  91 },/*left = dc  */
@@ -256,7 +321,7 @@ static u8 vp9_kf_y_mode_prob[INTRA_MODES][INTRA_MODES][INTRA_MODES - 1] = {
 	}
 };
 
-static u8 vp9_kf_partition_probs[PARTITION_CONTEXTS][PARTITION_TYPES - 1] = {
+static u8 kf_partition_probs[16][3] = {
 	/* 8x8 -> 4x4 */
 	{ 158,  97,  94 },	/* a/l both not split   */
 	{  93,  24,  99 },	/* a split, l not split */
@@ -279,7 +344,7 @@ static u8 vp9_kf_partition_probs[PARTITION_CONTEXTS][PARTITION_TYPES - 1] = {
 	{  12,   3,   3 },	/* a/l both split       */
 };
 
-static const u8 vp9_kf_uv_mode_prob[INTRA_MODES][INTRA_MODES - 1] = {
+static const u8 kf_uv_mode_prob[10][9] = {
 	{ 144,  11,  54, 157, 195, 130,  46,  58, 108 },  /* y = dc   */
 	{ 118,  15, 123, 148, 131, 101,  44,  93, 131 },  /* y = v    */
 	{ 113,  12,  23, 188, 226, 142,  26,  32, 125 },  /* y = h    */
@@ -292,50 +357,15 @@ static const u8 vp9_kf_uv_mode_prob[INTRA_MODES][INTRA_MODES - 1] = {
 	{ 102,  19,  66, 162, 182, 122,  35,  59, 128 }   /* y = tm   */
 };
 
-int rk3399_vdec_vp9d_init(struct rockchip_vpu_ctx *ctx)
+static void write_coeff_plane(const u8 coef[6][6][3], u8 *coeff_plane)
 {
-	struct rockchip_vpu_dev *vpu = ctx->dev;
-	int ret;
-
-	ret = rockchip_vpu_aux_buf_alloc(vpu, &ctx->hw.vp9d.priv_tbl,
-				sizeof(struct rkvdec_vp9_priv_tbl));
-	if (ret) {
-		vpu_err("allocate vp9d priv_tbl failed\n");
-		return ret;
-	}
-
-	ret = rockchip_vpu_aux_buf_alloc(vpu, &ctx->hw.vp9d.priv_dst,
-					 RKV_VP9D_COUNT_SIZE);
-	if (ret) {
-		vpu_err("allocate vp9d priv_dst failed\n");
-		return ret;
-	}
-
-	memset(&ctx->hw.vp9d.last_info, 0, sizeof(ctx->hw.vp9d.last_info));
-	ctx->hw.vp9d.mv_base_addr = 0;
-	ctx->hw.vp9d.last_info.last_segid_flag = true;
-
-	return 0;
-}
-
-void rk3399_vdec_vp9d_exit(struct rockchip_vpu_ctx *ctx)
-{
-	rockchip_vpu_aux_buf_free(ctx->dev, &ctx->hw.vp9d.priv_tbl);
-	rockchip_vpu_aux_buf_free(ctx->dev, &ctx->hw.vp9d.priv_dst);
-}
-
-static void vp9d_write_coeff_plane(
-	const u8 coef[COEF_BANDS][COEFF_CONTEXTS][3],
-	u8 *coeff_plane)
-{
+	unsigned int idx = 0;
+	u8 byte_count = 0, p;
 	s32 k, m, n;
-	u8 p;
-	u8 byte_count = 0;
-	int idx = 0;
 
-	for (k = 0; k < COEF_BANDS; k++) {
-		for (m = 0; m < COEFF_CONTEXTS; m++) {
-			for (n = 0; n < UNCONSTRAINED_NODES; n++) {
+	for (k = 0; k < 6; k++) {
+		for (m = 0; m < 6; m++) {
+			for (n = 0; n < 3; n++) {
 				p = coef[k][m][n];
 				coeff_plane[idx++] = p;
 				byte_count++;
@@ -348,168 +378,178 @@ static void vp9d_write_coeff_plane(
 	}
 }
 
-static void rk3399_vdec_vp9d_output_prob(struct rockchip_vpu_ctx *ctx)
+static void init_intra_only_probs(struct rkvdec_ctx *ctx,
+				  const struct rkvdec_vp9_run *run)
 {
-	const struct v4l2_ctrl_vp9_entropy *entropy =
-		ctx->run.vp9d.entropy;
-	const struct v4l2_ctrl_vp9_frame_hdr *frmhdr = ctx->run.vp9d.frame_hdr;
-	struct rkvdec_vp9_priv_tbl *tbl = ctx->hw.vp9d.priv_tbl.cpu;
-	u8 p;
+	const struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
+	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+	struct rkvdec_vp9_priv_tbl *tbl = vp9_ctx->priv_tbl.cpu;
+	struct rkvdec_vp9_intra_only_frame_probs *rkprobs;
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
+	unsigned i, j, k, m;
 
-	s32 i, j, k, m;
-	bool intra_only;
+	rkprobs = &tbl->probs.intra_only_probs;
+	dec_params = run->decode_params;
+	fctx = run->frame_context;
 
-	const struct v4l2_vp9_entropy_ctx *fc;
-	struct vp9_decoder_probs_hw *probs =
-		(struct vp9_decoder_probs_hw *)tbl->prob_table;
-
-	vpu_debug_enter();
-
-	fc = &entropy->current_entropy_ctx;
-
-	memset(tbl->prob_table, 0, sizeof(tbl->prob_table));
-
-	intra_only = (frmhdr->frame_type == 0) ||
-		(frmhdr->flags & V4L2_VP9_FRAME_HDR_FLAG_FRAME_INTRA);
-
-	/* sb info  5 x 128 bit */
-	if (intra_only) {
-		memcpy(probs->partition_probs, vp9_kf_partition_probs,
-			sizeof(probs->partition_probs));
-	} else {
-		memcpy(probs->partition_probs, fc->partition_probs,
-			sizeof(probs->partition_probs));
+	/*
+	 * intra only 149 x 128 bits ,aligned to 152 x 128 bits coeff related
+	 * prob 64 x 128 bits
+	 */
+	for (i = 0; i < ARRAY_SIZE(fctx->probs.coef_probs); i++) {
+		for (j = 0; j < ARRAY_SIZE(fctx->probs.coef_probs[0]); j++)
+			write_coeff_plane(fctx->probs.coef_probs[i][j][0],
+					       rkprobs->coef_probs_intra[i][j]);
 	}
-	memcpy(probs->pred_probs, frmhdr->sgmnt_params.pred_probs,
-		sizeof(probs->pred_probs));
-	memcpy(probs->tree_probs, frmhdr->sgmnt_params.tree_probs,
-		sizeof(probs->tree_probs));
-	memcpy(probs->skip_prob, fc->skip_prob, sizeof(probs->skip_prob));
-	memcpy(probs->tx_probs_32x32, fc->tx_probs_32x32,
-		sizeof(probs->tx_probs_32x32));
-	memcpy(probs->tx_probs_16x16, fc->tx_probs_16x16,
-		sizeof(probs->tx_probs_16x16));
-	memcpy(probs->tx_probs_8x8, fc->tx_probs_8x8,
-		sizeof(probs->tx_probs_8x8));
-	memcpy(probs->is_inter_prob, fc->is_inter_prob,
-		sizeof(probs->is_inter_prob));
 
-	if (intra_only) {
-		struct intra_only_frm_spec *probs_intra = &probs->intra_spec;
+	/* intra mode prob  80 x 128 bits */
+	for (i = 0; i < ARRAY_SIZE(vp9_kf_y_mode_prob); i++) {
+		u32 byte_count = 0;
+		int idx = 0;
 
-		/* intra probs */
-		/* intra only 149 x 128 bits ,aligned to 152 x 128 bits
-		 * coeff related prob 64 x 128 bits
-		 */
-		for (i = 0; i < TX_SIZES; i++)
-			for (j = 0; j < PLANE_TYPES; j++)
-				vp9d_write_coeff_plane(
-					fc->coef_probs[i][j][0],
-					probs_intra->coef_probs_intra[i][j]);
+		/* vp9_kf_y_mode_prob */
+		for (j = 0; j < ARRAY_SIZE(vp9_kf_y_mode_prob[0]); j++) {
+			for (k = 0; k < ARRAY_SIZE(vp9_kf_y_mode_prob[0][0]);
+			     k++) {
+				u8 val = vp9_kf_y_mode_prob[i][j][k];
 
-		/* intra mode prob  80 x 128 bits */
-		for (i = 0; i < INTRA_MODES; i++) {
-			struct intra_mode_prob *intra_mode =
-				&probs_intra->intra_mode[i];
-			u32 byte_count = 0;
-			int idx = 0;
-
-			/* vp9_kf_y_mode_prob */
-			for (j = 0; j < INTRA_MODES; j++) {
-				for (k = 0; k < INTRA_MODES - 1; k++) {
-					p = vp9_kf_y_mode_prob[i][j][k];
-					intra_mode->y_mode_prob[idx++] = p;
-					byte_count++;
-					if (byte_count == 27) {
-						byte_count = 0;
-						idx += 5;
-					}
-				}
-			}
-
-			idx = 0;
-			if (i < 4) {
-				for (m = 0; m < (i < 3 ? 23 : 21); m++) {
-					u8 *ptr = (u8 *)vp9_kf_uv_mode_prob;
-
-					intra_mode->uv_mode_prob[idx++] =
-						ptr[i * 23 + m];
+				rkprobs->intra_mode[i].y_mode_prob[idx++] = val;
+				byte_count++;
+				if (byte_count == 27) {
+					byte_count = 0;
+					idx += 5;
 				}
 			}
 		}
-	} else {
-		struct inter_frm_spec *probs_inter = &probs->inter_spec;
-		/* inter probs
-		 * 151 x 128 bits, aligned to 152 x 128 bits
-		 * inter only
-		 * intra_y_mode & inter_block info 6 x 128 bits
-		 */
 
-		memcpy(probs_inter->y_mode_probs, fc->y_mode_probs,
-			sizeof(probs_inter->y_mode_probs));
-		memcpy(probs_inter->comp_mode_prob, fc->comp_mode_prob,
-			sizeof(probs_inter->comp_mode_prob));
-		memcpy(probs_inter->comp_ref_prob, fc->comp_ref_prob,
-			sizeof(probs_inter->comp_ref_prob));
-		memcpy(probs_inter->single_ref_prob, fc->single_ref_prob,
-			sizeof(probs_inter->single_ref_prob));
-		memcpy(probs_inter->inter_mode_probs, fc->inter_mode_probs,
-			sizeof(probs_inter->inter_mode_probs));
-		memcpy(probs_inter->interp_filter_probs,
-			fc->interp_filter_probs,
-			sizeof(probs_inter->interp_filter_probs));
+		idx = 0;
+		if (i < 4) {
+			for (m = 0; m < (i < 3 ? 23 : 21); m++) {
+				const u8 *ptr = &kf_uv_mode_prob[0][0];
 
-		/* 128 x 128 bits coeff related */
-		for (i = 0; i < TX_SIZES; i++)
-			for (j = 0; j < PLANE_TYPES; j++)
-				vp9d_write_coeff_plane(
-					fc->coef_probs[i][j][0],
-					probs_inter->coef_probs[0][i][j]);
-
-		for (i = 0; i < TX_SIZES; i++)
-			for (j = 0; j < PLANE_TYPES; j++)
-				vp9d_write_coeff_plane(
-					fc->coef_probs[i][j][1],
-					probs_inter->coef_probs[1][i][j]);
-
-		/* intra uv mode 6 x 128 */
-		memcpy(probs_inter->uv_mode_prob_0_2, fc->uv_mode_probs,
-			sizeof(probs_inter->uv_mode_prob_0_2));
-		memcpy(probs_inter->uv_mode_prob_3_5, &fc->uv_mode_probs[3],
-			sizeof(probs_inter->uv_mode_prob_3_5));
-		memcpy(probs_inter->uv_mode_prob_6_8, &fc->uv_mode_probs[6],
-			sizeof(probs_inter->uv_mode_prob_6_8));
-		memcpy(probs_inter->uv_mode_prob_9, &fc->uv_mode_probs[9],
-			sizeof(probs_inter->uv_mode_prob_9));
-
-		/* mv related 6 x 128 */
-		memcpy(probs_inter->mv_joint_probs, fc->mv_joint_probs,
-			sizeof(probs_inter->mv_joint_probs));
-		memcpy(probs_inter->mv_sign_prob, fc->mv_sign_prob,
-			sizeof(probs_inter->mv_sign_prob));
-		memcpy(probs_inter->mv_class_probs, fc->mv_class_probs,
-			sizeof(probs_inter->mv_class_probs));
-		memcpy(probs_inter->mv_class0_bit_prob, fc->mv_class0_bit_prob,
-			sizeof(probs_inter->mv_class0_bit_prob));
-		memcpy(probs_inter->mv_bits_prob, fc->mv_bits_prob,
-			sizeof(probs_inter->mv_bits_prob));
-		memcpy(probs_inter->mv_class0_fr_probs, fc->mv_class0_fr_probs,
-			sizeof(probs_inter->mv_class0_fr_probs));
-		memcpy(probs_inter->mv_fr_probs, fc->mv_fr_probs,
-			sizeof(probs_inter->mv_fr_probs));
-		memcpy(probs_inter->mv_class0_hp_prob, fc->mv_class0_hp_prob,
-			sizeof(probs_inter->mv_class0_hp_prob));
-		memcpy(probs_inter->mv_hp_prob, fc->mv_hp_prob,
-			sizeof(probs_inter->mv_hp_prob));
+				rkprobs->intra_mode[i].uv_mode_prob[idx++] = ptr[i * 23 + m];
+			}
+		}
 	}
 }
 
-static void rk3399_vdec_vp9d_prepare_table(struct rockchip_vpu_ctx *ctx)
+static void init_inter_probs(struct rkvdec_ctx *ctx,
+			     const struct rkvdec_vp9_run *run)
 {
+	const struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
+	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+	struct rkvdec_vp9_priv_tbl *tbl = vp9_ctx->priv_tbl.cpu;
+	struct rkvdec_vp9_inter_frame_probs *rkprobs;
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
+	unsigned i, j, k;
+
+	rkprobs = &tbl->probs.inter_probs;
+	dec_params = run->decode_params;
+	fctx = run->frame_context;
+
 	/*
-	 * Prepare auxiliary buffer.
+	 * inter probs
+	 * 151 x 128 bits, aligned to 152 x 128 bits
+	 * inter only
+	 * intra_y_mode & inter_block info 6 x 128 bits
 	 */
-	rk3399_vdec_vp9d_output_prob(ctx);
+
+	memcpy(rkprobs->y_mode_probs, fctx->probs.y_mode_probs,
+	       sizeof(rkprobs->y_mode_probs));
+	memcpy(rkprobs->comp_mode_prob, fctx->probs.comp_mode_prob,
+	       sizeof(rkprobs->comp_mode_prob));
+	memcpy(rkprobs->comp_ref_prob, fctx->probs.comp_ref_prob,
+	       sizeof(rkprobs->comp_ref_prob));
+	memcpy(rkprobs->single_ref_prob, fctx->probs.single_ref_prob,
+	       sizeof(rkprobs->single_ref_prob));
+	memcpy(rkprobs->inter_mode_probs, fctx->probs.inter_mode_probs,
+	       sizeof(rkprobs->inter_mode_probs));
+	memcpy(rkprobs->interp_filter_probs, fctx->probs.interp_filter_probs,
+	       sizeof(rkprobs->interp_filter_probs));
+
+	/* 128 x 128 bits coeff related */
+	for (i = 0; i < ARRAY_SIZE(fctx->probs.coef_probs); i++) {
+		for (j = 0; j < ARRAY_SIZE(fctx->probs.coef_probs[0]); j++) {
+			for (k = 0; k < ARRAY_SIZE(fctx->probs.coef_probs[0][0]); k++)
+				write_coeff_plane(fctx->probs.coef_probs[i][j][k],
+						  rkprobs->coef_probs[k][i][j]);
+		}
+	}
+
+	/* intra uv mode 6 x 128 */
+	memcpy(rkprobs->uv_mode_prob_0_2, fctx->probs.uv_mode_probs,
+	       sizeof(rkprobs->uv_mode_prob_0_2));
+	memcpy(rkprobs->uv_mode_prob_3_5, &fctx->probs.uv_mode_probs[3],
+	       sizeof(rkprobs->uv_mode_prob_3_5));
+	memcpy(rkprobs->uv_mode_prob_6_8, &fctx->probs.uv_mode_probs[6],
+	       sizeof(rkprobs->uv_mode_prob_6_8));
+	memcpy(rkprobs->uv_mode_prob_9, &fctx->probs.uv_mode_probs[9],
+	       sizeof(rkprobs->uv_mode_prob_9));
+
+	/* mv related 6 x 128 */
+	memcpy(rkprobs->mv_joint_probs, fctx->probs.mv_joint_probs,
+	       sizeof(rkprobs->mv_joint_probs));
+	memcpy(rkprobs->mv_sign_prob, fctx->probs.mv_sign_prob,
+	       sizeof(rkprobs->mv_sign_prob));
+	memcpy(rkprobs->mv_class_probs, fctx->probs.mv_class_probs,
+	       sizeof(rkprobs->mv_class_probs));
+	memcpy(rkprobs->mv_class0_bit_prob, fctx->probs.mv_class0_bit_prob,
+	       sizeof(rkprobs->mv_class0_bit_prob));
+	memcpy(rkprobs->mv_bits_prob, fctx->probs.mv_bits_prob,
+	       sizeof(rkprobs->mv_bits_prob));
+	memcpy(rkprobs->mv_class0_fr_probs, fctx->probs.mv_class0_fr_probs,
+	       sizeof(rkprobs->mv_class0_fr_probs));
+	memcpy(rkprobs->mv_fr_probs, fctx->probs.mv_fr_probs,
+	       sizeof(rkprobs->mv_fr_probs));
+	memcpy(rkprobs->mv_class0_hp_prob, fctx->probs.mv_class0_hp_prob,
+	       sizeof(rkprobs->mv_class0_hp_prob));
+	memcpy(rkprobs->mv_hp_prob, fctx->probs.mv_hp_prob,
+	       sizeof(rkprobs->mv_hp_prob));
+}
+
+static void init_probs(struct rkvdec_ctx *ctx,
+		       const struct rkvdec_vp9_run *run)
+{
+	const struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
+	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+	struct rkvdec_vp9_priv_tbl *tbl = vp9_ctx->priv_tbl.cpu;
+	struct rkvdec_vp9_probs *rkprobs = &tbl->probs;
+	const struct v4l2_vp9_segmentation *seg;
+	bool intra_only;
+
+	dec_params = run->decode_params;
+	fctx = run->frame_context;
+	seg = &dec_params->seg;
+
+	memset(rkprobs, 0, sizeof(*rkprobs));
+
+	intra_only = !!(dec_params->flags &
+			(V4L2_VP9_FRAME_FLAG_KEY_FRAME |
+			 V4L2_VP9_FRAME_FLAG_INTRA_ONLY));
+
+	/* sb info  5 x 128 bit */
+	memcpy(rkprobs->partition_probs,
+	       intra_only ? kf_partition_probs : fctx->probs.partition_probs,
+	       sizeof(rkprobs->partition_probs));
+
+	memcpy(rkprobs->pred_probs, seg->pred_probs, sizeof(rkprobs->pred_probs));
+	memcpy(rkprobs->tree_probs, seg->tree_probs, sizeof(rkprobs->tree_probs));
+	memcpy(rkprobs->skip_prob, fctx->probs.skip_prob,
+	       sizeof(rkprobs->skip_prob));
+	memcpy(rkprobs->tx_probs_32x32, fctx->probs.tx_probs_32x32,
+	       sizeof(rkprobs->tx_probs_32x32));
+	memcpy(rkprobs->tx_probs_16x16, fctx->probs.tx_probs_16x16,
+	       sizeof(rkprobs->tx_probs_16x16));
+	memcpy(rkprobs->tx_probs_8x8, fctx->probs.tx_probs_8x8,
+	       sizeof(rkprobs->tx_probs_8x8));
+	memcpy(rkprobs->is_inter_prob, fctx->probs.is_inter_prob,
+	       sizeof(rkprobs->is_inter_prob));
+
+	if (intra_only)
+		init_intra_only_probs(ctx, run);
+	else
+		init_inter_probs(ctx, run);
 }
 
 struct vp9d_ref_config {
@@ -551,288 +591,338 @@ static struct vp9d_ref_config ref_config[REF_INDEX_NUM] = {
 	}
 };
 
-static void rk3399_vdec_vp9d_config_registers(struct rockchip_vpu_ctx *ctx)
+static struct rkvdec_vp9_decoded_buffer *
+get_ref_buf(struct rkvdec_ctx *ctx,
+	    const struct v4l2_ctrl_vp9_frame_decode_params *dec_params,
+	    struct vb2_v4l2_buffer *dst,
+	    enum v4l2_vp9_ref_id id)
 {
-	const struct v4l2_ctrl_vp9_decode_param *dec_param =
-		ctx->run.vp9d.dec_param;
-	struct v4l2_ctrl_vp9_entropy *entropy =
-		ctx->run.vp9d.entropy;
-	const struct v4l2_ctrl_vp9_frame_hdr *frmhdr = ctx->run.vp9d.frame_hdr;
-	struct rockchip_vpu_vp9d_last_info *last_info =
-		&ctx->hw.vp9d.last_info;
-	struct rockchip_vpu_dev *vpu = ctx->dev;
-	dma_addr_t hw_base;
-	u32 reg = 0;
-	u32 stream_len = 0;
-	u32 aligned_pitch = 0;
-	u32 y_len = 0;
-	u32 uv_len = 0;
-	u32 yuv_len = 0;
-	u32 bit_depth;
-	u32 align_height;
-	s32 i;
-	u16 mvscale[3][2];
+	struct v4l2_m2m_ctx *m2m_ctx = ctx->fh.m2m_ctx;
+	struct vb2_queue *cap_q = &m2m_ctx->cap_q_ctx.q;
+	int buf_idx;
 
-	bool intra_only = (frmhdr->frame_type == 0) ||
-		(frmhdr->flags & V4L2_VP9_FRAME_HDR_FLAG_FRAME_INTRA);
+	/*
+	 * If a ref is unused or invalid, address of current destination
+	 * buffer is returned.
+	 */
+	buf_idx = vb2_find_timestamp(cap_q, dec_params->refs[id], 0);
+	if (buf_idx < 0)
+		return vb2_to_vp9_decoded_buf(&dst->vb2_buf);
 
-	struct v4l2_vp9_entropy_ctx *fc;
+	return vb2_to_vp9_decoded_buf(vb2_get_buffer(cap_q, buf_idx));
+}
 
-	vpu_debug_enter();
+static dma_addr_t get_mv_base_addr(struct rkvdec_vp9_decoded_buffer *buf)
+{
+	u32 aligned_pitch, aligned_height, yuv_len, width, height;
 
-	fc = &entropy->current_entropy_ctx;
+	width = buf->info.frame_width_minus_1 + 1;
+	height = buf->info.frame_height_minus_1 + 1;
+	aligned_height = round_up(height, 64);
+	aligned_pitch = round_up(width * buf->info.bit_depth, 512) / 8;
+	yuv_len = (aligned_height * aligned_pitch * 3) / 2;
 
-	reg = RKVDEC_MODE(RKVDEC_MODE_VP9);
-	vdpu_write_relaxed(vpu, reg, RKVDEC_REG_SYSCTRL);
+	return vb2_dma_contig_plane_dma_addr(&buf->base.vb.vb2_buf, 0) +
+	       yuv_len;
+}
 
-	bit_depth = frmhdr->bit_depth;
-	align_height = round_up(ctx->dst_fmt.height, SB_DIM);
+static void
+config_ref_registers(struct rkvdec_ctx *ctx,
+		     const struct rkvdec_vp9_run *run,
+		     struct rkvdec_vp9_decoded_buffer **ref_bufs,
+		     enum v4l2_vp9_ref_id id)
+{
+	u32 width, height, aligned_pitch, aligned_height, y_len, yuv_len;
+	struct rkvdec_vp9_decoded_buffer *buf = ref_bufs[id];
+	struct rkvdec_dev *rkvdec = ctx->dev;
 
-	aligned_pitch = round_up(ctx->dst_fmt.width * bit_depth, 512) / 8;
-	y_len = align_height * aligned_pitch;
+	width = buf->info.frame_width_minus_1 + 1;
+	height = buf->info.frame_height_minus_1 + 1;
+	writel_relaxed(RKVDEC_VP9_FRAMEWIDTH(width) |
+		       RKVDEC_VP9_FRAMEHEIGHT(height),
+		       rkvdec->regs + ref_config[id].reg_frm_size);
+
+	writel_relaxed(vb2_dma_contig_plane_dma_addr(&buf->base.vb.vb2_buf, 0),
+		       rkvdec->regs + ref_config[id].reg_ref_base);
+
+	if (&buf->base.vb == run->base.bufs.dst)
+		return;
+
+	aligned_height = round_up(height, 64);
+	aligned_pitch = round_up(width * buf->info.bit_depth, 512) / 8;
+	y_len = aligned_height * aligned_pitch;
+	yuv_len = (y_len * 3) / 2;
+
+	writel_relaxed(RKVDEC_HOR_Y_VIRSTRIDE(aligned_pitch / 16) |
+		       RKVDEC_HOR_UV_VIRSTRIDE(aligned_pitch / 16),
+		       rkvdec->regs + ref_config[id].reg_hor_stride);
+	writel_relaxed(RKVDEC_VP9_REF_YSTRIDE(y_len / 16),
+		       rkvdec->regs + ref_config[id].reg_y_stride);
+
+	if (!ref_config[id].reg_yuv_stride)
+		return;
+
+	writel_relaxed(RKVDEC_VP9_REF_YUVSTRIDE(yuv_len / 16),
+		      rkvdec->regs + ref_config[id].reg_yuv_stride);
+}
+
+static bool seg_featured_enabled(const struct rkvdec_vp9_decoded_buffer *buf,
+				 enum v4l2_vp9_segmentation_feature feature,
+				 unsigned int segid)
+{
+	u8 mask = V4L2_VP9_SEGMENTATION_FEATURE_ENABLED(feature);
+
+	return !!(buf->info.seg.feature_enabled[segid] & mask);
+}
+
+static void
+config_seg_registers(struct rkvdec_ctx *ctx,
+		     struct rkvdec_vp9_decoded_buffer *last,
+		     unsigned int segid)
+{
+	struct rkvdec_dev *rkvdec = ctx->dev;
+	s16 feature_val;
+	u8 feature_id;
+	u32 val = 0;
+
+	feature_id = V4L2_VP9_SEGMENTATION_FEATURE_QP_DELTA;
+	if (seg_featured_enabled(last, feature_id, segid)) {
+		feature_val = last->info.seg.feature_data[segid][feature_id];
+		val |= RKVDEC_SEGID_FRAME_QP_DELTA_EN(1) |
+		       RKVDEC_SEGID_FRAME_QP_DELTA(feature_val);
+	}
+	
+	feature_id = V4L2_VP9_SEGMENTATION_FEATURE_LF_VAL;
+	if (seg_featured_enabled(last, feature_id, segid)) {
+		feature_val = last->info.seg.feature_data[segid][feature_id];
+		val |= RKVDEC_SEGID_FRAME_LOOPFILTER_VALUE_EN(1) |
+		       RKVDEC_SEGID_FRAME_LOOPFILTER_VALUE(feature_val);
+	}
+
+	feature_id = V4L2_VP9_SEGMENTATION_FEATURE_REFERINFO;
+	if (seg_featured_enabled(last, feature_id, segid)) {
+		feature_val = last->info.seg.feature_data[segid][feature_id];
+		val |= RKVDEC_SEGID_REFERINFO_EN(1) |
+		       RKVDEC_SEGID_REFERINFO(feature_val);
+	}
+
+	feature_id = V4L2_VP9_SEGMENTATION_FEATURE_FRAME_SKIP;
+	if (seg_featured_enabled(last, feature_id, segid))
+		val |= RKVDEC_SEGID_FRAME_SKIP_EN(1);
+
+	if (!segid &&
+	    (last->info.seg.flags & V4L2_VP9_SEGMENTATION_FLAG_ABS_OR_DELTA_UPDATE))
+		val |= RKVDEC_SEGID_ABS_DELTA(1);
+
+	writel_relaxed(val, rkvdec->regs + RKVDEC_VP9_SEGID_GRP(segid));
+}
+
+static void config_registers(struct rkvdec_ctx *ctx,
+			     const struct rkvdec_vp9_run *run)
+{
+	struct rkvdec_vp9_decoded_buffer *ref_bufs[V4L2_REF_ID_CNT], *dst, *last;
+	u32 y_len, uv_len, yuv_len, bit_depth, aligned_height, aligned_pitch;
+	const struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
+	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
+	u32 val, stream_len, last_frame_info = 0;
+	const struct v4l2_vp9_segmentation *seg;
+	struct rkvdec_dev *rkvdec = ctx->dev;
+	dma_addr_t addr;
+	bool intra_only;
+	unsigned int i;
+
+	dec_params = run->decode_params;
+	dst = vb2_to_vp9_decoded_buf(&run->base.bufs.dst->vb2_buf);
+	for (i = 0; i < ARRAY_SIZE(ref_bufs); i++)
+		ref_bufs[i] = get_ref_buf(ctx, dec_params, &dst->base.vb, i);
+
+	last = ref_bufs[V4L2_REF_ID_LAST];
+	dst->info = *dec_params;
+	fctx = run->frame_context;
+	seg = &dec_params->seg;
+
+	intra_only = !!(dec_params->flags &
+			(V4L2_VP9_FRAME_FLAG_KEY_FRAME |
+			 V4L2_VP9_FRAME_FLAG_INTRA_ONLY));
+
+	writel_relaxed(RKVDEC_MODE(RKVDEC_MODE_VP9),
+		       rkvdec->regs + RKVDEC_REG_SYSCTRL);
+
+	bit_depth = dec_params->bit_depth;
+	aligned_height = round_up(ctx->decoded_fmt.fmt.pix_mp.height, 64);
+
+	aligned_pitch = round_up(ctx->decoded_fmt.fmt.pix_mp.width *
+				 bit_depth,
+				 512) / 8;
+	y_len = aligned_height * aligned_pitch;
 	uv_len = y_len / 2;
 	yuv_len = y_len + uv_len;
 
-	reg = RKVDEC_Y_HOR_VIRSTRIDE(aligned_pitch / 16)
-		| RKVDEC_UV_HOR_VIRSTRIDE(aligned_pitch / 16);
-	vdpu_write_relaxed(vpu, reg, RKVDEC_REG_PICPAR);
+	writel_relaxed(RKVDEC_Y_HOR_VIRSTRIDE(aligned_pitch / 16) |
+		       RKVDEC_UV_HOR_VIRSTRIDE(aligned_pitch / 16),
+		       rkvdec->regs + RKVDEC_REG_PICPAR);
+	writel_relaxed(RKVDEC_Y_VIRSTRIDE(y_len / 16),
+		       rkvdec->regs + RKVDEC_REG_Y_VIRSTRIDE);
+	writel_relaxed(RKVDEC_YUV_VIRSTRIDE(yuv_len / 16),
+		       rkvdec->regs + RKVDEC_REG_YUV_VIRSTRIDE);
 
-	reg = RKVDEC_Y_VIRSTRIDE(y_len / 16);
-	vdpu_write_relaxed(vpu, reg, RKVDEC_REG_Y_VIRSTRIDE);
+	stream_len = vb2_get_plane_payload(&run->base.bufs.src->vb2_buf, 0);
+	writel_relaxed(RKVDEC_STRM_LEN(stream_len),
+		       rkvdec->regs + RKVDEC_REG_STRM_LEN);
 
-	reg = RKVDEC_YUV_VIRSTRIDE(yuv_len / 16);
-	vdpu_write_relaxed(vpu, reg, RKVDEC_REG_YUV_VIRSTRIDE);
+	/*
+	 * Reset count buffer, because decoder only output intra related syntax
+	 * counts when decoding intra frame, but update entropy need to update
+	 * all the probabilities.
+	 */
+	if (intra_only)
+		memset(vp9_ctx->count_tbl.cpu, 0, vp9_ctx->count_tbl.size);
 
-	stream_len = vb2_get_plane_payload(&ctx->run.src->b.vb2_buf, 0);
+	if (seg->flags & V4L2_VP9_SEGMENTATION_FLAG_UPDATE_MAP)
+		dst->segmapid = ref_bufs[V4L2_REF_ID_LAST]->segmapid + 1;
+	else
+		dst->segmapid = ref_bufs[V4L2_REF_ID_LAST]->segmapid;
 
-	reg = RKVDEC_STRM_LEN(stream_len);
-	vdpu_write_relaxed(vpu, reg, RKVDEC_REG_STRM_LEN);
+	for (i = 0; i < ARRAY_SIZE(ref_bufs); i++)
+		config_ref_registers(ctx, run, ref_bufs, i);
 
-	if (intra_only) {
-		/*
-		 * reset count buffer, because decoder only output intra
-		 * related syntax counts when decoding intra frame,
-		 * but update entropy need to update all the probabilities.
-		 */
-		void *cnt_ptr = ctx->hw.vp9d.priv_dst.cpu;
+	for (i = 0; i < 8; i++)
+		config_seg_registers(ctx, ref_bufs[V4L2_REF_ID_LAST], i);
 
-		memset(cnt_ptr, 0, RKV_VP9D_COUNT_SIZE);
-	}
-
-	if (!intra_only && !(frmhdr->flags &
-			     V4L2_VP9_FRAME_HDR_FLAG_ERR_RES)) {
-		last_info->mv_base_addr = ctx->hw.vp9d.mv_base_addr;
-
-		if (!(frmhdr->sgmnt_params.flags &
-		      V4L2_VP9_SGMNT_PARAM_FLAG_ENABLED &&
-			!(frmhdr->sgmnt_params.flags &
-			  V4L2_VP9_SGMNT_PARAM_FLAG_UPDATE_MAP)))
-			last_info->last_segid_flag =
-				!last_info->last_segid_flag;
-	}
-
-	/* store mv base address, before yuv_virstride change */
-	ctx->hw.vp9d.mv_base_addr =
-		vb2_dma_contig_plane_dma_addr(&ctx->run.dst->b.vb2_buf, 0) +
-		yuv_len;
-
-	for (i = 0; i < REF_INDEX_NUM; i++) {
-		u32 ref_idx;
-		u32 width;
-		u32 height;
-		struct vb2_buffer *buf;
-
-		ref_idx = dec_param->active_ref_frames[i].buf_index;
-
-		if (ref_idx >= ctx->vq_dst.num_buffers) {
-			buf = &ctx->run.dst->b.vb2_buf;
-			vdpu_write_relaxed(
-				vpu,
-				vb2_dma_contig_plane_dma_addr(buf, 0),
-				ref_config[i].reg_ref_base);
-
-			reg = RKVDEC_VP9_FRAMEWIDTH(frmhdr->frame_width)
-				| RKVDEC_VP9_FRAMEHEIGHT(frmhdr->frame_height);
-			vdpu_write_relaxed(vpu, reg,
-					   ref_config[i].reg_frm_size);
-			continue;
-		}
-
-		width = dec_param->active_ref_frames[i].frame_width;
-		height = dec_param->active_ref_frames[i].frame_height;
-		buf = ctx->dst_bufs[ref_idx];
-
-		reg = RKVDEC_VP9_FRAMEWIDTH(width)
-			| RKVDEC_VP9_FRAMEHEIGHT(height);
-		vdpu_write_relaxed(vpu, reg, ref_config[i].reg_frm_size);
-
-		align_height = round_up(height, SB_DIM);
-		aligned_pitch = round_up(width * bit_depth, 512) / 8;
-
-		y_len = aligned_pitch * align_height;
-		uv_len = y_len / 2;
-		yuv_len = y_len + uv_len;
-
-		reg = RKVDEC_HOR_Y_VIRSTRIDE(aligned_pitch / 16)
-			| RKVDEC_HOR_UV_VIRSTRIDE(aligned_pitch / 16);
-		vdpu_write_relaxed(vpu, reg, ref_config[i].reg_hor_stride);
-
-		reg = RKVDEC_VP9_REF_YSTRIDE(y_len / 16);
-		vdpu_write_relaxed(vpu, reg, ref_config[i].reg_y_stride);
-
-		reg = RKVDEC_VP9_REF_YUVSTRIDE(yuv_len / 16);
-		if (ref_config[i].reg_yuv_stride)
-			vdpu_write_relaxed(vpu, reg,
-					   ref_config[i].reg_yuv_stride);
-
-		vdpu_write_relaxed(vpu, vb2_dma_contig_plane_dma_addr(buf, 0),
-			ref_config[i].reg_ref_base);
-	}
-
-	for (i = 0; i < 8; i++) {
-		reg = RKVDEC_SEGID_FRAME_QP_DELTA_EN(
-			!!(last_info->feature_mask[i] & 1));
-		reg |= RKVDEC_SEGID_FRAME_QP_DELTA(
-			last_info->feature_data[i][0]);
-		reg |= RKVDEC_SEGID_FRAME_LOOPFILTER_VALUE_EN(
-			!!(last_info->feature_mask[i] & 2));
-		reg |= RKVDEC_SEGID_FRAME_LOOPFILTER_VALUE(
-			last_info->feature_data[i][1]);
-		reg |= RKVDEC_SEGID_REFERINFO_EN(
-			!!(last_info->feature_mask[i] & 4));
-		reg |= RKVDEC_SEGID_REFERINFO(last_info->feature_data[i][2]);
-		reg |= RKVDEC_SEGID_FRAME_SKIP_EN(
-			!!(last_info->feature_mask[i] & 8));
-		reg |= RKVDEC_SEGID_ABS_DELTA(
-			!!(i == 0 && last_info->abs_delta));
-		vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_SEGID_GRP(i));
-	}
-
-	reg = RKVDEC_VP9_TX_MODE(entropy->tx_mode)
-		| RKVDEC_VP9_FRAME_REF_MODE(entropy->reference_mode);
-	vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_CPRHEADER_CONFIG);
-
-	reg = 0;
-	if (intra_only) {
-		last_info->segmentation_enable = false;
-		last_info->intra_only = true;
-	} else {
-		reg = RKVDEC_REF_DELTAS0_LASTFRAME(last_info->ref_deltas[0]);
-		reg |= RKVDEC_REF_DELTAS1_LASTFRAME(last_info->ref_deltas[1]);
-		reg |= RKVDEC_REF_DELTAS2_LASTFRAME(last_info->ref_deltas[2]);
-		reg |= RKVDEC_REF_DELTAS3_LASTFRAME(last_info->ref_deltas[3]);
-		vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_REF_DELTAS_LASTFRAME);
-
-		reg = RKVDEC_MODE_DELTAS0_LASTFRAME(last_info->mode_deltas[0]);
-		reg |= RKVDEC_MODE_DELTAS1_LASTFRAME(last_info->mode_deltas[1]);
-		vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_INFO_LASTFRAME);
-	}
-
-	if (last_info->segmentation_enable)
-		reg |= RKVDEC_SEG_EN_LASTFRAME;
-	if (last_info->show_frame)
-		reg |= RKVDEC_LAST_SHOW_FRAME;
-	if (last_info->intra_only)
-		reg |= RKVDEC_LAST_INTRA_ONLY;
-	if (frmhdr->frame_width == last_info->width &&
-	    frmhdr->frame_height == last_info->height)
-		reg |= RKVDEC_LAST_WIDHHEIGHT_EQCUR;
-	vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_INFO_LASTFRAME);
-
-	reg = stream_len - frmhdr->header_size_in_bytes;
-	vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_LASTTILE_SIZE);
-
-	for (i = 0; i < 3; i++) {
-		u32 refw = dec_param->active_ref_frames[i].frame_width;
-		u32 refh = dec_param->active_ref_frames[i].frame_height;
-
-		mvscale[i][0] = (refw << 14) / frmhdr->frame_width;
-		mvscale[i][1] = (refh << 14) / frmhdr->frame_height;
-	}
+	writel_relaxed(RKVDEC_VP9_TX_MODE(dec_params->tx_mode) |
+		       RKVDEC_VP9_FRAME_REF_MODE(dec_params->reference_mode),
+		       rkvdec->regs + RKVDEC_VP9_CPRHEADER_CONFIG);
 
 	if (!intra_only) {
-		/* last frame */
-		reg = RKVDEC_VP9_REF_HOR_SCALE(mvscale[0][0])
-			| RKVDEC_VP9_REF_VER_SCALE(mvscale[0][1]);
-		vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_REF_SCALE(0));
-		/* golden frame */
-		reg = RKVDEC_VP9_REF_HOR_SCALE(mvscale[1][0])
-			| RKVDEC_VP9_REF_VER_SCALE(mvscale[1][1]);
-		vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_REF_SCALE(1));
-		/* altref frame */
-		reg = RKVDEC_VP9_REF_HOR_SCALE(mvscale[2][0])
-			| RKVDEC_VP9_REF_VER_SCALE(mvscale[2][1]);
-		vdpu_write_relaxed(vpu, reg, RKVDEC_VP9_REF_SCALE(2));
+		s8 delta;
+
+		val = 0;
+		for (i = 0; i < ARRAY_SIZE(last->info.lf.ref_deltas); i++) {
+			delta = last->info.lf.ref_deltas[i];
+			val |= RKVDEC_REF_DELTAS_LASTFRAME(i, delta);
+		}
+
+		writel_relaxed(val,
+			       rkvdec->regs + RKVDEC_VP9_REF_DELTAS_LASTFRAME);
+
+		for (i = 0; i < ARRAY_SIZE(last->info.lf.mode_deltas); i++) {
+			delta = last->info.lf.mode_deltas[i];
+			last_frame_info |= RKVDEC_MODE_DELTAS_LASTFRAME(i,
+									delta);
+		}
 	}
 
-	hw_base = vb2_dma_contig_plane_dma_addr(&ctx->run.dst->b.vb2_buf, 0);
-	vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_DECOUT_BASE);
+	if (last->info.seg.flags & V4L2_VP9_SEGMENTATION_FLAG_ENABLED)
+		last_frame_info |= RKVDEC_SEG_EN_LASTFRAME;
 
-	hw_base = vb2_dma_contig_plane_dma_addr(&ctx->run.src->b.vb2_buf, 0);
-	vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_STRM_RLC_BASE);
+	if (last->info.flags & V4L2_VP9_FRAME_FLAG_SHOW_FRAME)
+		last_frame_info |= RKVDEC_LAST_SHOW_FRAME;
 
-	hw_base = ctx->hw.vp9d.priv_tbl.dma +
-		offsetof(struct rkvdec_vp9_priv_tbl, prob_table);
-	vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_CABACTBL_PROB_BASE);
+	if (last->info.flags &
+	    (V4L2_VP9_FRAME_FLAG_KEY_FRAME | V4L2_VP9_FRAME_FLAG_INTRA_ONLY))
+		last_frame_info |= RKVDEC_LAST_INTRA_ONLY;
 
-	hw_base = ctx->hw.vp9d.priv_dst.dma;
-	vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_VP9COUNT_BASE);
+	if (dec_params->frame_width_minus_1 == last->info.frame_width_minus_1 &&
+	    dec_params->frame_height_minus_1 == last->info.frame_height_minus_1)
+		last_frame_info |= RKVDEC_LAST_WIDHHEIGHT_EQCUR;
 
-	if (last_info->last_segid_flag) {
-		hw_base = ctx->hw.vp9d.priv_tbl.dma +
-			offsetof(struct rkvdec_vp9_priv_tbl, segmap_last);
-		vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_VP9_SEGIDCUR_BASE);
-		hw_base = ctx->hw.vp9d.priv_tbl.dma +
-			offsetof(struct rkvdec_vp9_priv_tbl, segmap);
-		vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_VP9_SEGIDLAST_BASE);
-	} else {
-		hw_base = ctx->hw.vp9d.priv_tbl.dma +
-			offsetof(struct rkvdec_vp9_priv_tbl, segmap);
-		vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_VP9_SEGIDCUR_BASE);
-		hw_base = ctx->hw.vp9d.priv_tbl.dma +
-			offsetof(struct rkvdec_vp9_priv_tbl, segmap_last);
-		vdpu_write_relaxed(vpu, hw_base, RKVDEC_REG_VP9_SEGIDLAST_BASE);
+	writel_relaxed(last_frame_info,
+		       rkvdec->regs + RKVDEC_VP9_INFO_LASTFRAME);
+
+	writel_relaxed(stream_len - dec_params->header_size_in_bytes,
+		       rkvdec->regs + RKVDEC_VP9_LASTTILE_SIZE);
+
+	for (i = 0; !intra_only && i < ARRAY_SIZE(ref_bufs); i++) {
+		u32 refw = ref_bufs[i]->info.frame_width_minus_1 + 1;
+		u32 refh = ref_bufs[i]->info.frame_height_minus_1 + 1;
+		u32 hscale, vscale;
+
+		hscale = (refw << 14) /	(dec_params->frame_width_minus_1 + 1);
+		vscale = (refh << 14) / (dec_params->frame_height_minus_1 + 1);
+		writel_relaxed(RKVDEC_VP9_REF_HOR_SCALE(hscale) |
+			       RKVDEC_VP9_REF_VER_SCALE(vscale),
+			       rkvdec->regs + RKVDEC_VP9_REF_SCALE(i));
 	}
 
+	addr = vb2_dma_contig_plane_dma_addr(&dst->base.vb.vb2_buf, 0);
+	writel_relaxed(addr, rkvdec->regs + RKVDEC_REG_DECOUT_BASE);
+	addr = vb2_dma_contig_plane_dma_addr(&run->base.bufs.src->vb2_buf, 0);
+	writel_relaxed(addr, rkvdec->regs + RKVDEC_REG_STRM_RLC_BASE);
+	writel_relaxed(vp9_ctx->priv_tbl.dma +
+		       offsetof(struct rkvdec_vp9_priv_tbl, probs),
+		       rkvdec->regs + RKVDEC_REG_CABACTBL_PROB_BASE);
+	writel_relaxed(vp9_ctx->count_tbl.dma,
+		       rkvdec->regs + RKVDEC_REG_VP9COUNT_BASE);
 
-	if (!last_info->mv_base_addr)
-		last_info->mv_base_addr = ctx->hw.vp9d.mv_base_addr;
+	writel_relaxed(vp9_ctx->priv_tbl.dma +
+		       offsetof(struct rkvdec_vp9_priv_tbl, segmap) +
+		       (RKVDEC_VP9_MAX_SEGMAP_SIZE * dst->segmapid),
+		       rkvdec->regs + RKVDEC_REG_VP9_SEGIDCUR_BASE);
+	writel_relaxed(vp9_ctx->priv_tbl.dma +
+		       offsetof(struct rkvdec_vp9_priv_tbl, segmap) +
+		       (RKVDEC_VP9_MAX_SEGMAP_SIZE * last->segmapid),
+		       rkvdec->regs + RKVDEC_REG_VP9_SEGIDLAST_BASE);
 
-	vdpu_write_relaxed(vpu, last_info->mv_base_addr,
-			   RKVDEC_VP9_REF_COLMV_BASE);
+	if (!intra_only &&
+	    !(dec_params->flags & V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT))
+		addr = get_mv_base_addr(ref_bufs[V4L2_REF_ID_LAST]);
+	else
+		addr = get_mv_base_addr(dst);
 
-	vdpu_write_relaxed(vpu, ctx->dst_fmt.width |
-				(ctx->dst_fmt.height << 16),
-			   RKVDEC_REG_PERFORMANCE_CYCLE);
+	writel_relaxed(addr, rkvdec->regs + RKVDEC_VP9_REF_COLMV_BASE);
+
+	writel_relaxed(ctx->decoded_fmt.fmt.pix_mp.width |
+		       (ctx->decoded_fmt.fmt.pix_mp.height << 16),
+		       rkvdec->regs + RKVDEC_REG_PERFORMANCE_CYCLE);
 }
 
-void rk3399_vdec_vp9d_run(struct rockchip_vpu_ctx *ctx)
+static void rkvdec_vp9_run_preamble(struct rkvdec_ctx *ctx,
+				    struct rkvdec_vp9_run *run)
 {
-	struct rockchip_vpu_dev *vpu = ctx->dev;
+	struct v4l2_ctrl *ctrl;
+	u8 frm_ctx;
 
-	/* Prepare data in memory. */
-	rk3399_vdec_vp9d_prepare_table(ctx);
+	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
+			      V4L2_CTRL_TYPE_VP9_FRAME_DECODE_PARAMS);
+	run->decode_params = ctrl ? ctrl->p_cur.p : NULL;
 
-	rockchip_vpu_power_on(vpu);
+	frm_ctx = run->decode_params->frame_context_idx;
+	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
+			      V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(frm_ctx));
+	if (ctrl)
+		run->frame_context = ctrl->p_cur.p;
+
+	rkvdec_run_preamble(ctx, &run->base);
+}
+
+static void rkvdec_vp9_run(struct rkvdec_ctx *ctx)
+{
+	struct rkvdec_dev *rkvdec = ctx->dev;
+	struct rkvdec_vp9_run run;
+
+	rkvdec_vp9_run_preamble(ctx, &run);
+
+	/* Prepare probs. */
+	init_probs(ctx, &run);
 
 	/* Configure hardware registers. */
-	rk3399_vdec_vp9d_config_registers(ctx);
+	config_registers(ctx, &run);
 
-	schedule_delayed_work(&vpu->watchdog_work, msecs_to_jiffies(2000));
+	rkvdec_run_postamble(ctx, &run.base);
 
-	vdpu_write(vpu, 1, RKVDEC_REG_PREF_LUMA_CACHE_COMMAND);
-	vdpu_write(vpu, 1, RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
+	schedule_delayed_work(&rkvdec->watchdog_work, msecs_to_jiffies(2000));
+
+	writel(1, rkvdec->regs + RKVDEC_REG_PREF_LUMA_CACHE_COMMAND);
+	writel(1, rkvdec->regs + RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
 
 	/* Start decoding! */
-	vdpu_write(vpu,
-		   RKVDEC_INTERRUPT_DEC_E |
-		   RKVDEC_CONFIG_DEC_CLK_GATE_E |
-		   RKVDEC_TIMEOUT_E,
-		   RKVDEC_REG_INTERRUPT);
+	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E |
+	       RKVDEC_TIMEOUT_E,
+	       rkvdec->regs + RKVDEC_REG_INTERRUPT);
 }
 
-static u8 adapt_prob(u8 p1, u32 ct0, u32 ct1,
-		     s32 max_count, s32 update_factor)
+static u8 adapt_prob(u8 p1, u32 ct0, u32 ct1, u16 max_count, u32 update_factor)
 {
 	u32 ct = ct0 + ct1, p2;
 	u32 lo = 1;
@@ -853,206 +943,253 @@ static u8 adapt_prob(u8 p1, u32 ct0, u32 ct1,
 	return p1 + (((p2 - p1) * update_factor + 128) >> 8);
 }
 
-#define BAND_COEFF_CONTEXTS(band) ((band) == 0 ? 3 : COEFF_CONTEXTS)
+#define BAND_6(band) ((band) == 0 ? 3 : 6)
 
-static void vp9d_adapt_coeff(
-	u8 coef_probs[COEF_BANDS][COEFF_CONTEXTS][3],
-	u8 pre_coef_probs[COEF_BANDS][COEFF_CONTEXTS][3],
-	struct refs_counts ref_cnt[COEF_BANDS][COEFF_CONTEXTS], s32 uf)
+static void adapt_coeff(const u8 pre_coef_probs[6][6][3],
+			u8 coef_probs[6][6][3],
+			const struct rkvdec_vp9_refs_counts ref_cnt[6][6],
+			u32 uf)
 {
 	s32 l, m, n;
 
-	for (l = 0; l < COEF_BANDS; l++) {
-		for (m = 0; m < BAND_COEFF_CONTEXTS(l); m++) {
-			u8 *pp = pre_coef_probs[l][m];
+	for (l = 0; l < 6; l++) {
+		for (m = 0; m < BAND_6(l); m++) {
+			const u8 *pp = pre_coef_probs[l][m];
 			u8 *p = coef_probs[l][m];
 			const u32 n0 = ref_cnt[l][m].coeff[0];
 			const u32 n1 = ref_cnt[l][m].coeff[1];
 			const u32 n2 = ref_cnt[l][m].coeff[2];
 			const u32 neob = ref_cnt[l][m].eob[1];
 			const u32 eob_count = ref_cnt[l][m].eob[0];
-
-			const u32 branch_ct[UNCONSTRAINED_NODES][2] = {
+			const u32 branch_ct[3][2] = {
 				{ neob, eob_count - neob },
 				{ n0, n1 + n2 },
 				{ n1, n2 }
 			};
-			for (n = 0; n < UNCONSTRAINED_NODES; n++)
+
+			for (n = 0; n < 3; n++)
 				p[n] = adapt_prob(pp[n], branch_ct[n][0],
 						  branch_ct[n][1], 24, uf);
 		}
 	}
 }
 
-static int intra_mode_map[10] = {
-	1, 2, 0, 3, 4, 5, 6, 8, 7, 9
-};
-
-static void adapt_probs(struct rockchip_vpu_ctx *ctx, u8 *count_info)
+static void
+adapt_coef_probs(const struct v4l2_vp9_probs *orig,
+		 struct v4l2_vp9_probs *cur,
+		 const struct rkvdec_vp9_refs_counts ref_cnt[2][4][2][6][6],
+		 unsigned int uf)
 {
-	s32 i, j, k;
-	const struct v4l2_ctrl_vp9_frame_hdr *frmhdr = ctx->run.vp9d.frame_hdr;
-	struct v4l2_vp9_entropy_ctx *fc =
-		&ctx->run.vp9d.entropy->current_entropy_ctx;
-	struct v4l2_vp9_entropy_ctx *pre_fc =
-		&ctx->run.vp9d.entropy->initial_entropy_ctx;
-	struct rockchip_vpu_vp9d_last_info *last_info = &ctx->hw.vp9d.last_info;
-	bool intra_only = (frmhdr->frame_type == 0) ||
-			  (frmhdr->flags & V4L2_VP9_FRAME_HDR_FLAG_FRAME_INTRA);
-	s32 uf = (intra_only || last_info->frame_type != 0) ? 112 : 128;
-	struct refs_counts (*ref_cnt)[REF_TYPES][TX_SIZES][PLANE_TYPES]
-				     [COEF_BANDS][COEFF_CONTEXTS];
+	unsigned int i, j, k;
 
-	union rkv_vp9_symbol_counts *counts =
-		(union rkv_vp9_symbol_counts *)count_info;
-
-	struct symbol_counts_for_inter_frame *interc = &counts->inter_spec;
-
-	if (intra_only)
-		ref_cnt = &counts->intra_spec.ref_cnt;
-	else
-		ref_cnt = &counts->inter_spec.ref_cnt;
-
-
-	/* coefficients */
-	for (i = 0; i < TX_SIZES; i++) {
-		for (j = 0; j < PLANE_TYPES; j++) {
-			for (k = 0; k < REF_TYPES; k++) {
-				vp9d_adapt_coeff(fc->coef_probs[i][j][k],
-						 pre_fc->coef_probs[i][j][k],
-						 (*ref_cnt)[k][i][j],
-						 uf);
+	for (i = 0; i < ARRAY_SIZE(orig->coef_probs); i++) {
+		for (j = 0; j < ARRAY_SIZE(orig->coef_probs[0]); j++) {
+			for (k = 0; k < ARRAY_SIZE(orig->coef_probs[0][0]);
+			     k++) {
+				adapt_coeff(orig->coef_probs[i][j][k],
+					    cur->coef_probs[i][j][k],
+					    ref_cnt[k][i][j],
+					    uf);
 			}
 		}
 	}
+}
 
-	if (intra_only)
-		return;
+static void adapt_intra_frame_probs(const struct v4l2_vp9_probs *orig,
+				    struct v4l2_vp9_probs *cur,
+				    const void *count_tbl)
+{
+	const struct rkvdec_vp9_intra_frame_symbol_counts *sym_cnts = count_tbl;
 
-	/* skip flag */
-	for (i = 0; i < 3; i++)
-		fc->skip_prob[i] = adapt_prob(pre_fc->skip_prob[i],
-					      interc->skip[i][0],
-					      interc->skip[i][1], 20, 128);
+	adapt_coef_probs(orig, cur, sym_cnts->ref_cnt, 112);
+}
 
-	/* intra/inter flag */
-	for (i = 0; i < 4; i++)
-		fc->is_inter_prob[i] = adapt_prob(pre_fc->is_inter_prob[i],
-						  interc->inter[i][0],
-						  interc->inter[i][1], 20, 128);
+static void
+adapt_skip_probs(const struct v4l2_vp9_probs *orig,
+		 struct v4l2_vp9_probs *cur,
+		 const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
 
-	/* comppred flag */
-	for (i = 0; i < 5; i++)
-		fc->comp_mode_prob[i] =
-			adapt_prob(pre_fc->comp_mode_prob[i],
-				   interc->comp[i][0],
-				   interc->comp[i][1], 20, 128);
+	for (i = 0; i < ARRAY_SIZE(orig->skip_prob); i++)
+		cur->skip_prob[i] = adapt_prob(orig->skip_prob[i],
+					       sym_cnts->skip[i][0],
+					       sym_cnts->skip[i][1], 20, 128);
+}
 
-	/* reference frames */
-	for (i = 0; i < 5; i++)
-		fc->comp_ref_prob[i] =
-			adapt_prob(pre_fc->comp_ref_prob[i],
-				   interc->comp_ref[i][0],
-				   interc->comp_ref[i][1], 20, 128);
+static void
+adapt_is_inter_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
 
-	if (ctx->run.vp9d.entropy->reference_mode != PRED_COMPREF) {
-		for (i = 0; i < 5; i++) {
-			u8 *pp = pre_fc->single_ref_prob[i];
-			u8 *p = fc->single_ref_prob[i];
-			u32(*c)[2] = interc->single_ref[i];
+	for (i = 0; i < ARRAY_SIZE(orig->is_inter_prob); i++)
+		cur->is_inter_prob[i] = adapt_prob(orig->is_inter_prob[i],
+						   sym_cnts->inter[i][0],
+						   sym_cnts->inter[i][1],
+						   20, 128);
+}
 
-			p[0] = adapt_prob(pp[0], c[0][0], c[0][1], 20, 128);
-			p[1] = adapt_prob(pp[1], c[1][0], c[1][1], 20, 128);
-		}
+static void
+adapt_comp_mode_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->comp_mode_prob); i++)
+		cur->comp_mode_prob[i] = adapt_prob(orig->comp_mode_prob[i],
+						    sym_cnts->comp[i][0],
+						    sym_cnts->comp[i][1],
+						    20, 128);
+}
+
+static void
+adapt_comp_ref_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->comp_ref_prob); i++)
+		cur->comp_ref_prob[i] =	adapt_prob(orig->comp_ref_prob[i],
+						   sym_cnts->comp_ref[i][0],
+						   sym_cnts->comp_ref[i][1],
+						   20, 128);
+}
+
+static void
+adapt_single_ref_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->single_ref_prob); i++) {
+		const u8 *pp = orig->single_ref_prob[i];
+		u8 *p = cur->single_ref_prob[i];
+
+		p[0] = adapt_prob(pp[0], sym_cnts->single_ref[i][0][0],
+				  sym_cnts->single_ref[i][0][1], 20, 128);
+		p[1] = adapt_prob(pp[1], sym_cnts->single_ref[i][1][0],
+				  sym_cnts->single_ref[i][1][1], 20, 128);
 	}
+}
 
-	/* block partitioning */
-	for (i = 0; i < PARTITION_CONTEXTS; i++) {
-		u8 *pp = pre_fc->partition_probs[i];
-		u8 *p = fc->partition_probs[i];
-		u32 *c = interc->partition[i];
+static void
+adapt_partition_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
 
-		p[0] = adapt_prob(pp[0], c[0], c[1] + c[2] + c[3], 20,
-				  128);
-		p[1] = adapt_prob(pp[1], c[1], c[2] + c[3], 20, 128);
-		p[2] = adapt_prob(pp[2], c[2], c[3], 20, 128);
-	}
-
-	/* tx size */
-	if (ctx->run.vp9d.entropy->tx_mode == TX_SWITCHABLE) {
-		for (i = 0; i < 2; i++) {
-			u32 *c16 = interc->tx16p[i], *c32 = interc->tx32p[i];
-
-			fc->tx_probs_8x8[i][0] =
-				adapt_prob(pre_fc->tx_probs_8x8[i][0],
-					   interc->tx8p[i][0],
-					   interc->tx8p[i][1], 20, 128);
-			fc->tx_probs_16x16[i][0] =
-				adapt_prob(pre_fc->tx_probs_16x16[i][0],
-					   c16[0], c16[1] + c16[2], 20, 128);
-			fc->tx_probs_16x16[i][1] =
-				adapt_prob(pre_fc->tx_probs_16x16[i][1],
-					   c16[1], c16[2], 20, 128);
-			fc->tx_probs_32x32[i][0] =
-				adapt_prob(pre_fc->tx_probs_32x32[i][0], c32[0],
-					   c32[1] + c32[2] + c32[3], 20, 128);
-			fc->tx_probs_32x32[i][1] =
-				adapt_prob(pre_fc->tx_probs_32x32[i][1], c32[1],
-					   c32[2] + c32[3], 20, 128);
-			fc->tx_probs_32x32[i][2] =
-				adapt_prob(pre_fc->tx_probs_32x32[i][2], c32[2],
-					   c32[3], 20, 128);
-		}
-	}
-
-	/* interpolation filter */
-	if (frmhdr->interpolation_filter == FILTER_SWITCHABLE) {
-		for (i = 0; i < 4; i++) {
-			u8 *pp = pre_fc->interp_filter_probs[i];
-			u8 *p = fc->interp_filter_probs[i];
-			u32 *c = interc->filter[i];
-
-			p[0] = adapt_prob(pp[0], c[0], c[1] + c[2], 20, 128);
-			p[1] = adapt_prob(pp[1], c[1], c[2], 20, 128);
-		}
-	}
-
-	/* inter modes */
-	for (i = 0; i < 7; i++) {
-		u8 *pp = pre_fc->inter_mode_probs[i];
-		u8 *p = fc->inter_mode_probs[i];
-		u32 *c = interc->mv_mode[i];
-
-		p[0] = adapt_prob(pp[0], c[2], c[1] + c[0] + c[3], 20, 128);
-		p[1] = adapt_prob(pp[1], c[0], c[1] + c[3], 20, 128);
-		p[2] = adapt_prob(pp[2], c[1], c[3], 20, 128);
-	}
-
-	/* mv joints */
-	{
-		u8 *pp = pre_fc->mv_joint_probs;
-		u8 *p = fc->mv_joint_probs;
-		u32 *c = interc->mv_joint;
+	for (i = 0; i < ARRAY_SIZE(orig->partition_probs); i++) {
+		const u8 *pp = orig->partition_probs[i];
+		const u32 *c = sym_cnts->partition[i];
+		u8 *p = cur->partition_probs[i];
 
 		p[0] = adapt_prob(pp[0], c[0], c[1] + c[2] + c[3], 20, 128);
 		p[1] = adapt_prob(pp[1], c[1], c[2] + c[3], 20, 128);
 		p[2] = adapt_prob(pp[2], c[2], c[3], 20, 128);
 	}
+}
 
-	/* mv components */
-	for (i = 0; i < 2; i++) {
-		u8 *pp = pre_fc->mv_sign_prob;
-		u8 *p = fc->mv_sign_prob;
-		u32 *c, (*c2)[2], sum;
+static void
+adapt_tx_probs(const struct v4l2_vp9_probs *orig,
+	       struct v4l2_vp9_probs *cur,
+	       const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
 
-		p[i] = adapt_prob(pp[i], interc->sign[i][0],
-				  interc->sign[i][1], 20, 128);
+	for (i = 0; i < ARRAY_SIZE(orig->tx_probs_8x8); i++) {
+		u8 *cur_16x16 = cur->tx_probs_16x16[i];
+		u8 *cur_32x32 = cur->tx_probs_32x32[i];
+		const u32 *c16 = sym_cnts->tx16p[i];
+		const u32 *c32 = sym_cnts->tx32p[i];
+		u8 *cur_8x8 = cur->tx_probs_8x8[i];
 
-		pp = pre_fc->mv_class_probs[i];
-		p = fc->mv_class_probs[i];
-		c = interc->classes[i];
-		sum = c[1] + c[2] + c[3] + c[4] + c[5] +
-			c[6] + c[7] + c[8] + c[9] + c[10];
+		cur_8x8[0] = adapt_prob(orig->tx_probs_8x8[i][0],
+					sym_cnts->tx8p[i][0],
+					sym_cnts->tx8p[i][1],
+					20, 128);
+		cur_16x16[0] = adapt_prob(orig->tx_probs_16x16[i][0],
+					  c16[0], c16[1] + c16[2], 20, 128);
+		cur_16x16[1] = adapt_prob(orig->tx_probs_16x16[i][1],
+					  c16[1], c16[2], 20, 128);
+		cur_32x32[0] = adapt_prob(orig->tx_probs_32x32[i][0],
+					  c32[0], c32[1] + c32[2] + c32[3],
+					  20, 128);
+		cur_32x32[1] = adapt_prob(orig->tx_probs_32x32[i][1],
+					  c32[1], c32[2] + c32[3], 20, 128);
+		cur_32x32[2] = adapt_prob(orig->tx_probs_32x32[i][2],
+					  c32[2], c32[3], 20, 128);
+	}
+}
+
+static void
+adapt_interp_filter_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->interp_filter_probs); i++) {
+		const u8 *pp = orig->interp_filter_probs[i];
+		u8 *p = cur->interp_filter_probs[i];
+		const u32 *c = sym_cnts->filter[i];
+
+		p[0] = adapt_prob(pp[0], c[0], c[1] + c[2], 20, 128);
+		p[1] = adapt_prob(pp[1], c[1], c[2], 20, 128);
+	}
+}
+
+static void
+adapt_inter_mode_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->inter_mode_probs); i++) {
+		const u8 *pp = orig->inter_mode_probs[i];
+		const u32 *c = sym_cnts->mv_mode[i];
+		u8 *p = cur->inter_mode_probs[i];
+
+		p[0] = adapt_prob(pp[0], c[2], c[1] + c[0] + c[3], 20, 128);
+		p[1] = adapt_prob(pp[1], c[0], c[1] + c[3], 20, 128);
+		p[2] = adapt_prob(pp[2], c[1], c[3], 20, 128);
+	}
+}
+
+static void
+adapt_mv_probs(const struct v4l2_vp9_probs *orig,
+	       struct v4l2_vp9_probs *cur,
+	       const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts,
+	       bool high_prec_mv)
+{
+	const u8 *pp = orig->mv_joint_probs;
+	const u32 *c = sym_cnts->mv_joint;
+	u8 *p = cur->mv_joint_probs;
+	unsigned int i, j;
+	u32 sum;
+
+	p[0] = adapt_prob(pp[0], c[0], c[1] + c[2] + c[3], 20, 128);
+	p[1] = adapt_prob(pp[1], c[1], c[2] + c[3], 20, 128);
+	p[2] = adapt_prob(pp[2], c[2], c[3], 20, 128);
+
+	for (i = 0; i < ARRAY_SIZE(orig->mv_sign_prob); i++) {
+		pp = orig->mv_sign_prob;
+		p = cur->mv_sign_prob;
+
+		p[i] = adapt_prob(pp[i], sym_cnts->sign[i][0],
+				  sym_cnts->sign[i][1], 20, 128);
+
+		pp = orig->mv_class_probs[i];
+		p = cur->mv_class_probs[i];
+		c = sym_cnts->classes[i];
+		sum = c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7] + c[8] +
+		      c[9] + c[10];
 		p[0] = adapt_prob(pp[0], c[0], sum, 20, 128);
 		sum -= c[1];
 		p[1] = adapt_prob(pp[1], c[1], sum, 20, 128);
@@ -1068,231 +1205,308 @@ static void adapt_probs(struct rockchip_vpu_ctx *ctx, u8 *count_info)
 		p[8] = adapt_prob(pp[8], c[7], c[8], 20, 128);
 		p[9] = adapt_prob(pp[9], c[9], c[10], 20, 128);
 
-		pp = pre_fc->mv_class0_bit_prob;
-		p = fc->mv_class0_bit_prob;
+		pp = orig->mv_class0_bit_prob;
+		p = cur->mv_class0_bit_prob;
 		p[i] = adapt_prob(pp[i],
-				  interc->class0[i][0],
-				  interc->class0[i][1], 20, 128);
+				  sym_cnts->class0[i][0],
+				  sym_cnts->class0[i][1], 20, 128);
 
-		pp = pre_fc->mv_bits_prob[i];
-		p = fc->mv_bits_prob[i];
-		c2 = interc->bits[i];
+		pp = orig->mv_bits_prob[i];
+		p = cur->mv_bits_prob[i];
 		for (j = 0; j < 10; j++)
-			p[j] = adapt_prob(pp[j], c2[j][0], c2[j][1], 20, 128);
+			p[j] = adapt_prob(pp[j], sym_cnts->bits[i][j][0],
+					  sym_cnts->bits[i][j][1], 20, 128);
 
 		for (j = 0; j < 2; j++) {
-			pp = pre_fc->mv_class0_fr_probs[i][j];
-			p = fc->mv_class0_fr_probs[i][j];
-			c = interc->class0_fp[i][j];
+			pp = orig->mv_class0_fr_probs[i][j];
+			p = cur->mv_class0_fr_probs[i][j];
+			c = sym_cnts->class0_fp[i][j];
 			p[0] = adapt_prob(pp[0], c[0], c[1] + c[2] + c[3],
 					  20, 128);
 			p[1] = adapt_prob(pp[1], c[1], c[2] + c[3], 20, 128);
 			p[2] = adapt_prob(pp[2], c[2], c[3], 20, 128);
 		}
 
-		pp = pre_fc->mv_fr_probs[i];
-		p = fc->mv_fr_probs[i];
-		c = interc->fp[i];
+		pp = orig->mv_fr_probs[i];
+		p = cur->mv_fr_probs[i];
+		c = sym_cnts->fp[i];
 		p[0] = adapt_prob(pp[0], c[0], c[1] + c[2] + c[3], 20, 128);
 		p[1] = adapt_prob(pp[1], c[1], c[2] + c[3], 20, 128);
 		p[2] = adapt_prob(pp[2], c[2], c[3], 20, 128);
 
-		if (frmhdr->flags & V4L2_VP9_FRAME_HDR_ALLOW_HIGH_PREC_MV) {
-			pp = pre_fc->mv_class0_hp_prob;
-			p = fc->mv_class0_hp_prob;
-			p[i] = adapt_prob(pp[i],
-					  interc->class0_hp[i][0],
-					  interc->class0_hp[i][1], 20, 128);
+		if (!high_prec_mv)
+			continue;
 
-			pp = pre_fc->mv_hp_prob;
-			p = fc->mv_hp_prob;
-			p[i] = adapt_prob(pp[i], interc->hp[i][0],
-					  interc->hp[i][1], 20, 128);
-		}
+		pp = orig->mv_class0_hp_prob;
+		p = cur->mv_class0_hp_prob;
+		p[i] = adapt_prob(pp[i], sym_cnts->class0_hp[i][0],
+				  sym_cnts->class0_hp[i][1], 20, 128);
+
+		pp = orig->mv_hp_prob;
+		p = cur->mv_hp_prob;
+		p[i] = adapt_prob(pp[i], sym_cnts->hp[i][0],
+				  sym_cnts->hp[i][1], 20, 128);
 	}
+}
 
-	/* The hardware output count order is rather different from syntax,
-	 * the following map is to translate the hardware output count to syntax
-	 * need.
-	 *    syntax              hardware
-	 *+++++ v   ++++*     *++++ dc   ++++*
-	 *+++++ h   ++++*     *++++ v   ++++*
-	 *+++++ dc  ++++*     *++++ h  ++++*
-	 *+++++ d45 ++++*     *++++ d45 ++++*
-	 *+++++ d135++++*     *++++ d135++++*
-	 *+++++ d117++++*     *++++ d117++++*
-	 *+++++ d153++++*     *++++ d153++++*
-	 *+++++ d63 ++++*     *++++ d207++++*
-	 *+++++ d207 ++++*    *++++ d63 ++++*
-	 *+++++ tm  ++++*     *++++ tm  ++++*
-	 */
+static void
+adapt_intra_mode_probs(const u8 *pp, u8 *p, const u32 *c)
+{
+	u32 sum = 0, s2;
+	unsigned int i;
+
+	for (i = V4L2_VP9_INTRA_PRED_MODE_V; i <= V4L2_VP9_INTRA_PRED_MODE_TM;
+	     i++)
+		sum += c[i];
+
+	p[0] = adapt_prob(pp[0], c[V4L2_VP9_INTRA_PRED_MODE_DC], sum, 20, 128);
+	sum -= c[V4L2_VP9_INTRA_PRED_MODE_TM];
+	p[1] = adapt_prob(pp[1], c[V4L2_VP9_INTRA_PRED_MODE_TM], sum, 20, 128);
+	sum -= c[V4L2_VP9_INTRA_PRED_MODE_V];
+	p[2] = adapt_prob(pp[2], c[V4L2_VP9_INTRA_PRED_MODE_V], sum, 20, 128);
+	s2 = c[V4L2_VP9_INTRA_PRED_MODE_H] + c[V4L2_VP9_INTRA_PRED_MODE_D135] +
+	     c[V4L2_VP9_INTRA_PRED_MODE_D117];
+	sum -= s2;
+	p[3] = adapt_prob(pp[3], s2, sum, 20, 128);
+	s2 -= c[V4L2_VP9_INTRA_PRED_MODE_H];
+	p[4] = adapt_prob(pp[4], c[V4L2_VP9_INTRA_PRED_MODE_H], s2, 20, 128);
+	p[5] = adapt_prob(pp[5], c[V4L2_VP9_INTRA_PRED_MODE_D135],
+			  c[V4L2_VP9_INTRA_PRED_MODE_D117], 20, 128);
+	sum -= c[V4L2_VP9_INTRA_PRED_MODE_D45];
+	p[6] = adapt_prob(pp[6], c[V4L2_VP9_INTRA_PRED_MODE_D45],
+			  sum, 20, 128);
+	sum -= c[V4L2_VP9_INTRA_PRED_MODE_D63];
+	p[7] = adapt_prob(pp[7], c[V4L2_VP9_INTRA_PRED_MODE_D63], sum,
+			  20, 128);
+	p[8] = adapt_prob(pp[8], c[V4L2_VP9_INTRA_PRED_MODE_D153],
+			  c[V4L2_VP9_INTRA_PRED_MODE_D207], 20, 128);
+}
+
+static void
+adapt_y_intra_mode_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->y_mode_probs); i++)
+		adapt_intra_mode_probs(orig->y_mode_probs[i],
+				       cur->y_mode_probs[i],
+				       sym_cnts->y_mode[i]);
+}
+
+static void
+adapt_uv_intra_mode_probs(const struct v4l2_vp9_probs *orig,
+		struct v4l2_vp9_probs *cur,
+		const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(orig->uv_mode_probs); i++)
+		adapt_intra_mode_probs(orig->uv_mode_probs[i],
+				       cur->uv_mode_probs[i],
+				       sym_cnts->uv_mode[i]);
+}
+
+static void
+adapt_inter_frame_probs(struct rkvdec_ctx *ctx,
+			struct v4l2_ctrl_vp9_frame_decode_params *dec_params,
+			struct rkvdec_vp9_decoded_buffer *dst,
+			const struct v4l2_vp9_probs *orig,
+			struct v4l2_vp9_probs *cur,
+			const void *count_tbl)
+{
+	const struct rkvdec_vp9_inter_frame_symbol_counts *sym_cnts = count_tbl;
+	struct rkvdec_vp9_decoded_buffer *last;
+
+	/* coefficients */
+	last = get_ref_buf(ctx, dec_params, &dst->base.vb, V4L2_REF_ID_LAST);
+	if (last != dst && !(last->info.flags & V4L2_VP9_FRAME_FLAG_KEY_FRAME))
+		adapt_coef_probs(orig, cur, sym_cnts->ref_cnt, 112);
+	else
+		adapt_coef_probs(orig, cur, sym_cnts->ref_cnt, 128);
+
+	/* skip flag */
+	adapt_skip_probs(orig, cur, sym_cnts);
+
+	/* intra/inter flag */
+	adapt_is_inter_probs(orig, cur, sym_cnts);
+
+	/* comppred flag */
+	adapt_comp_mode_probs(orig, cur, sym_cnts);
+
+	/* reference frames */
+	adapt_comp_ref_probs(orig, cur, sym_cnts);
+
+	if (dec_params->reference_mode != V4L2_VP9_REF_MODE_COMPOUND)
+		adapt_single_ref_probs(orig, cur, sym_cnts);
+
+	/* block partitioning */
+	adapt_partition_probs(orig, cur, sym_cnts);
+
+	/* tx size */
+	if (dec_params->tx_mode == V4L2_VP9_TX_MODE_SELECT)
+		adapt_tx_probs(orig, cur, sym_cnts);
+
+	/* interpolation filter */
+	if (dec_params->interpolation_filter == V4L2_VP9_INTERP_FILTER_SWITCHABLE)
+		adapt_interp_filter_probs(orig, cur, sym_cnts);
+
+	/* inter modes */
+	adapt_inter_mode_probs(orig, cur, sym_cnts);
+
+	/* mv probs */
+	adapt_mv_probs(orig, cur, sym_cnts,
+		       !!(dec_params->flags &
+			  V4L2_VP9_FRAME_FLAG_ALLOW_HIGH_PREC_MV));
 
 	/* y intra modes */
-	for (i = 0; i < 4; i++) {
-		u8 *pp = pre_fc->y_mode_probs[i];
-		u8 *p = fc->y_mode_probs[i];
-		u32 *c = interc->y_mode[i], sum, s2;
-
-		sum = c[intra_mode_map[0]] + c[intra_mode_map[1]] +
-			c[intra_mode_map[3]] + c[intra_mode_map[4]] +
-			c[intra_mode_map[5]] + c[intra_mode_map[6]] +
-			c[intra_mode_map[7]] + c[intra_mode_map[8]] +
-			c[intra_mode_map[9]];
-		p[0] = adapt_prob(pp[0], c[intra_mode_map[DC_PRED]],
-				  sum, 20, 128);
-		sum -= c[intra_mode_map[TM_VP8_PRED]];
-		p[1] = adapt_prob(pp[1], c[intra_mode_map[TM_VP8_PRED]], sum,
-				  20, 128);
-		sum -= c[intra_mode_map[VERT_PRED]];
-		p[2] = adapt_prob(pp[2], c[intra_mode_map[VERT_PRED]], sum,
-				  20, 128);
-		s2 = c[intra_mode_map[HOR_PRED]] +
-			c[intra_mode_map[DIAG_DOWN_RIGHT_PRED]] +
-			c[intra_mode_map[VERT_RIGHT_PRED]];
-		sum -= s2;
-		p[3] = adapt_prob(pp[3], s2, sum, 20, 128);
-		s2 -= c[intra_mode_map[HOR_PRED]];
-		p[4] = adapt_prob(pp[4], c[intra_mode_map[HOR_PRED]], s2,
-				  20, 128);
-		p[5] = adapt_prob(pp[5],
-				  c[intra_mode_map[DIAG_DOWN_RIGHT_PRED]],
-				  c[intra_mode_map[VERT_RIGHT_PRED]], 20, 128);
-		sum -= c[intra_mode_map[DIAG_DOWN_LEFT_PRED]];
-		p[6] = adapt_prob(pp[6], c[intra_mode_map[DIAG_DOWN_LEFT_PRED]],
-				  sum, 20, 128);
-		sum -= c[intra_mode_map[VERT_LEFT_PRED]];
-		p[7] = adapt_prob(pp[7], c[intra_mode_map[VERT_LEFT_PRED]], sum,
-				  20, 128);
-		p[8] = adapt_prob(pp[8], c[intra_mode_map[HOR_DOWN_PRED]],
-				  c[intra_mode_map[HOR_UP_PRED]], 20, 128);
-	}
+	adapt_y_intra_mode_probs(orig, cur, sym_cnts);
 
 	/* uv intra modes */
-	for (i = 0; i < 10; i++) {
-		u8 *pp = pre_fc->uv_mode_probs[i];
-		u8 *p = fc->uv_mode_probs[i];
-		u32 *c = interc->uv_mode[i], sum, s2;
-
-		sum = c[intra_mode_map[0]] + c[intra_mode_map[1]] +
-			c[intra_mode_map[3]] + c[intra_mode_map[4]] +
-			c[intra_mode_map[5]] + c[intra_mode_map[6]] +
-			c[intra_mode_map[7]] + c[intra_mode_map[8]] +
-			c[intra_mode_map[9]];
-		p[0] = adapt_prob(pp[0], c[intra_mode_map[DC_PRED]],
-				  sum, 20, 128);
-		sum -= c[intra_mode_map[TM_VP8_PRED]];
-		p[1] = adapt_prob(pp[1], c[intra_mode_map[TM_VP8_PRED]], sum,
-				  20, 128);
-		sum -= c[intra_mode_map[VERT_PRED]];
-		p[2] = adapt_prob(pp[2], c[intra_mode_map[VERT_PRED]], sum,
-				  20, 128);
-		s2 = c[intra_mode_map[HOR_PRED]] +
-			c[intra_mode_map[DIAG_DOWN_RIGHT_PRED]] +
-			c[intra_mode_map[VERT_RIGHT_PRED]];
-		sum -= s2;
-		p[3] = adapt_prob(pp[3], s2, sum, 20, 128);
-		s2 -= c[intra_mode_map[HOR_PRED]];
-		p[4] = adapt_prob(pp[4], c[intra_mode_map[HOR_PRED]],
-				  s2, 20, 128);
-		p[5] = adapt_prob(pp[5],
-				  c[intra_mode_map[DIAG_DOWN_RIGHT_PRED]],
-				  c[intra_mode_map[VERT_RIGHT_PRED]], 20, 128);
-		sum -= c[intra_mode_map[DIAG_DOWN_LEFT_PRED]];
-		p[6] = adapt_prob(pp[6], c[intra_mode_map[DIAG_DOWN_LEFT_PRED]],
-				  sum, 20, 128);
-		sum -= c[intra_mode_map[VERT_LEFT_PRED]];
-		p[7] = adapt_prob(pp[7], c[intra_mode_map[VERT_LEFT_PRED]], sum,
-				  20, 128);
-		p[8] = adapt_prob(pp[8], c[intra_mode_map[HOR_DOWN_PRED]],
-				  c[intra_mode_map[HOR_UP_PRED]], 20, 128);
-	}
+	adapt_uv_intra_mode_probs(orig, cur, sym_cnts);
 }
 
-static void vp9d_probs_update(struct rockchip_vpu_ctx *ctx,
-			      u8 *count_info, u32 len)
+static void adapt_probs(struct rkvdec_ctx *ctx,
+			struct rkvdec_vp9_decoded_buffer *dst,
+			const struct v4l2_ctrl_vp9_frame_ctx *fctx,
+			const void *count_tbl)
 {
-	const struct v4l2_ctrl_vp9_frame_hdr *frmhdr = ctx->run.vp9d.frame_hdr;
+	struct v4l2_ctrl_vp9_frame_decode_params *dec_params = &dst->info;
+	const struct v4l2_vp9_probs *orig;
+	struct v4l2_vp9_probs *cur;
+	bool intra_only;
 
-	if (!(frmhdr->flags & V4L2_VP9_FRAME_HDR_FLAG_ERR_RES) &&
-	    !(frmhdr->flags & V4L2_VP9_FRAME_HDR_PARALLEL_DEC_MODE))
-		adapt_probs(ctx, count_info);
+	orig = &fctx->probs;
+	cur = &dec_params->probs;
 
-	if (frmhdr->flags & V4L2_VP9_FRAME_HDR_REFRESH_FRAME_CTX) {
-		struct v4l2_ctrl_vp9_entropy *entropy =
-			ctx->run.vp9d.entropy;
-		struct v4l2_ext_controls cs;
+	intra_only = !!(dec_params->flags &
+			(V4L2_VP9_FRAME_FLAG_KEY_FRAME |
+			 V4L2_VP9_FRAME_FLAG_INTRA_ONLY));
 
-		memset(&cs, 0, sizeof(cs));
+	if (intra_only)
+		adapt_intra_frame_probs(orig, cur, count_tbl);
+	else
+		adapt_inter_frame_probs(ctx, dec_params, dst, orig, cur, count_tbl);
 
-		cs.config_store = ctx->run.src->b.config_store;
-		cs.count = 1;
-		cs.controls = vmalloc(sizeof(struct v4l2_ext_control));
-		if (!cs.controls) {
-			vpu_err("no mem for controls\n");
-			return;
-		}
 
-		cs.controls[0].id = V4L2_CID_MPEG_VIDEO_VP9_ENTROPY;
-		cs.controls[0].ptr = entropy;
-		cs.controls[0].size = sizeof(*entropy);
-
-		if (v4l2_s_ext_ctrls(&ctx->fh, &ctx->ctrl_handler, &cs) < 0)
-			vpu_err("try to store the adapted entropy failed\n");
-
-		vfree(cs.controls);
-	}
 }
 
-void rk3399_vdec_vp9d_done(struct rockchip_vpu_ctx *ctx,
-		      enum vb2_buffer_state result)
+static void rkvdec_vp9_done(struct rkvdec_ctx *ctx,
+			    struct vb2_v4l2_buffer *src_buf,
+			    struct vb2_v4l2_buffer *dst_buf,
+			    enum vb2_buffer_state result)
 {
-	struct rockchip_vpu_vp9d_last_info *last_info =
-			&ctx->hw.vp9d.last_info;
-	const struct v4l2_ctrl_vp9_frame_hdr *frmhdr = ctx->run.vp9d.frame_hdr;
-	u32 i;
+	struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
+	struct rkvdec_vp9_decoded_buffer *dec_dst_buf;
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
+	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+	struct v4l2_ctrl *ctrl;
+	unsigned int fctx_idx;
 
-	vpu_debug_enter();
+	if (result == VB2_BUF_STATE_ERROR)
+		return;
 
-	vp9d_probs_update(ctx,
-			  ctx->hw.vp9d.priv_dst.cpu,
-			  ctx->hw.vp9d.priv_dst.size);
+	dec_dst_buf = vb2_to_vp9_decoded_buf(&dst_buf->vb2_buf);
+	dec_params = &dec_dst_buf->info;
+	fctx_idx = dec_params->frame_context_idx;
+	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
+			      V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(fctx_idx));
+	if (WARN_ON(!ctrl))
+		return;
 
-	last_info->abs_delta = frmhdr->sgmnt_params.flags &
-		V4L2_VP9_SGMNT_PARAM_FLAG_ABS_OR_DELTA_UPDATE;
+	fctx = ctrl->p_cur.p;
 
-	for (i = 0 ; i < 4; i++)
-		last_info->ref_deltas[i] = frmhdr->lf_params.deltas[i];
+	if (!(dec_params->flags &
+	      (V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT |
+	       V4L2_VP9_FRAME_FLAG_PARALLEL_DEC_MODE)))
+		adapt_probs(ctx, dec_dst_buf, fctx, vp9_ctx->count_tbl.cpu);
 
-	for (i = 0 ; i < 2; i++)
-		last_info->mode_deltas[i] = frmhdr->lf_params.mode_deltas[i];
+	if (dec_params->flags & V4L2_VP9_FRAME_FLAG_REFRESH_FRAME_CTX)
+		v4l2_ctrl_s_ctrl_compound(ctrl, &dec_params->probs,
+					  sizeof(dec_params->probs));
+}
 
-	for (i = 0; i < 8; i++) {
-		last_info->feature_data[i][0] =
-			frmhdr->sgmnt_params.feature_data[i][0];
-		last_info->feature_data[i][1] =
-			frmhdr->sgmnt_params.feature_data[i][1];
-		last_info->feature_data[i][2] =
-			frmhdr->sgmnt_params.feature_data[i][2];
-		last_info->feature_data[i][3] =
-			frmhdr->sgmnt_params.feature_data[i][3];
-		last_info->feature_mask[i] =
-			frmhdr->sgmnt_params.feature_enabled[i][0] |
-			(frmhdr->sgmnt_params.feature_enabled[i][1] << 1) |
-			(frmhdr->sgmnt_params.feature_enabled[i][2] << 2) |
-			(frmhdr->sgmnt_params.feature_enabled[i][3] << 3);
+static int rkvdec_vp9_start(struct rkvdec_ctx *ctx)
+{
+	struct rkvdec_dev *rkvdec = ctx->dev;
+	struct rkvdec_vp9_priv_tbl *priv_tbl;
+	struct rkvdec_vp9_ctx *vp9_ctx;
+	u8 *count_tbl;
+	int ret;
+
+	vp9_ctx = kzalloc(sizeof(*vp9_ctx), GFP_KERNEL);
+	if (!vp9_ctx)
+		return -ENOMEM;
+
+	priv_tbl = dma_alloc_coherent(rkvdec->dev, sizeof(*priv_tbl),
+				      &vp9_ctx->priv_tbl.dma, GFP_KERNEL);
+	if (!priv_tbl) {
+		ret = -ENOMEM;
+		goto err_free_ctx;
 	}
 
-	last_info->segmentation_enable = frmhdr->sgmnt_params.flags &
-		V4L2_VP9_SGMNT_PARAM_FLAG_ENABLED;
-	last_info->show_frame = frmhdr->flags &
-		V4L2_VP9_FRAME_HDR_FLAG_SHOW_FRAME;
-	last_info->width = frmhdr->frame_width;
-	last_info->height = frmhdr->frame_height;
-	last_info->intra_only = (frmhdr->frame_type == 0) ||
-		(frmhdr->flags & V4L2_VP9_FRAME_HDR_FLAG_FRAME_INTRA);
-	last_info->frame_type = frmhdr->frame_type;
+	vp9_ctx->priv_tbl.size = sizeof(*priv_tbl);
+	vp9_ctx->priv_tbl.cpu = priv_tbl;
 
-	rockchip_vpu_run_done(ctx, result);
+	count_tbl = dma_alloc_coherent(rkvdec->dev, RKVDEC_VP9_COUNT_SIZE,
+				       &vp9_ctx->count_tbl.dma, GFP_KERNEL);
+	if (!count_tbl) {
+		ret = -ENOMEM;
+		goto err_free_priv_tbl;
+	}
 
-	vpu_debug_leave();
+	vp9_ctx->count_tbl.size = RKVDEC_VP9_COUNT_SIZE;
+	vp9_ctx->count_tbl.cpu = count_tbl;
+
+	return 0;
+
+err_free_priv_tbl:
+	dma_free_coherent(rkvdec->dev, vp9_ctx->priv_tbl.size,
+			  vp9_ctx->priv_tbl.cpu, vp9_ctx->priv_tbl.dma);
+
+err_free_ctx:
+	kfree(ctx);
+	return ret;
 }
+
+static void rkvdec_vp9_stop(struct rkvdec_ctx *ctx)
+{
+	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
+	struct rkvdec_dev *rkvdec = ctx->dev;
+
+	dma_free_coherent(rkvdec->dev, vp9_ctx->count_tbl.size,
+			  vp9_ctx->count_tbl.cpu, vp9_ctx->count_tbl.dma);
+	dma_free_coherent(rkvdec->dev, vp9_ctx->priv_tbl.size,
+			  vp9_ctx->priv_tbl.cpu, vp9_ctx->priv_tbl.dma);
+	kfree(vp9_ctx);
+}
+
+static void rkvdec_vp9_queue_init(struct rkvdec_ctx *ctx,
+				  struct vb2_queue *src_vq,
+				  struct vb2_queue *dst_vq)
+{
+	dst_vq->buf_struct_size = sizeof(struct rkvdec_vp9_decoded_buffer);
+}
+
+#define RKVDEC_VP9_MAX_DEPTH_IN_BYTES		2
+
+static int rkvdec_vp9_adjust_fmt(struct rkvdec_ctx *ctx,
+				 struct v4l2_format *f)
+{
+	struct v4l2_pix_format_mplane *fmt = &f->fmt.pix_mp;
+
+	fmt->num_planes = 1;
+	fmt->plane_fmt[0].sizeimage = fmt->width * fmt->height *
+				      RKVDEC_VP9_MAX_DEPTH_IN_BYTES;
+	return 0;
+}
+
+const struct rkvdec_coded_fmt_ops rkvdec_vp9_fmt_ops = {
+	.adjust_fmt = rkvdec_vp9_adjust_fmt,
+	.queue_init = rkvdec_vp9_queue_init,
+	.start = rkvdec_vp9_start,
+	.stop = rkvdec_vp9_stop,
+	.run = rkvdec_vp9_run,
+	.done = rkvdec_vp9_done,
+};

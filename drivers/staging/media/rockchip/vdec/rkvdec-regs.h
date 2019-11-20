@@ -117,13 +117,9 @@
 #define     RKVDEC_VP9_REF_HOR_SCALE(x)			((x) & 0xffff)
 #define     RKVDEC_VP9_REF_VER_SCALE(x)			(((x) & 0xffff) << 16)
 #define RKVDEC_VP9_REF_DELTAS_LASTFRAME		0x080
-#define     RKVDEC_REF_DELTAS0_LASTFRAME(x)		((x) & 0x7f)
-#define     RKVDEC_REF_DELTAS1_LASTFRAME(x)		(((x) & 0x7f) << 7)
-#define     RKVDEC_REF_DELTAS2_LASTFRAME(x)		(((x) & 0x7f) << 14)
-#define     RKVDEC_REF_DELTAS3_LASTFRAME(x)		(((x) & 0x7f) << 21)
+#define     RKVDEC_REF_DELTAS_LASTFRAME(pos, val)	(((val) & 0x7f) << ((pos) * 7))
 #define RKVDEC_VP9_INFO_LASTFRAME		0x084
-#define     RKVDEC_MODE_DELTAS0_LASTFRAME(x)		((x) & 0x7f)
-#define     RKVDEC_MODE_DELTAS1_LASTFRAME(x)		(((x) & 0x7f) << 7)
+#define     RKVDEC_MODE_DELTAS_LASTFRAME(pos, val)	(((val) & 0x7f) << ((pos) * 7))
 #define     RKVDEC_SEG_EN_LASTFRAME			BIT(16)
 #define     RKVDEC_LAST_SHOW_FRAME			BIT(17)
 #define     RKVDEC_LAST_INTRA_ONLY			BIT(18)

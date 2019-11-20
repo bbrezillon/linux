@@ -50,9 +50,15 @@ struct rkvdec_ctx;
 struct rkvdec_coded_fmt_ops {
 	int (*adjust_fmt)(struct rkvdec_ctx *ctx,
 			  struct v4l2_format *f);
+	void (*queue_init)(struct rkvdec_ctx *ctx,
+			   struct vb2_queue *src_vq,
+			   struct vb2_queue *dst_vq);
 	int (*start)(struct rkvdec_ctx *ctx);
 	void (*stop)(struct rkvdec_ctx *ctx);
 	void (*run)(struct rkvdec_ctx *ctx);
+	void (*done)(struct rkvdec_ctx *ctx, struct vb2_v4l2_buffer *src_buf,
+		     struct vb2_v4l2_buffer *dst_buf,
+		     enum vb2_buffer_state result);
 };
 
 struct rkvdec_coded_fmt_desc {
@@ -127,5 +133,6 @@ static inline void rkvdec_set_field(u32 *buf, u32 bit_offset, u8 len_in_bits,
 	rkvdec_set_field(_buf, _field##_OFF, _field##_LEN, _val)
 
 extern const struct rkvdec_coded_fmt_ops rkvdec_h264_fmt_ops;
+extern const struct rkvdec_coded_fmt_ops rkvdec_vp9_fmt_ops;
 
 #endif /* RKVDEC_H_ */
