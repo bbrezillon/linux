@@ -45,14 +45,34 @@ struct rkvdec_decoded_fmt_desc {
 	u32 fourcc;
 };
 
+struct rkvdec_vp9_decoded_buffer_info {
+	/* Info needed when the decoded frame serves as a reference frame. */
+	struct v4l2_ctrl_vp9_frame_decode_params params;
+
+	u32 segmapid : 1;
+};
+
+struct rkvdec_decoded_buffer {
+	/* Must be the first field in this struct. */
+	struct v4l2_m2m_buffer base;
+
+	union {
+		struct rkvdec_vp9_decoded_buffer_info vp9;
+	};
+};
+
+static inline struct rkvdec_decoded_buffer *
+vb2_to_rkvdec_decoded_buf(struct vb2_buffer *buf)
+{
+	return container_of(buf, struct rkvdec_decoded_buffer,
+			    base.vb.vb2_buf);
+}
+
 struct rkvdec_ctx;
 
 struct rkvdec_coded_fmt_ops {
 	int (*adjust_fmt)(struct rkvdec_ctx *ctx,
 			  struct v4l2_format *f);
-	void (*queue_init)(struct rkvdec_ctx *ctx,
-			   struct vb2_queue *src_vq,
-			   struct vb2_queue *dst_vq);
 	int (*start)(struct rkvdec_ctx *ctx);
 	void (*stop)(struct rkvdec_ctx *ctx);
 	void (*run)(struct rkvdec_ctx *ctx);

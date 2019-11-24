@@ -213,6 +213,7 @@ static int rkvdec_try_capture_fmt(struct file *file, void *priv,
 
 	v4l2_fill_pixfmt_mp(&f->fmt.pix_mp, fourcc, f->fmt.pix_mp.width,
 			    f->fmt.pix_mp.height);
+	f->fmt.pix_mp.plane_fmt[0].sizeimage *= 2;
 	f->fmt.pix_mp.field = V4L2_FIELD_NONE;
 
 	return 0;
@@ -718,13 +719,10 @@ static int rkvdec_queue_init(void *priv,
 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
 	dst_vq->drv_priv = ctx;
 	dst_vq->ops = &rkvdec_queue_ops;
-	dst_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
+	dst_vq->buf_struct_size = sizeof(struct rkvdec_decoded_buffer);
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->lock = &rkvdec->vdev_lock;
 	dst_vq->dev = rkvdec->v4l2_dev.dev;
-
-	if (ctx->coded_fmt_desc->ops->queue_init)
-		ctx->coded_fmt_desc->ops->queue_init(ctx, src_vq, dst_vq);
 
 	ret = vb2_queue_init(src_vq);
 	if (ret)
@@ -831,6 +829,8 @@ static int rkvdec_open(struct file *filp)
 		return -ENOMEM;
 
 	ctx->dev = rkvdec;
+	rkvdec_reset_coded_fmt(ctx);
+	rkvdec_reset_decoded_fmt(ctx);
 	v4l2_fh_init(&ctx->fh, video_devdata(filp));
 
 	ret = rkvdec_init_ctrls(ctx);
@@ -847,8 +847,6 @@ static int rkvdec_open(struct file *filp)
 	filp->private_data = &ctx->fh;
 	v4l2_fh_add(&ctx->fh);
 
-	rkvdec_reset_coded_fmt(ctx);
-	rkvdec_reset_decoded_fmt(ctx);
 	return 0;
 
 err_cleanup_ctrls:
