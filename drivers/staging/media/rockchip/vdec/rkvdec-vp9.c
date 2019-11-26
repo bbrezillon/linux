@@ -84,7 +84,7 @@ struct rkvdec_vp9_probs {
 struct rkvdec_vp9_priv_tbl {
 	union {
 		struct rkvdec_vp9_probs probs;
-		u8 raw[4864];
+//		u8 raw[4864];
 	};
 	u8 segmap[2][RKVDEC_VP9_MAX_SEGMAP_SIZE];
 };
@@ -134,7 +134,6 @@ struct rkvdec_vp9_intra_frame_symbol_counts {
 struct rkvdec_vp9_run {
 	struct rkvdec_run base;
 	const struct v4l2_ctrl_vp9_frame_decode_params *decode_params;
-	const struct v4l2_ctrl_vp9_frame_ctx *frame_context;
 };
 
 struct rkvdec_vp9_ctx {
@@ -371,15 +370,11 @@ static void init_intra_only_probs(struct rkvdec_ctx *ctx,
 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
 	struct rkvdec_vp9_priv_tbl *tbl = vp9_ctx->priv_tbl.cpu;
 	struct rkvdec_vp9_intra_only_frame_probs *rkprobs;
-	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
 	const struct v4l2_vp9_probs *probs;
 	unsigned i, j, k, m;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	rkprobs = &tbl->probs.intra_only_probs;
 	dec_params = run->decode_params;
-	fctx = run->frame_context;
-//	probs = &fctx->probs;
 	probs = &dec_params->probs;
 
 	/*
@@ -430,14 +425,11 @@ static void init_inter_probs(struct rkvdec_ctx *ctx,
 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
 	struct rkvdec_vp9_priv_tbl *tbl = vp9_ctx->priv_tbl.cpu;
 	struct rkvdec_vp9_inter_frame_probs *rkprobs;
-	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
 	const struct v4l2_vp9_probs *probs;
 	unsigned i, j, k;
 
 	rkprobs = &tbl->probs.inter_probs;
 	dec_params = run->decode_params;
-	fctx = run->frame_context;
-//	probs = &fctx->probs;
 	probs = &dec_params->probs;
 
 	/*
@@ -449,7 +441,6 @@ static void init_inter_probs(struct rkvdec_ctx *ctx,
 
 	memcpy(rkprobs->y_mode_probs, probs->y_mode_probs,
 	       sizeof(rkprobs->y_mode_probs));
-	pr_info("%s:%i y_mode_probs[0][0] %02x\n", __func__, __LINE__, rkprobs->y_mode_probs[0][0]);
 	memcpy(rkprobs->comp_mode_prob, probs->comp_mode_prob,
 	       sizeof(rkprobs->comp_mode_prob));
 	memcpy(rkprobs->comp_ref_prob, probs->comp_ref_prob,
@@ -501,11 +492,34 @@ static void init_inter_probs(struct rkvdec_ctx *ctx,
 	       sizeof(rkprobs->mv_hp_prob));
 }
 
+static void dump_probs(struct rkvdec_vp9_priv_tbl *tbl)
+{
+	const u8 *raw = (u8 *)tbl;
+	unsigned int i;
+
+	return;
+	for (i = 0; i < 152; i++)
+		pr_info("%08x  %02x %02x %02x %02x %02x %02x %02x %02x  %02x %02x %02x %02x %02x %02x %02x %02x\n",
+			i * 16,
+			raw[i * 16], raw[i * 16 + 1], raw[i * 16 + 2], raw[i * 16 + 3],
+			raw[i * 16 + 4], raw[i * 16 + 5], raw[i * 16 + 6], raw[i * 16 + 7],
+			raw[i * 16 + 8], raw[i * 16 + 9], raw[i * 16 + 10], raw[i * 16 + 11],
+                        raw[i * 16 + 12], raw[i * 16 + 13], raw[i * 16 + 14], raw[i * 16 + 15]);
+}
+
+static void dump_regs(struct rkvdec_dev *rkvdec)
+{
+	unsigned int i;
+
+	return;
+	for (i = 0; i < 0xe0; i += 4)
+		pr_info("%08x  %08x\n", i, readl(rkvdec->regs + i));
+}
+
 static void init_probs(struct rkvdec_ctx *ctx,
 		       const struct rkvdec_vp9_run *run)
 {
 	const struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
-	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
 	struct rkvdec_vp9_priv_tbl *tbl = vp9_ctx->priv_tbl.cpu;
 	struct rkvdec_vp9_probs *rkprobs = &tbl->probs;
@@ -514,13 +528,10 @@ static void init_probs(struct rkvdec_ctx *ctx,
 	bool intra_only;
 
 	dec_params = run->decode_params;
-	fctx = run->frame_context;
-//	probs = &fctx->probs;
 	probs = &dec_params->probs;
 	seg = &dec_params->seg;
 
-	memset(tbl->raw, 0, sizeof(tbl->raw));
-//	memset(rkprobs, 0, sizeof(*rkprobs));
+	memset(rkprobs, 0, sizeof(*rkprobs));
 
 	intra_only = !!(dec_params->flags &
 			(V4L2_VP9_FRAME_FLAG_KEY_FRAME |
@@ -530,7 +541,6 @@ static void init_probs(struct rkvdec_ctx *ctx,
 	memcpy(rkprobs->partition_probs,
 	       intra_only ? kf_partition_probs : probs->partition_probs,
 	       sizeof(rkprobs->partition_probs));
-	pr_info("%s:%i partition_probs[0][0] %02x\n", __func__, __LINE__, rkprobs->partition_probs[0][0]);
 
 	memcpy(rkprobs->pred_probs, seg->pred_probs, sizeof(rkprobs->pred_probs));
 	memcpy(rkprobs->tree_probs, seg->tree_probs, sizeof(rkprobs->tree_probs));
@@ -538,18 +548,19 @@ static void init_probs(struct rkvdec_ctx *ctx,
 	       sizeof(rkprobs->skip_prob));
 	memcpy(rkprobs->tx_probs_32x32, probs->tx_probs_32x32,
 	       sizeof(rkprobs->tx_probs_32x32));
-	pr_info("%s:%i tx32_probs[0][0] %02x\n", __func__, __LINE__, rkprobs->tx_probs_32x32[0][0]);
 	memcpy(rkprobs->tx_probs_16x16, probs->tx_probs_16x16,
 	       sizeof(rkprobs->tx_probs_16x16));
 	memcpy(rkprobs->tx_probs_8x8, probs->tx_probs_8x8,
 	       sizeof(rkprobs->tx_probs_8x8));
 	memcpy(rkprobs->is_inter_prob, probs->is_inter_prob,
-	       sizeof(rkprobs->is_inter_prob));
+               sizeof(rkprobs->is_inter_prob));
 
 	if (intra_only)
 		init_intra_only_probs(ctx, run);
 	else
 		init_inter_probs(ctx, run);
+
+	dump_probs(tbl);
 }
 
 struct vp9d_ref_config {
@@ -633,7 +644,7 @@ config_ref_registers(struct rkvdec_ctx *ctx,
 	height = buf->vp9.params.frame_height_minus_1 + 1;
 	aligned_height = round_up(height, 64);
 	writel_relaxed(RKVDEC_VP9_FRAMEWIDTH(round_up(width, 64)) |
-		       RKVDEC_VP9_FRAMEHEIGHT(aligned_height),
+		       RKVDEC_VP9_FRAMEHEIGHT(height),
 		       rkvdec->regs + ref_config[id].reg_frm_size);
 
 	writel_relaxed(vb2_dma_contig_plane_dma_addr(&buf->base.vb.vb2_buf, 0),
@@ -717,7 +728,6 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	u32 y_len, uv_len, yuv_len, bit_depth, aligned_height, aligned_pitch;
 	const struct v4l2_ctrl_vp9_frame_decode_params *dec_params;
 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
-//	const struct v4l2_ctrl_vp9_frame_ctx *fctx;
 	u32 val, stream_len, last_frame_info = 0;
 	const struct v4l2_vp9_segmentation *seg;
 	struct rkvdec_dev *rkvdec = ctx->dev;
@@ -732,7 +742,6 @@ static void config_registers(struct rkvdec_ctx *ctx,
 
 	last = ref_bufs[V4L2_REF_ID_LAST];
 	dst->vp9.params = *dec_params;
-	//fctx = run->frame_context;
 	seg = &dec_params->seg;
 
 	intra_only = !!(dec_params->flags &
@@ -755,9 +764,6 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	writel_relaxed(RKVDEC_Y_HOR_VIRSTRIDE(aligned_pitch / 16) |
 		       RKVDEC_UV_HOR_VIRSTRIDE(aligned_pitch / 16),
 		       rkvdec->regs + RKVDEC_REG_PICPAR);
-	pr_info("%s:%i aligned pitch %d w %d bit_depth %d PICPAR %08x %08x\n", __func__, __LINE__, aligned_pitch, ctx->decoded_fmt.fmt.pix_mp.width, bit_depth,
-		readl(rkvdec->regs + RKVDEC_REG_PICPAR), RKVDEC_Y_HOR_VIRSTRIDE(aligned_pitch / 16) |
-                       RKVDEC_UV_HOR_VIRSTRIDE(aligned_pitch / 16));
 	writel_relaxed(RKVDEC_Y_VIRSTRIDE(y_len / 16),
 		       rkvdec->regs + RKVDEC_REG_Y_VIRSTRIDE);
 	writel_relaxed(RKVDEC_YUV_VIRSTRIDE(yuv_len / 16),
@@ -775,10 +781,12 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	if (intra_only)
 		memset(vp9_ctx->count_tbl.cpu, 0, vp9_ctx->count_tbl.size);
 
-	if (seg->flags & V4L2_VP9_SEGMENTATION_FLAG_UPDATE_MAP)
-		dst->vp9.segmapid = ref_bufs[V4L2_REF_ID_LAST]->vp9.segmapid + 1;
-	else
-		dst->vp9.segmapid = ref_bufs[V4L2_REF_ID_LAST]->vp9.segmapid;
+	dst->vp9.segmapid = ref_bufs[V4L2_REF_ID_LAST]->vp9.segmapid;
+	if (!intra_only &&
+	    !(dec_params->flags & V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT) &&
+	    (!(seg->flags & V4L2_VP9_SEGMENTATION_FLAG_ENABLED) ||
+	     (seg->flags & V4L2_VP9_SEGMENTATION_FLAG_UPDATE_MAP)))
+		dst->vp9.segmapid++;
 
 	for (i = 0; i < ARRAY_SIZE(ref_bufs); i++)
 		config_ref_registers(ctx, run, ref_bufs, i);
@@ -828,7 +836,7 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	writel_relaxed(last_frame_info,
 		       rkvdec->regs + RKVDEC_VP9_INFO_LASTFRAME);
 
-	writel_relaxed(stream_len - dec_params->header_size_in_bytes,
+	writel_relaxed(stream_len /* - dec_params->header_size_in_bytes*/,
 		       rkvdec->regs + RKVDEC_VP9_LASTTILE_SIZE);
 
 	for (i = 0; !intra_only && i < ARRAY_SIZE(ref_bufs); i++) {
@@ -843,34 +851,24 @@ static void config_registers(struct rkvdec_ctx *ctx,
 			       rkvdec->regs + RKVDEC_VP9_REF_SCALE(i));
 	}
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	addr = vb2_dma_contig_plane_dma_addr(&dst->base.vb.vb2_buf, 0);
-	pr_info("%s:%i\n", __func__, __LINE__);
 	writel_relaxed(addr, rkvdec->regs + RKVDEC_REG_DECOUT_BASE);
-	pr_info("%s:%i decout_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_DECOUT_BASE));
-	pr_info("%s:%i\n", __func__, __LINE__);
 	addr = vb2_dma_contig_plane_dma_addr(&run->base.bufs.src->vb2_buf, 0);
-	pr_info("%s:%i\n", __func__, __LINE__);
 	writel_relaxed(addr, rkvdec->regs + RKVDEC_REG_STRM_RLC_BASE);
-	pr_info("%s:%i strm_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_STRM_RLC_BASE));
 	writel_relaxed(vp9_ctx->priv_tbl.dma +
 		       offsetof(struct rkvdec_vp9_priv_tbl, probs),
 		       rkvdec->regs + RKVDEC_REG_CABACTBL_PROB_BASE);
-	pr_info("%s:%i prob_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_CABACTBL_PROB_BASE));
 	writel_relaxed(vp9_ctx->count_tbl.dma,
 		       rkvdec->regs + RKVDEC_REG_VP9COUNT_BASE);
-	pr_info("%s:%i count_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_VP9COUNT_BASE));
 
 	writel_relaxed(vp9_ctx->priv_tbl.dma +
 		       offsetof(struct rkvdec_vp9_priv_tbl, segmap) +
 		       (RKVDEC_VP9_MAX_SEGMAP_SIZE * dst->vp9.segmapid),
 		       rkvdec->regs + RKVDEC_REG_VP9_SEGIDCUR_BASE);
-	pr_info("%s:%i segid_cur_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_VP9_SEGIDCUR_BASE));
 	writel_relaxed(vp9_ctx->priv_tbl.dma +
 		       offsetof(struct rkvdec_vp9_priv_tbl, segmap) +
 		       (RKVDEC_VP9_MAX_SEGMAP_SIZE * (!dst->vp9.segmapid)),
 		       rkvdec->regs + RKVDEC_REG_VP9_SEGIDLAST_BASE);
-	pr_info("%s:%i segid_last_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_REG_VP9_SEGIDLAST_BASE));
 
 	if (!intra_only &&
 	    !(dec_params->flags & V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT))
@@ -879,20 +877,21 @@ static void config_registers(struct rkvdec_ctx *ctx,
 		addr = get_mv_base_addr(dst);
 
 	writel_relaxed(addr, rkvdec->regs + RKVDEC_VP9_REF_COLMV_BASE);
-	pr_info("%s:%i mv_base %08x\n", __func__, __LINE__, readl(rkvdec->regs + RKVDEC_VP9_REF_COLMV_BASE));
 
 	writel_relaxed(ctx->decoded_fmt.fmt.pix_mp.width |
 		       (ctx->decoded_fmt.fmt.pix_mp.height << 16),
 		       rkvdec->regs + RKVDEC_REG_PERFORMANCE_CYCLE);
+	dump_regs(rkvdec);
 }
 
 static void rkvdec_vp9_run_preamble(struct rkvdec_ctx *ctx,
 				    struct rkvdec_vp9_run *run)
 {
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx = NULL;
+	struct rkvdec_decoded_buffer *dst;
 	struct v4l2_ctrl *ctrl;
 	u8 frm_ctx;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
 			       V4L2_CID_MPEG_VIDEO_VP9_FRAME_DECODE_PARAMS);
 	WARN_ON(!ctrl);
@@ -900,16 +899,18 @@ static void rkvdec_vp9_run_preamble(struct rkvdec_ctx *ctx,
 	if (WARN_ON(!run->decode_params))
 		return;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	frm_ctx = run->decode_params->frame_context_idx;
 	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
 			      V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(frm_ctx));
 	if (ctrl)
-		run->frame_context = ctrl->p_cur.p;
+		fctx = ctrl->p_cur.p;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	rkvdec_run_preamble(ctx, &run->base);
-	pr_info("%s:%i\n", __func__, __LINE__);
+	dst = vb2_to_rkvdec_decoded_buf(&run->base.bufs.dst->vb2_buf);
+	if (fctx)
+		dst->vp9.frame_context = *fctx;
+	else
+		dst->vp9.frame_context.probs = run->decode_params->probs;
 }
 
 static void rkvdec_vp9_run(struct rkvdec_ctx *ctx)
@@ -917,38 +918,28 @@ static void rkvdec_vp9_run(struct rkvdec_ctx *ctx)
 	struct rkvdec_dev *rkvdec = ctx->dev;
 	struct rkvdec_vp9_run run = { };
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	rkvdec_vp9_run_preamble(ctx, &run);
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	if (WARN_ON(!run.decode_params))
 		return;
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Prepare probs. */
 	init_probs(ctx, &run);
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Configure hardware registers. */
 	config_registers(ctx, &run);
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	rkvdec_run_postamble(ctx, &run.base);
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	schedule_delayed_work(&rkvdec->watchdog_work, msecs_to_jiffies(2000));
 
-
-	pr_info("%s:%i\n", __func__, __LINE__);
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_LUMA_CACHE_COMMAND);
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
 
-	pr_info("%s:%i\n", __func__, __LINE__);
 	/* Start decoding! */
 	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E |
 	       RKVDEC_TIMEOUT_E,
 	       rkvdec->regs + RKVDEC_REG_INTERRUPT);
-	pr_info("%s:%i\n", __func__, __LINE__);
 }
 
 static u8 adapt_prob(u8 p1, u32 ct0, u32 ct1, u16 max_count, u32 update_factor)
@@ -1398,10 +1389,10 @@ adapt_inter_frame_probs(struct rkvdec_ctx *ctx,
 
 static void adapt_probs(struct rkvdec_ctx *ctx,
 			struct rkvdec_decoded_buffer *dst,
-			const struct v4l2_ctrl_vp9_frame_ctx *fctx,
 			const void *count_tbl)
 {
 	struct v4l2_ctrl_vp9_frame_decode_params *dec_params = &dst->vp9.params;
+	const struct v4l2_ctrl_vp9_frame_ctx *fctx = &dst->vp9.frame_context;
 	const struct v4l2_vp9_probs *orig;
 	struct v4l2_vp9_probs *cur;
 	bool intra_only;
@@ -1439,21 +1430,24 @@ static void rkvdec_vp9_done(struct rkvdec_ctx *ctx,
 	dec_dst_buf = vb2_to_rkvdec_decoded_buf(&dst_buf->vb2_buf);
 	dec_params = &dec_dst_buf->vp9.params;
 	fctx_idx = dec_params->frame_context_idx;
-	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
-			      V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(fctx_idx));
-	if (WARN_ON(!ctrl))
-		return;
 
 	fctx = ctrl->p_cur.p;
 
 	if (!(dec_params->flags &
 	      (V4L2_VP9_FRAME_FLAG_ERROR_RESILIENT |
 	       V4L2_VP9_FRAME_FLAG_PARALLEL_DEC_MODE)))
-		adapt_probs(ctx, dec_dst_buf, fctx, vp9_ctx->count_tbl.cpu);
+		adapt_probs(ctx, dec_dst_buf, vp9_ctx->count_tbl.cpu);
 
-	if (dec_params->flags & V4L2_VP9_FRAME_FLAG_REFRESH_FRAME_CTX)
-		v4l2_ctrl_s_ctrl_compound(ctrl, &dec_params->probs,
-					  sizeof(dec_params->probs));
+	if (!(dec_params->flags & V4L2_VP9_FRAME_FLAG_REFRESH_FRAME_CTX))
+		return;
+
+	ctrl = v4l2_ctrl_find(&ctx->ctrl_hdl,
+			      V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(fctx_idx));
+	if (WARN_ON(!ctrl))
+		return;
+
+	v4l2_ctrl_s_ctrl_compound(ctrl, &dec_dst_buf->vp9.params.probs,
+				  sizeof(dec_dst_buf->vp9.params.probs));
 }
 
 static int rkvdec_vp9_start(struct rkvdec_ctx *ctx)

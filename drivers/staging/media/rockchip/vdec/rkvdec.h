@@ -48,6 +48,7 @@ struct rkvdec_decoded_fmt_desc {
 struct rkvdec_vp9_decoded_buffer_info {
 	/* Info needed when the decoded frame serves as a reference frame. */
 	struct v4l2_ctrl_vp9_frame_decode_params params;
+	struct v4l2_ctrl_vp9_frame_ctx frame_context;
 
 	u32 segmapid : 1;
 };
