@@ -328,13 +328,13 @@ static struct dma_fence *panfrost_job_run(struct drm_sched_job *sched_job)
 	struct dma_fence *fence = NULL;
 
 	if (unlikely(job->base.s_fence->finished.error))
-		return NULL;
+		return ERR_PTR(job->base.s_fence->finished.error);
 
 	pfdev->jobs[slot] = job;
 
 	fence = panfrost_fence_create(pfdev, slot);
 	if (IS_ERR(fence))
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	if (job->done_fence)
 		dma_fence_put(job->done_fence);
