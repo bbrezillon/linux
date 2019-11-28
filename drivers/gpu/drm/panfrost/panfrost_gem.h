@@ -10,6 +10,10 @@
 struct panfrost_mmu;
 
 struct panfrost_gem_object {
+	/*
+	 * Must be the first element because we're using some of the
+	 * drm_gem_shmem helpers.
+	 */
 	struct drm_gem_shmem_object base;
 	struct sg_table *sgts;
 
