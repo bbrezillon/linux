@@ -78,8 +78,10 @@ static int panfrost_ioctl_get_param(struct drm_device *ddev, void *data, struct 
 static int panfrost_ioctl_create_bo(struct drm_device *dev, void *data,
 		struct drm_file *file)
 {
+	struct panfrost_file_priv *priv = file->driver_priv;
 	struct panfrost_gem_object *bo;
 	struct drm_panfrost_create_bo *args = data;
+	struct panfrost_gem_mapping *mapping;
 
 	if (!args->size || args->pad ||
 	    (args->flags & ~(PANFROST_BO_NOEXEC | PANFROST_BO_HEAP)))
@@ -95,7 +97,14 @@ static int panfrost_ioctl_create_bo(struct drm_device *dev, void *data,
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
-	args->offset = bo->node.start << PAGE_SHIFT;
+	mapping = panfrost_gem_mapping_get(bo, priv);
+	if (!mapping) {
+		drm_gem_object_put_unlocked(&bo->base.base);
+		return -EINVAL;
+	}
+
+	args->offset = mapping->mmnode.start << PAGE_SHIFT;
+	panfrost_gem_mapping_put(mapping);
 
 	return 0;
 }
@@ -119,6 +128,11 @@ panfrost_lookup_bos(struct drm_device *dev,
 		  struct drm_panfrost_submit *args,
 		  struct panfrost_job *job)
 {
+	struct panfrost_file_priv *priv = file_priv->driver_priv;
+	struct panfrost_gem_object *bo;
+	unsigned int i;
+	int ret;
+
 	job->bo_count = args->bo_handle_count;
 
 	if (!job->bo_count)
@@ -130,9 +144,39 @@ panfrost_lookup_bos(struct drm_device *dev,
 	if (!job->implicit_fences)
 		return -ENOMEM;
 
-	return drm_gem_objects_lookup(file_priv,
-				      (void __user *)(uintptr_t)args->bo_handles,
-				      job->bo_count, &job->bos);
+	ret = drm_gem_objects_lookup(file_priv,
+				     (void __user *)(uintptr_t)args->bo_handles,
+				     job->bo_count, &job->bos);
+	if (ret)
+		return ret;
+
+	job->mappings = kvmalloc_array(job->bo_count,
+				       sizeof(struct panfrost_gem_mapping *),
+				       GFP_KERNEL | __GFP_ZERO);
+	if (!job->mappings)
+		return -ENOMEM;
+
+	/* Make sure all referenced BOs are non-purgeable. */
+	for (i = 0; i < job->bo_count; i++) {
+		struct panfrost_gem_mapping *mapping;
+
+		/*
+		 * If the BO is purgeable, it should no longer be referenced by
+		 * new jobs until it's set back to a non-purgeable state. If
+		 * it's been purged, that's even worse, we simply can't
+		 * reference it.
+		 */
+		bo = to_panfrost_bo(job->bos[i]);
+		mapping = panfrost_gem_mapping_get(bo, priv);
+		if (!mapping) {
+			ret = -EINVAL;
+			break;
+		}
+
+		job->mappings[i] = mapping;
+	}
+
+	return ret;
 }
 
 /**
@@ -320,7 +364,9 @@ out:
 static int panfrost_ioctl_get_bo_offset(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv)
 {
+	struct panfrost_file_priv *priv = file_priv->driver_priv;
 	struct drm_panfrost_get_bo_offset *args = data;
+	struct panfrost_gem_mapping *mapping;
 	struct drm_gem_object *gem_obj;
 	struct panfrost_gem_object *bo;
 
@@ -331,18 +377,26 @@ static int panfrost_ioctl_get_bo_offset(struct drm_device *dev, void *data,
 	}
 	bo = to_panfrost_bo(gem_obj);
 
-	args->offset = bo->node.start << PAGE_SHIFT;
-
+	mapping = panfrost_gem_mapping_get(bo, priv);
 	drm_gem_object_put_unlocked(gem_obj);
+
+	if (!mapping)
+		return -EINVAL;
+
+	args->offset = mapping->mmnode.start << PAGE_SHIFT;
+	panfrost_gem_mapping_put(mapping);
 	return 0;
 }
 
 static int panfrost_ioctl_madvise(struct drm_device *dev, void *data,
 				  struct drm_file *file_priv)
 {
+	struct panfrost_file_priv *priv = file_priv->driver_priv;
 	struct drm_panfrost_madvise *args = data;
 	struct panfrost_device *pfdev = dev->dev_private;
 	struct drm_gem_object *gem_obj;
+	struct panfrost_gem_object *bo;
+	int ret;
 
 	gem_obj = drm_gem_object_lookup(file_priv, args->handle);
 	if (!gem_obj) {
@@ -350,22 +404,68 @@ static int panfrost_ioctl_madvise(struct drm_device *dev, void *data,
 		return -ENOENT;
 	}
 
+	/*
+	 * We don't want to mark exported/imported BOs as purgeable: we're not
+	 * the only owner in that case.
+	 */
+	mutex_lock(&dev->object_name_lock);
+	if (gem_obj->dma_buf)
+		ret = -EINVAL;
+	else
+		ret = 0;
+
+	if (ret)
+		goto out_unlock_object_name;
+
+	bo = to_panfrost_bo(gem_obj);
+
 	mutex_lock(&pfdev->shrinker_lock);
+	mutex_lock(&bo->mappings.lock);
+	if (args->madv == PANFROST_MADV_DONTNEED) {
+		struct panfrost_gem_mapping *first, *last;
+
+		first = list_first_entry(&bo->mappings.list,
+					 struct panfrost_gem_mapping,
+					 node);
+		last = list_last_entry(&bo->mappings.list,
+				       struct panfrost_gem_mapping,
+				       node);
+
+		/*
+		 * If we want to mark the BO purgeable, there must be only one
+		 * user: the caller FD.
+		 * We could do something smarter and mark the BO purgeable only
+		 * when all its users have marked it purgeable, but globally
+		 * visible/shared BOs are likely to never be marked purgeable
+		 * anyway, so let's not bother.
+		 */
+		if (first != last || WARN_ON_ONCE(first->mmu != &priv->mmu)) {
+			ret = -EINVAL;
+			goto out_unlock_mappings;
+		}
+	}
+
 	args->retained = drm_gem_shmem_madvise(gem_obj, args->madv);
 
 	if (args->retained) {
-		struct panfrost_gem_object *bo = to_panfrost_bo(gem_obj);
-
 		if (args->madv == PANFROST_MADV_DONTNEED)
 			list_add_tail(&bo->base.madv_list,
 				      &pfdev->shrinker_list);
 		else if (args->madv == PANFROST_MADV_WILLNEED)
 			list_del_init(&bo->base.madv_list);
 	}
+
+	ret = 0;
+
+out_unlock_mappings:
+	mutex_unlock(&bo->mappings.lock);
 	mutex_unlock(&pfdev->shrinker_lock);
 
+out_unlock_object_name:
+	mutex_unlock(&dev->object_name_lock);
+
 	drm_gem_object_put_unlocked(gem_obj);
-	return 0;
+	return ret;
 }
 
 int panfrost_unstable_ioctl_check(void)
@@ -445,7 +545,7 @@ panfrost_postclose(struct drm_device *dev, struct drm_file *file)
 {
 	struct panfrost_file_priv *panfrost_priv = file->driver_priv;
 
-	panfrost_perfcnt_close(panfrost_priv);
+	panfrost_perfcnt_close(file);
 	panfrost_job_close(panfrost_priv);
 
 	panfrost_mmu_pgtable_free(panfrost_priv);
