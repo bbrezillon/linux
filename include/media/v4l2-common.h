@@ -488,6 +488,7 @@ struct v4l2_format_info {
 	u8 pixel_enc;
 	u8 mem_planes;
 	u8 comp_planes;
+	u8 bpp_in_bits;
 	u8 bpp[4];
 	u8 hdiv;
 	u8 vdiv;
