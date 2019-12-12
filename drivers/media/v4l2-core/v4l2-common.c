@@ -274,7 +274,6 @@ const struct v4l2_format_info *v4l2_format_info(u32 format)
 		{ .format = V4L2_PIX_FMT_YUV420,  .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 3, .bpp = { 1, 1, 1, 0 }, .hdiv = 2, .vdiv = 2 },
 		{ .format = V4L2_PIX_FMT_YVU420,  .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 3, .bpp = { 1, 1, 1, 0 }, .hdiv = 2, .vdiv = 2 },
 		{ .format = V4L2_PIX_FMT_YUV422P, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 3, .bpp = { 1, 1, 1, 0 }, .hdiv = 2, .vdiv = 1 },
-		{ .format = V4L2_PIX_FMT_P010_PACKED, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 1, .comp_planes = 2, .bpp_in_bits = true, .bpp = { 10, 20, 0, 0 }, .block_w = { 4, 4, 0, 0 }, .hdiv = 2, .vdiv = 2 },
 
 		/* YUV planar formats, non contiguous variant */
 		{ .format = V4L2_PIX_FMT_YUV420M, .pixel_enc = V4L2_PIXEL_ENC_YUV, .mem_planes = 3, .comp_planes = 3, .bpp = { 1, 1, 1, 0 }, .hdiv = 2, .vdiv = 2 },
@@ -369,11 +368,7 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 
 	if (info->mem_planes == 1) {
 		plane = &pixfmt->plane_fmt[0];
-
 		plane->bytesperline = ALIGN(width, v4l2_format_block_width(info, 0)) * info->bpp[0];
-		if (info->bpp_in_bits)
-			plane->bytesperline = DIV_ROUND_UP(plane->bytesperline, 8);
-
 		plane->sizeimage = 0;
 
 		for (i = 0; i < info->comp_planes; i++) {
@@ -381,17 +376,13 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 			unsigned int vdiv = (i == 0) ? 1 : info->vdiv;
 			unsigned int aligned_width;
 			unsigned int aligned_height;
-			u32 size;
 
 			aligned_width = ALIGN(width, v4l2_format_block_width(info, i));
 			aligned_height = ALIGN(height, v4l2_format_block_height(info, i));
 
-			size = info->bpp[i] *
-			       DIV_ROUND_UP(aligned_width, hdiv) *
-			       DIV_ROUND_UP(aligned_height, vdiv);
-			if (info->bpp_in_bits)
-				size = DIV_ROUND_UP(size, 8);
-			plane->sizeimage += size;
+			plane->sizeimage += info->bpp[i] *
+				DIV_ROUND_UP(aligned_width, hdiv) *
+				DIV_ROUND_UP(aligned_height, vdiv);
 		}
 	} else {
 		for (i = 0; i < info->comp_planes; i++) {
@@ -406,9 +397,6 @@ int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt,
 			plane = &pixfmt->plane_fmt[i];
 			plane->bytesperline =
 				info->bpp[i] * DIV_ROUND_UP(aligned_width, hdiv);
-			if (info->bpp_in_bits)
-				plane->bytesperline = DIV_ROUND_UP(plane->bytesperline, 8);
-
 			plane->sizeimage =
 				plane->bytesperline * DIV_ROUND_UP(aligned_height, vdiv);
 		}
@@ -435,8 +423,6 @@ int v4l2_fill_pixfmt(struct v4l2_pix_format *pixfmt, u32 pixelformat,
 	pixfmt->height = height;
 	pixfmt->pixelformat = pixelformat;
 	pixfmt->bytesperline = ALIGN(width, v4l2_format_block_width(info, 0)) * info->bpp[0];
-	if (info->bpp_in_bits)
-		pixfmt->bytesperline = DIV_ROUND_UP(pixfmt->bytesperline, 8);
 	pixfmt->sizeimage = 0;
 
 	for (i = 0; i < info->comp_planes; i++) {
@@ -444,18 +430,13 @@ int v4l2_fill_pixfmt(struct v4l2_pix_format *pixfmt, u32 pixelformat,
 		unsigned int vdiv = (i == 0) ? 1 : info->vdiv;
 		unsigned int aligned_width;
 		unsigned int aligned_height;
-		u32 size;
 
 		aligned_width = ALIGN(width, v4l2_format_block_width(info, i));
 		aligned_height = ALIGN(height, v4l2_format_block_height(info, i));
 
-		size = info->bpp[i] *
-		       DIV_ROUND_UP(aligned_width, hdiv) *
-		       DIV_ROUND_UP(aligned_height, vdiv);
-		if (info->bpp_in_bits)
-			size = DIV_ROUND_UP(pixfmt->sizeimage, 8);
-
-		pixfmt->sizeimage += size;
+		pixfmt->sizeimage += info->bpp[i] *
+			DIV_ROUND_UP(aligned_width, hdiv) *
+			DIV_ROUND_UP(aligned_height, vdiv);
 	}
 	return 0;
 }

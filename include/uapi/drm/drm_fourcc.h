@@ -250,7 +250,6 @@ extern "C" {
  * index 1 = Cr:Cb plane, [31:0] Cr:x:Cb:x [10:6:10:6] little endian
  */
 #define DRM_FORMAT_P010		fourcc_code('P', '0', '1', '0') /* 2x2 subsampled Cr:Cb plane 10 bits per channel */
-#define DRM_FORMAT_P010_PACKED	fourcc_code('p', '0', '1', '0') /* 2x2 subsampled Cr:Cb plane 10 bits per channel */
 
 /*
  * 2 plane YCbCr MSB aligned
@@ -258,7 +257,6 @@ extern "C" {
  * index 1 = Cr:Cb plane, [31:0] Cr:x:Cb:x [12:4:12:4] little endian
  */
 #define DRM_FORMAT_P012		fourcc_code('P', '0', '1', '2') /* 2x2 subsampled Cr:Cb plane 12 bits per channel */
-#define DRM_FORMAT_P012_PACKED	fourcc_code('p', '0', '1', '2') /* 2x2 subsampled Cr:Cb plane 12 bits per channel */
 
 /*
  * 2 plane YCbCr MSB aligned

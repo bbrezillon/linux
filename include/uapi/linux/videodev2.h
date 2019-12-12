@@ -605,10 +605,6 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_NV24    v4l2_fourcc('N', 'V', '2', '4') /* 24  Y/CbCr 4:4:4  */
 #define V4L2_PIX_FMT_NV42    v4l2_fourcc('N', 'V', '4', '2') /* 24  Y/CrCb 4:4:4  */
 
-/* two planes -- one Y, one Cr + Cb interleaved, 10, 12 and 16 bits per components  */
-#define V4L2_PIX_FMT_P010_PACKED v4l2_fourcc('p', '0', '1', '0') /* 12  Y/CbCr 4:2:0  */
-#define V4L2_PIX_FMT_P012_PACKED v4l2_fourcc('p', '0', '1', '2') /* 12  Y/CbCr 4:2:0  */
-
 /* two non contiguous planes - one Y, one Cr + Cb interleaved  */
 #define V4L2_PIX_FMT_NV12M   v4l2_fourcc('N', 'M', '1', '2') /* 12  Y/CbCr 4:2:0  */
 #define V4L2_PIX_FMT_NV21M   v4l2_fourcc('N', 'M', '2', '1') /* 21  Y/CrCb 4:2:0  */
