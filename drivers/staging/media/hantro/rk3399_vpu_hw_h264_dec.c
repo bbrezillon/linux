@@ -409,11 +409,22 @@ void rk3399_vpu_h264_dec_run(struct hantro_ctx *ctx)
          * NOTE: The bits are reversed, i.e. MSb is DPB 0.
          */
         for (i = 0; i < HANTRO_H264_DPB_SIZE; ++i) {
-                if (ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)
-                        dpb_valid |= BIT(HANTRO_H264_DPB_SIZE - 1 - i);
+		u32 mask;
 
-                if (ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
-                        dpb_longterm |= BIT(HANTRO_H264_DPB_SIZE - 1 - i);
+		if (!(slices[0].flags & V4L2_H264_SLICE_FLAG_FIELD_PIC))
+			mask = BIT(31 - i);
+		else if (!(ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_FIELD))
+			mask = GENMASK(31 - (i * 2), 30 - (i * 2));
+		else if (ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_BOTTOM_FIELD)
+			mask = BIT(30 - (i * 2));
+		else
+			mask = BIT(31 - (i * 2));
+
+		if (ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)
+			dpb_valid |= mask;
+
+		if (ctx->h264_dec.dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM)
+			dpb_longterm |= mask;
         }
 
 	reg = VDPU_REG_REFER_LTERM_E(dpb_longterm);

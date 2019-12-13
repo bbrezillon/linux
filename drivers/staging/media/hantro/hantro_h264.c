@@ -311,8 +311,11 @@ static void update_dpb(struct hantro_ctx *ctx)
 dma_addr_t hantro_h264_get_ref_buf(struct hantro_ctx *ctx,
 				   unsigned int dpb_idx)
 {
+	const struct v4l2_ctrl_h264_decode_params *dec_params = ctx->h264_dec.ctrls.decode;
+	const struct v4l2_ctrl_h264_slice_params *slices = ctx->h264_dec.ctrls.slices;
 	struct v4l2_h264_dpb_entry *dpb = ctx->h264_dec.dpb;
 	dma_addr_t dma_addr = 0;
+	u32 cur_poc, ref_poc;
 
 	if (dpb[dpb_idx].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE)
 		dma_addr = hantro_get_ref(ctx, dpb[dpb_idx].reference_ts);
@@ -329,6 +332,27 @@ dma_addr_t hantro_h264_get_ref_buf(struct hantro_ctx *ctx,
 		buf = &dst_buf->vb2_buf;
 		dma_addr = vb2_dma_contig_plane_dma_addr(buf, 0);
 	}
+
+	if (!(slices[0].flags & V4L2_H264_SLICE_FLAG_FIELD_PIC))
+		return dma_addr;
+
+	dma_addr |= 0x2;
+
+	if (slices[0].flags & V4L2_H264_SLICE_FLAG_BOTTOM_FIELD)
+		cur_poc = dec_params->bottom_field_order_cnt;
+	else
+		cur_poc = dec_params->top_field_order_cnt;
+
+	if (!(dpb[dpb_idx].flags & V4L2_H264_DPB_ENTRY_FLAG_FIELD))
+		ref_poc = min_t(u32, dpb[dpb_idx].top_field_order_cnt,
+				dpb[dpb_idx].bottom_field_order_cnt);
+	else if (dpb[dpb_idx].flags & V4L2_H264_DPB_ENTRY_FLAG_BOTTOM_FIELD)
+		ref_poc = dpb[dpb_idx].bottom_field_order_cnt;
+	else
+		ref_poc = dpb[dpb_idx].top_field_order_cnt;
+
+	if (cur_poc < ref_poc)
+		dma_addr |= 0x1;
 
 	return dma_addr;
 }
