@@ -10,30 +10,38 @@
 #ifndef __MTD_NAND_ECC_SW_HAMMING_H__
 #define __MTD_NAND_ECC_SW_HAMMING_H__
 
-struct nand_chip;
+#include <linux/mtd/nand.h>
 
-/*
- * Calculate 3 byte ECC code for eccsize byte block
+/**
+ * struct nand_ecc_sw_hamming_conf - private software Hamming ECC engine structure
+ * @reqooblen: Save the actual user OOB length requested before overwriting it
+ * @spare_oobbuf: Spare OOB buffer if none is provided
+ * @code_size: Number of bytes needed to store a code (one code per step)
+ * @nsteps: Number of steps
+ * @calc_buf: Buffer to use when calculating ECC bytes
+ * @code_buf: Buffer to use when reading (raw) ECC bytes from the chip
+ * @sm_order: Smart Media special ordering
  */
-void __nand_calculate_ecc(const u_char *dat, unsigned int eccsize,
-			  u_char *ecc_code, bool sm_order);
+struct nand_ecc_sw_hamming_conf {
+	unsigned int reqooblen;
+	void *spare_oobbuf;
+	unsigned int code_size;
+	unsigned int nsteps;
+	u8 *calc_buf;
+	u8 *code_buf;
+	unsigned int sm_order;
+};
 
-/*
- * Calculate 3 byte ECC code for 256/512 byte block
- */
-int nand_calculate_ecc(struct nand_chip *chip, const u_char *dat,
-		       u_char *ecc_code);
-
-/*
- * Detect and correct a 1 bit error for eccsize byte block
- */
-int __nand_correct_data(u_char *dat, u_char *read_ecc, u_char *calc_ecc,
-			unsigned int eccsize, bool sm_order);
-
-/*
- * Detect and correct a 1 bit error for 256/512 byte block
- */
-int nand_correct_data(struct nand_chip *chip, u_char *dat, u_char *read_ecc,
-		      u_char *calc_ecc);
+int ecc_sw_hamming_calculate(const unsigned char *buf, unsigned int step_size,
+			     unsigned char *code, bool sm_order);
+int nand_ecc_sw_hamming_calculate(struct nand_device *nand,
+				  const unsigned char *buf,
+				  unsigned char *code);
+int ecc_sw_hamming_correct(unsigned char *buf, unsigned char *read_ecc,
+			   unsigned char *calc_ecc, unsigned int step_size,
+			   bool sm_order);
+int nand_ecc_sw_hamming_correct(struct nand_device *nand, unsigned char *buf,
+				unsigned char *read_ecc,
+				unsigned char *calc_ecc);
 
 #endif /* __MTD_NAND_ECC_SW_HAMMING_H__ */

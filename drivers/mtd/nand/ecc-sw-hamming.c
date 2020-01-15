@@ -17,8 +17,6 @@
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/mtd/mtd.h>
-#include <linux/mtd/rawnand.h>
 #include <linux/mtd/nand-ecc-sw-hamming.h>
 #include <asm/byteorder.h>
 
@@ -75,7 +73,7 @@ static const char bitsperbyte[256] = {
  * addressbits is a lookup table to filter out the bits from the xor-ed
  * ECC data that identify the faulty location.
  * this is only used for repairing parity
- * see the comments in nand_correct_data for more details
+ * see the comments in nand_ecc_sw_hamming_correct for more details
  */
 static const char addressbits[256] = {
 	0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x01,
@@ -112,30 +110,23 @@ static const char addressbits[256] = {
 	0x0e, 0x0e, 0x0f, 0x0f, 0x0e, 0x0e, 0x0f, 0x0f
 };
 
-/**
- * __nand_calculate_ecc - [NAND Interface] Calculate 3-byte ECC for 256/512-byte
- *			 block
- * @buf:	input buffer with raw data
- * @eccsize:	data bytes per ECC step (256 or 512)
- * @code:	output buffer with ECC
- * @sm_order:	Smart Media byte ordering
- */
-void __nand_calculate_ecc(const unsigned char *buf, unsigned int eccsize,
-			  unsigned char *code, bool sm_order)
+int ecc_sw_hamming_calculate(const unsigned char *buf, unsigned int step_size,
+			     unsigned char *code, bool sm_order)
 {
-	int i;
-	const uint32_t *bp = (uint32_t *)buf;
-	/* 256 or 512 bytes/ecc  */
-	const uint32_t eccsize_mult = eccsize >> 8;
-	uint32_t cur;		/* current value in buffer */
+	const u32 *bp = (uint32_t *)buf;
+	const u32 eccsize_mult = step_size >> 8;
+	/* current value in buffer */
+	u32 cur;
 	/* rp0..rp15..rp17 are the various accumulated parities (per byte) */
-	uint32_t rp0, rp1, rp2, rp3, rp4, rp5, rp6, rp7;
-	uint32_t rp8, rp9, rp10, rp11, rp12, rp13, rp14, rp15, rp16;
-	uint32_t uninitialized_var(rp17);	/* to make compiler happy */
-	uint32_t par;		/* the cumulative parity for all data */
-	uint32_t tmppar;	/* the cumulative parity for this iteration;
-				   for rp12, rp14 and rp16 at the end of the
-				   loop */
+	u32 rp0, rp1, rp2, rp3, rp4, rp5, rp6, rp7;
+	u32 rp8, rp9, rp10, rp11, rp12, rp13, rp14, rp15, rp16;
+	/* Make the compiler happy */
+	u32 uninitialized_var(rp17);
+	/* Cumulative parity for all data */
+	u32 par;
+	/* Cumulative parity at the end of the loop (rp12, rp14, rp16) */
+	u32 tmppar;
+	int i;
 
 	par = 0;
 	rp4 = 0;
@@ -356,45 +347,36 @@ void __nand_calculate_ecc(const unsigned char *buf, unsigned int eccsize,
 		    (invparity[par & 0x55] << 2) |
 		    (invparity[rp17] << 1) |
 		    (invparity[rp16] << 0);
-}
-EXPORT_SYMBOL(__nand_calculate_ecc);
-
-/**
- * nand_calculate_ecc - [NAND Interface] Calculate 3-byte ECC for 256/512-byte
- *			 block
- * @chip:	NAND chip object
- * @buf:	input buffer with raw data
- * @code:	output buffer with ECC
- */
-int nand_calculate_ecc(struct nand_chip *chip, const unsigned char *buf,
-		       unsigned char *code)
-{
-	bool sm_order = chip->ecc.options & NAND_ECC_SOFT_HAMMING_SM_ORDER;
-
-	__nand_calculate_ecc(buf, chip->ecc.size, code, sm_order);
 
 	return 0;
 }
-EXPORT_SYMBOL(nand_calculate_ecc);
+EXPORT_SYMBOL(ecc_sw_hamming_calculate);
 
 /**
- * __nand_correct_data - [NAND Interface] Detect and correct bit error(s)
- * @buf:	raw data read from the chip
- * @read_ecc:	ECC from the chip
- * @calc_ecc:	the ECC calculated from raw data
- * @eccsize:	data bytes per ECC step (256 or 512)
- * @sm_order:	Smart Media byte order
+ * nand_ecc_sw_hamming_calculate - Calculate 3-byte ECC for 256/512-byte block
  *
- * Detect and correct a 1 bit error for eccsize byte block
+ * @nand: NAND device
+ * @buf: Input buffer with raw data
+ * @code: Output buffer with ECC
  */
-int __nand_correct_data(unsigned char *buf,
-			unsigned char *read_ecc, unsigned char *calc_ecc,
-			unsigned int eccsize, bool sm_order)
+int nand_ecc_sw_hamming_calculate(struct nand_device *nand,
+				  const unsigned char *buf, unsigned char *code)
 {
+	struct nand_ecc_sw_hamming_conf *engine_conf = nand->ecc.ctx.priv;
+	unsigned int step_size = nand->ecc.ctx.conf.step_size;
+
+	return ecc_sw_hamming_calculate(buf, step_size, code,
+					engine_conf->sm_order);
+}
+EXPORT_SYMBOL(nand_ecc_sw_hamming_calculate);
+
+int ecc_sw_hamming_correct(unsigned char *buf, unsigned char *read_ecc,
+			   unsigned char *calc_ecc, unsigned int step_size,
+			   bool sm_order)
+{
+	const u32 eccsize_mult = step_size >> 8;
 	unsigned char b0, b1, b2, bit_addr;
 	unsigned int byte_addr;
-	/* 256 or 512 bytes/ecc  */
-	const uint32_t eccsize_mult = eccsize >> 8;
 
 	/*
 	 * b0 to b2 indicate which bit is faulty (if any)
@@ -458,27 +440,30 @@ int __nand_correct_data(unsigned char *buf,
 	pr_err("%s: uncorrectable ECC error\n", __func__);
 	return -EBADMSG;
 }
-EXPORT_SYMBOL(__nand_correct_data);
+EXPORT_SYMBOL(ecc_sw_hamming_correct);
 
 /**
- * nand_correct_data - [NAND Interface] Detect and correct bit error(s)
- * @chip:	NAND chip object
- * @buf:	raw data read from the chip
- * @read_ecc:	ECC from the chip
- * @calc_ecc:	the ECC calculated from raw data
+ * nand_ecc_sw_hamming_correct - Detect and correct bit error(s)
  *
- * Detect and correct a 1 bit error for 256/512 byte block
+ * @nand: NAND device
+ * @buf: Raw data read from the chip
+ * @read_ecc: ECC bytes read from the chip
+ * @calc_ecc: ECC calculated from the raw data
+ *
+ * Detect and correct up to 1 bit error per 256/512-byte block.
  */
-int nand_correct_data(struct nand_chip *chip, unsigned char *buf,
-		      unsigned char *read_ecc, unsigned char *calc_ecc)
+int nand_ecc_sw_hamming_correct(struct nand_device *nand, unsigned char *buf,
+				unsigned char *read_ecc,
+				unsigned char *calc_ecc)
 {
-	bool sm_order = chip->ecc.options & NAND_ECC_SOFT_HAMMING_SM_ORDER;
+	struct nand_ecc_sw_hamming_conf *engine_conf = nand->ecc.ctx.priv;
+	unsigned int step_size = nand->ecc.ctx.conf.step_size;
 
-	return __nand_correct_data(buf, read_ecc, calc_ecc, chip->ecc.size,
-				   sm_order);
+	return ecc_sw_hamming_correct(buf, read_ecc, calc_ecc, step_size,
+				      engine_conf->sm_order);
 }
-EXPORT_SYMBOL(nand_correct_data);
+EXPORT_SYMBOL(nand_ecc_sw_hamming_correct);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Frans Meulenbroeks <fransmeulenbroeks@gmail.com>");
-MODULE_DESCRIPTION("Generic NAND ECC support");
+MODULE_DESCRIPTION("NAND software Hamming ECC support");
