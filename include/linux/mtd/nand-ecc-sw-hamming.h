@@ -12,13 +12,10 @@
 
 #include <linux/mtd/nand.h>
 
-/* Needed for cross inclusion with nand.h */
-struct nand_device;
-
 /**
  * struct nand_ecc_sw_hamming_conf - private software Hamming ECC engine structure
- * @reqooblen: Save the actual user OOB length requested before overwriting it
- * @spare_oobbuf: Spare OOB buffer if none is provided
+ * @req_ctx: Save request context and tweak the original request to fit the
+ *           engine needs
  * @code_size: Number of bytes needed to store a code (one code per step)
  * @nsteps: Number of steps
  * @calc_buf: Buffer to use when calculating ECC bytes
@@ -26,8 +23,7 @@ struct nand_device;
  * @sm_order: Smart Media special ordering
  */
 struct nand_ecc_sw_hamming_conf {
-	unsigned int reqooblen;
-	void *spare_oobbuf;
+	struct nand_ecc_req_tweak_ctx req_ctx;
 	unsigned int code_size;
 	unsigned int nsteps;
 	u8 *calc_buf;
@@ -50,7 +46,6 @@ int ecc_sw_hamming_correct(unsigned char *buf, unsigned char *read_ecc,
 int nand_ecc_sw_hamming_correct(struct nand_device *nand, unsigned char *buf,
 				unsigned char *read_ecc,
 				unsigned char *calc_ecc);
-struct nand_ecc_engine *nand_ecc_sw_hamming_get_engine(void);
 
 #else /* !CONFIG_MTD_NAND_ECC_SW_HAMMING */
 
@@ -89,11 +84,6 @@ static inline int nand_ecc_sw_hamming_correct(struct nand_device *nand,
 					      unsigned char *calc_ecc)
 {
 	return -ENOTSUPP;
-}
-
-static inline struct nand_ecc_engine *nand_ecc_sw_hamming_get_engine(void)
-{
-	return NULL;
 }
 
 #endif /* CONFIG_MTD_NAND_ECC_SW_HAMMING */

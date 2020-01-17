@@ -12,12 +12,12 @@
 #include <linux/bch.h>
 
 /* Needed for cross inclusion with nand.h */
-struct nand_device;
+//struct nand_device;
 
 /**
  * struct nand_ecc_sw_bch_conf - private software BCH ECC engine structure
- * @reqooblen: Save the actual user OOB length requested before overwriting it
- * @spare_oobbuf: Spare OOB buffer if none is provided
+ * @req_ctx: Save request context and tweak the original request to fit the
+ *           engine needs
  * @code_size: Number of bytes needed to store a code (one code per step)
  * @nsteps: Number of steps
  * @calc_buf: Buffer to use when calculating ECC bytes
@@ -27,8 +27,7 @@ struct nand_device;
  * @eccmask: XOR ecc mask, allows erased pages to be decoded as valid
  */
 struct nand_ecc_sw_bch_conf {
-	unsigned int reqooblen;
-	void *spare_oobbuf;
+	struct nand_ecc_req_tweak_ctx req_ctx;
 	unsigned int code_size;
 	unsigned int nsteps;
 	u8 *calc_buf;
@@ -71,11 +70,6 @@ static inline int nand_ecc_sw_bch_init_ctx(struct nand_device *nand)
 }
 
 static inline void nand_ecc_sw_bch_cleanup_ctx(struct nand_device *nand) {}
-
-static inline struct nand_ecc_engine *nand_ecc_sw_bch_get_engine(void)
-{
-	return NULL;
-}
 
 #endif /* CONFIG_MTD_NAND_ECC_SW_BCH */
 

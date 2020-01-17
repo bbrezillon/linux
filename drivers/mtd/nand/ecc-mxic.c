@@ -109,12 +109,10 @@ struct mxic_ecc_engine {
 	struct completion complete;
 
 	/* DMA boilerplate */
-	u8 *databuf;
-	u8 *oobbuf;
+	struct nand_ecc_req_tweak_ctx req_ctx;
 	u8 *oobwithstat;
 	struct scatterlist sg[2];
 	struct nand_page_io_req *req;
-	struct nand_page_io_req actual_req;
 };
 
 static int mxic_ecc_ooblayout_ecc(struct mtd_info *mtd, int section,
@@ -215,7 +213,7 @@ static int mxic_ecc_init_ctx(struct nand_device *nand)
 	struct nand_ecc_props *user = &nand->ecc.user_conf;
 	struct mtd_info *mtd = nanddev_to_mtd(nand);
 	struct mxic_ecc_engine *eng;
-	int step_size = 0, strength = 0, desired_correction = 0, steps, idx, sz;
+	int step_size = 0, strength = 0, desired_correction = 0, steps, idx;
 	int possible_strength[] = {4, 8, 40, 48};
 	int spare_size[] = {32, 32, 96, 96};
 	int ret;
@@ -349,14 +347,12 @@ static int mxic_ecc_init_ctx(struct nand_device *nand)
 		writel(BURST_TYP_INCREASING | LAYOUT_TYP_DISTRIBUTED |
 		       TRANS_TYP_DMA, eng->regs + HC_CONFIG);
 
-	sz = mtd->writesize + mtd->oobsize;
-	eng->databuf = kmalloc(sz, GFP_KERNEL);
-	if (!eng->databuf)
-		return -ENOMEM;
+	//todo: check return code
+	//todo: cleanup in case of error
+	nand_ecc_init_req_tweaking(&eng->req_ctx, nand);
 
-	eng->oobbuf = eng->databuf + mtd->writesize;
-
-	eng->oobwithstat = kmalloc(mtd->oobsize + STAT_BYTES, GFP_KERNEL);
+	//todo: enlever le 4
+	eng->oobwithstat = kmalloc(mtd->oobsize + 4*STAT_BYTES, GFP_KERNEL);
 	if (!eng->oobwithstat)
 		return -ENOMEM;
 
@@ -384,7 +380,7 @@ static void mxic_ecc_cleanup_ctx(struct nand_device *nand)
 	struct mxic_ecc_engine *eng = nand->ecc.ctx.priv;
 
 	if (eng) {
-		kfree(eng->databuf);
+		//todo: clean req context
 		kfree(eng->oobwithstat);
 	}
 }
@@ -427,9 +423,9 @@ static int mxic_ecc_process_data(struct mxic_ecc_engine *eng)
 	return mxic_ecc_data_xfer_wait_for_completion(eng);
 }
 
-static void mxic_ecc_reconstruct_oob(struct mxic_ecc_engine *eng)
+static void mxic_ecc_trim_status_bytes(struct mxic_ecc_engine *eng,
+				       u8 *buf)
 {
-	u8 *in = eng->oobwithstat;
 	int next_stat_pos;
 	int step;
 
@@ -438,13 +434,13 @@ static void mxic_ecc_reconstruct_oob(struct mxic_ecc_engine *eng)
 		next_stat_pos = eng->oob_step_sz +
 				((STAT_BYTES + eng->oob_step_sz) * step);
 
-		eng->status[step] = in[next_stat_pos];
+		eng->status[step] = buf[next_stat_pos];
 	}
 
 	/* Reconstruct the OOB buffer linearly (without the ECC status bytes) */
 	for (step = 1; step < eng->steps; step++)
-		memcpy(in + (step * eng->oob_step_sz),
-		       in + (step * (eng->oob_step_sz + STAT_BYTES)),
+		memcpy(buf + (step * eng->oob_step_sz),
+		       buf + (step * (eng->oob_step_sz + STAT_BYTES)),
 		       eng->oob_step_sz);
 }
 
@@ -485,39 +481,11 @@ static int mxic_ecc_prepare_io_req_external(struct nand_device *nand,
 	if (req->mode == MTD_OPS_RAW)
 		return 0;
 
+	nand_ecc_tweak_req(&eng->req_ctx, req);
 	eng->req = req;
-	eng->actual_req = *req;
 
-	if (req->type == NAND_PAGE_READ) {
-		/*
-		 * Ensure the full page is read (including OOB and the
-		 * additional status bytes) otherwise the correction won't be
-		 * effective.
-		 */
-		req->datalen = nanddev_page_size(nand);
-		req->ooblen = nanddev_per_page_oobsize(nand);
-		if (!req->databuf.in)
-			req->databuf.in = eng->databuf;
-		if (!req->oobbuf.in)
-			req->oobbuf.in = eng->oobbuf;
+	if (req->type == NAND_PAGE_READ)
 		return 0;
-	}
-
-	/*
-	 * Ensure the full page is written (including OOB) otherwise the
-	 * correction cannot apply.
-	 */
-	req->datalen = nanddev_page_size(nand);
-	req->ooblen = nanddev_per_page_oobsize(nand);
-	if (!req->databuf.out)
-		req->databuf.out = eng->databuf;
-	if (!req->oobbuf.out)
-		req->oobbuf.out = eng->oobbuf;
-	if (!eng->actual_req.datalen)
-		memset((void *)req->databuf.out, 0xff, req->datalen);
-
-	if (!eng->actual_req.ooblen)
-		memset((void *)req->oobbuf.out, 0xff, req->ooblen);
 
 	sg_set_buf(&eng->sg[0], req->databuf.out, req->datalen);
 	sg_set_buf(&eng->sg[1], req->oobbuf.out, req->ooblen);
@@ -555,10 +523,7 @@ static int mxic_ecc_finish_io_req_external(struct nand_device *nand,
 		return 0;
 
 	if (req->type == NAND_PAGE_WRITE) {
-		req->datalen = eng->actual_req.datalen;
-		req->ooblen = eng->actual_req.ooblen;
-		req->databuf.out = eng->actual_req.databuf.out;
-		req->oobbuf.out = eng->actual_req.oobbuf.out;
+		nand_ecc_restore_req(&eng->req_ctx, req);
 		return 0;
 	}
 
@@ -595,17 +560,50 @@ static int mxic_ecc_finish_io_req_external(struct nand_device *nand,
 	dma_unmap_sg(eng->dev, eng->sg, 2, DMA_BIDIRECTIONAL);
 
 	/* Trim the the 4 status bytes added by the ECC engine */
-	mxic_ecc_reconstruct_oob(eng);
+	mxic_ecc_trim_status_bytes(eng, eng->oobwithstat);
 
-	req->datalen = eng->actual_req.datalen;
-	req->ooblen = eng->actual_req.ooblen;
-	req->databuf.in = eng->actual_req.databuf.in;
-	if (eng->actual_req.ooblen)
-		memcpy(eng->actual_req.oobbuf.in, eng->oobwithstat,
-		       eng->actual_req.ooblen);
-	req->oobbuf.in = eng->actual_req.oobbuf.in;
+	nand_ecc_restore_req(&eng->req_ctx, req);
 
 	return mxic_ecc_check_sum(eng, mtd);
+}
+
+static int mxic_ecc_deconstruct_raw_buffers(struct mxic_ecc_engine *eng)
+{
+	unsigned int chunk_sz = eng->data_step_sz + eng->oob_step_sz;
+	u8 *data_src = eng->req->databuf.in;
+	u8 *oob_src = eng->req->oobbuf.in;
+	int step;
+	u8 *tmp;
+
+	/*
+	 * memcpy() does not support overlapping areas, we must use an
+	 * additional temporary buffer for the copy.
+	 */
+	tmp = kzalloc(chunk_sz * eng->steps, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	/*
+	 * 1- Move the data with space between chunks (this works because we
+	 * know that req->databuf.in and req->oobbuf.in are contiguous thanks to
+	 * the bounce buffer).
+	 */
+	for (step = 0; step < eng->steps; step++)
+		memcpy(tmp + (step * chunk_sz),
+		       data_src + (step * eng->data_step_sz),
+		       eng->data_step_sz);
+
+	/* 2- Do the same with the OOB bytes */
+	for (step = 0; step < eng->steps; step++)
+		memcpy(tmp + eng->data_step_sz + (step * chunk_sz),
+		       oob_src + (step * eng->oob_step_sz),
+		       eng->oob_step_sz);
+
+	/* 3- Re-copy the data back into the original buffer */
+	memcpy(data_src, tmp, chunk_sz * eng->steps);
+	kfree(tmp);
+
+	return 0;
 }
 
 /* Pipelined ECC engine (distributed layout) helpers */
@@ -613,31 +611,13 @@ static int mxic_ecc_prepare_io_req_pipelined(struct nand_device *nand,
 					     struct nand_page_io_req *req)
 {
 	struct mxic_ecc_engine *eng = nand->ecc.ctx.priv;
-	struct mtd_info *mtd = nanddev_to_mtd(nand);
 	int nents;
 
-	if (req->mode != MTD_OPS_RAW ||
-	    (req->mode == MTD_OPS_RAW  && req->type == NAND_PAGE_READ)) {
-		eng->req = req;
-		eng->actual_req = *req;
+	nand_ecc_tweak_req(&eng->req_ctx, req);
+	eng->req = req;
 
-		/*
-		 * Ensure the full page is read/written (including OOB and the
-		 * additional status bytes) otherwise the correction and
-		 * the buffers reconstruction won't be effective.
-		 */
-		req->datalen = nanddev_page_size(nand);
-		req->ooblen = nanddev_per_page_oobsize(nand);
-		if (eng->actual_req.datalen < mtd->writesize) {
-			req->databuf.in = eng->databuf;
-			memset(req->databuf.in, 0xff, req->datalen);
-		}
-		if (eng->actual_req.ooblen < mtd->oobsize) {
-			req->oobbuf.in = eng->oobwithstat;
-			memset(req->oobbuf.in, 0xff,
-			       req->ooblen + eng->steps * STAT_BYTES);
-		}
-	}
+	if (req->mode == MTD_OPS_RAW && req->type == NAND_PAGE_WRITE)
+		mxic_ecc_deconstruct_raw_buffers(eng);
 
 	if (req->mode == MTD_OPS_RAW)
 		return 0;
@@ -689,44 +669,71 @@ int mxic_ecc_data_xfer(struct device *host_dev)
 	return mxic_ecc_process_data(eng);
 }
 
-static int mxic_ecc_reconstruct_raw_buffers(struct mxic_ecc_engine *eng)
+static int mxic_ecc_reconstruct_raw_buffers(struct mxic_ecc_engine *eng,
+					    bool has_stat_bytes)
 {
-	unsigned int chunk_sz = eng->data_step_sz + eng->oob_step_sz;
+	u8 *data_src = eng->req->databuf.in;
 	unsigned int data_sz = eng->data_step_sz * eng->steps;
-	unsigned int tmp_sz = eng->oob_step_sz * eng->steps;
-	u8 *data_src = eng->req->databuf.in, *oob_src = eng->req->oobbuf.in;
+	unsigned int oob_step_sz = eng->oob_step_sz;
+	unsigned int chunk_sz, tmp_sz;
 	int step;
 	u8 *tmp;
+	int i;
 
-	tmp = kmalloc(tmp_sz, GFP_KERNEL);
+	if (has_stat_bytes)
+		oob_step_sz += STAT_BYTES;
+
+	chunk_sz = eng->data_step_sz + oob_step_sz;
+	tmp_sz = chunk_sz * eng->steps;
+
+	/*
+	 * memcpy() does not support overlapping areas, we must use an
+	 * additional temporary buffer for the copy.
+	 */
+	tmp = kzalloc(tmp_sz, GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
+
+	printk("dump raw buf:\n");
+	for (i = 0; i < tmp_sz; i++)
+		printk(KERN_CONT "%02x ", data_src[i]);
+	printk(KERN_CONT "\n");
 
 	/*
 	 * In raw mode, data and OOB are mixed with a syndrome layout across the
 	 * data and OOB buffer, reconstruct the data for the end user by:
-	 * 1- rebuilding the OOB area in a tmp buffer
+	 * 1- Rebuilding the data area
 	 */
-	memcpy(tmp, oob_src, tmp_sz);
-	for (step = 0; step < eng->steps - 1; step++)
-		memcpy(tmp + (eng->oob_step_sz * step),
-		       data_src + eng->data_step_sz + (chunk_sz * step),
-		       eng->oob_step_sz);
-
-	/* 2- rebuilding the data area in the original data buffer */
-	for (step = 1; step < eng->steps - 1; step++)
-		memcpy(data_src + (eng->data_step_sz * step),
+	for (step = 0; step < eng->steps; step++)
+		memcpy(tmp + (eng->data_step_sz * step),
 		       data_src + (chunk_sz * step),
 		       eng->data_step_sz);
-	memcpy(data_src + data_sz - eng->data_step_sz,
-	       data_src + (chunk_sz * (eng->steps - 1)),
-	       eng->data_step_sz - eng->oob_step_sz);
-	memcpy(data_src + data_sz - eng->oob_step_sz, oob_src,
-	       eng->oob_step_sz);
 
-	/* 3- copying back the tmp buffer in the original OOB buffer */
-	memcpy(oob_src, tmp, tmp_sz);
+	printk("dump tmp buf with data:\n");
+	for (i = 0; i < tmp_sz; i++)
+		printk(KERN_CONT "%02x ", tmp[i]);
+	printk(KERN_CONT "\n");
+
+	/* 2- Rebuilding the OOB area */
+	for (step = 0; step < eng->steps; step++)
+		memcpy(tmp + data_sz + (oob_step_sz * step),
+		       data_src + eng->data_step_sz + (chunk_sz * step),
+		       oob_step_sz);
+
+	printk("dump tmp buf with oob:\n");
+	for (i = 0; i < tmp_sz; i++)
+		printk(KERN_CONT "%02x ", tmp[i]);
+	printk(KERN_CONT "\n");
+
+	//todo: allocate tmp buffer only once */
+	/* 3- Copying back the tmp buffer in the original buffer */
+	memcpy(data_src, tmp, tmp_sz);
 	kfree(tmp);
+
+	printk("dump final buf:\n");
+	for (i = 0; i < tmp_sz; i++)
+		printk(KERN_CONT "%02x ", data_src[i]);
+	printk(KERN_CONT "\n");
 
 	return 0;
 }
@@ -738,59 +745,21 @@ static int mxic_ecc_finish_io_req_pipelined(struct nand_device *nand,
 	struct mtd_info *mtd = nanddev_to_mtd(nand);
 	int ret = 0;
 
-	if (req->mode == MTD_OPS_RAW) {
-		if (req->type == NAND_PAGE_READ) {
-			ret = mxic_ecc_reconstruct_raw_buffers(eng);
-
-			req->datalen = eng->actual_req.datalen;
-			req->ooblen = eng->actual_req.ooblen;
-			if (eng->actual_req.datalen &&
-			    req->databuf.in != eng->actual_req.databuf.in)
-				memcpy(eng->actual_req.databuf.in,
-				       req->databuf.in + eng->actual_req.dataoffs,
-				       eng->actual_req.datalen);
-			if (eng->actual_req.ooblen &&
-			    req->oobbuf.in != eng->actual_req.oobbuf.in)
-				memcpy(eng->actual_req.oobbuf.in,
-				       req->oobbuf.in + eng->actual_req.ooboffs,
-				       eng->actual_req.ooblen);
-			req->databuf.in = eng->actual_req.databuf.in;
-			req->oobbuf.in = eng->actual_req.oobbuf.in;
-		}
-
-		return ret;
-	}
-
 	mxic_ecc_disable_engine(eng);
 
 	dma_unmap_sg(eng->dev, eng->sg, 2, DMA_BIDIRECTIONAL);
 
 	if (req->type == NAND_PAGE_READ) {
-		mxic_ecc_reconstruct_raw_buffers(eng);
-		mxic_ecc_reconstruct_oob(eng);
-
-		if (eng->actual_req.ooblen)
-			memcpy(eng->actual_req.oobbuf.in, req->oobbuf.in,
-			       eng->actual_req.ooblen);
-
-		ret = mxic_ecc_check_sum(eng, mtd);
-
-		if (eng->actual_req.datalen &&
-		    req->databuf.in != eng->actual_req.databuf.in)
-			memcpy(eng->actual_req.databuf.in,
-			       req->databuf.in + eng->actual_req.dataoffs,
-			       eng->actual_req.datalen);
-		if (eng->actual_req.ooblen &&
-		    req->oobbuf.in != eng->actual_req.oobbuf.in)
-			memcpy(eng->actual_req.oobbuf.in,
-			       req->oobbuf.in + eng->actual_req.ooboffs,
-			       eng->actual_req.ooblen);
+		if (req->mode == MTD_OPS_RAW) {
+			ret = mxic_ecc_reconstruct_raw_buffers(eng, false);
+		} else {
+			mxic_ecc_reconstruct_raw_buffers(eng, true);
+			mxic_ecc_trim_status_bytes(eng, eng->req->oobbuf.in);
+			ret = mxic_ecc_check_sum(eng, mtd);
+		}
 	}
 
-	req->datalen = eng->actual_req.datalen;
-	req->ooblen = eng->actual_req.ooblen;
-	req->databuf.in = eng->actual_req.databuf.in;
-	req->oobbuf.in = eng->actual_req.oobbuf.in;
+	nand_ecc_restore_req(&eng->req_ctx, req);
 
 	return ret;
 }

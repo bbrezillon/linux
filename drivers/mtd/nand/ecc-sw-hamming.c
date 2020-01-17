@@ -470,6 +470,7 @@ int nand_ecc_sw_hamming_init_ctx(struct nand_device *nand)
 	struct nand_ecc_props *conf = &nand->ecc.ctx.conf;
 	struct nand_ecc_sw_hamming_conf *engine_conf;
 	struct mtd_info *mtd = nanddev_to_mtd(nand);
+	int ret;
 
 	if (!mtd->ooblayout) {
 		switch (mtd->oobsize) {
@@ -499,20 +500,32 @@ int nand_ecc_sw_hamming_init_ctx(struct nand_device *nand)
 	if (!engine_conf)
 		return -ENOMEM;
 
+	ret = nand_ecc_init_req_tweaking(&engine_conf->req_ctx, nand);
+	if (ret)
+		goto free_engine_conf;
+
 	engine_conf->code_size = 3;
 	engine_conf->nsteps = mtd->writesize / conf->step_size;
-	engine_conf->spare_oobbuf = kzalloc(sizeof(mtd->oobsize), GFP_KERNEL);
 	engine_conf->calc_buf = kzalloc(sizeof(mtd->oobsize), GFP_KERNEL);
 	engine_conf->code_buf = kzalloc(sizeof(mtd->oobsize), GFP_KERNEL);
 	if (!engine_conf->calc_buf || !engine_conf->code_buf) {
-		kfree(engine_conf);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto free_bufs;
 	}
 
 	nand->ecc.ctx.priv = engine_conf;
 	nand->ecc.ctx.total = engine_conf->nsteps * engine_conf->code_size;
 
 	return 0;
+
+free_bufs:
+	nand_ecc_cleanup_req_tweaking(&engine_conf->req_ctx);
+	kfree(engine_conf->calc_buf);
+	kfree(engine_conf->code_buf);
+free_engine_conf:
+	kfree(engine_conf);
+
+	return ret;
 }
 EXPORT_SYMBOL(nand_ecc_sw_hamming_init_ctx);
 
@@ -521,7 +534,7 @@ void nand_ecc_sw_hamming_cleanup_ctx(struct nand_device *nand)
 	struct nand_ecc_sw_hamming_conf *engine_conf = nand->ecc.ctx.priv;
 
 	if (engine_conf) {
-		kfree(engine_conf->spare_oobbuf);
+		nand_ecc_cleanup_req_tweaking(&engine_conf->req_ctx);
 		kfree(engine_conf->calc_buf);
 		kfree(engine_conf->code_buf);
 		kfree(engine_conf);
@@ -550,22 +563,9 @@ static int nand_ecc_sw_hamming_prepare_io_req(struct nand_device *nand,
 	if (!req->datalen)
 		return 0;
 
-	/* Ensure the OOB buffer is empty before using it */
-	if (req->oobbuf.in)
-		memset(req->oobbuf.in, 0xff, nanddev_per_page_oobsize(nand));
+	nand_ecc_tweak_req(&engine_conf->req_ctx, req);
 
-	/*
-	 * Ensure OOB area is fully read/written otherwise the software
-	 * correction cannot apply.
-	 */
-	engine_conf->reqooblen = req->ooblen;
-	if (!req->oobbuf.in) {
-		req->ooblen = nanddev_per_page_oobsize(nand);
-		req->oobbuf.in = engine_conf->spare_oobbuf;
-		memset(req->oobbuf.in, 0xff, nanddev_per_page_oobsize(nand));
-	}
-
-	/* No preparation for page read */
+	/* No more preparation for page read */
 	if (req->type == NAND_PAGE_READ)
 		return 0;
 
@@ -600,12 +600,11 @@ static int nand_ecc_sw_hamming_finish_io_req(struct nand_device *nand,
 	if (!req->datalen)
 		return 0;
 
-	/* Don't mess up with the upper layer: restore the request OOB length */
-	req->ooblen = engine_conf->reqooblen;
-
-	/* Nothing more to do for page write */
-	if (req->type == NAND_PAGE_WRITE)
+	/* No more preparation for page write */
+	if (req->type == NAND_PAGE_WRITE) {
+		nand_ecc_restore_req(&engine_conf->req_ctx, req);
 		return 0;
+	}
 
 	/* Finish a page read: retrieve the (raw) ECC bytes*/
 	ret = mtd_ooblayout_get_eccbytes(mtd, ecccode, req->oobbuf.in, 0,
@@ -631,6 +630,8 @@ static int nand_ecc_sw_hamming_finish_io_req(struct nand_device *nand,
 			max_bitflips = max_t(unsigned int, max_bitflips, stat);
 		}
 	}
+
+	nand_ecc_restore_req(&engine_conf->req_ctx, req);
 
 	return max_bitflips;
 }

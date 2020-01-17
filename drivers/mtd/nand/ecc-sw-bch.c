@@ -231,37 +231,46 @@ int nand_ecc_sw_bch_init_ctx(struct nand_device *nand)
 	if (!engine_conf)
 		return -ENOMEM;
 
+	ret = nand_ecc_init_req_tweaking(&engine_conf->req_ctx, nand);
+	if (ret)
+		goto free_engine_conf;
+
 	engine_conf->code_size = code_size;
 	engine_conf->nsteps = nsteps;
-	engine_conf->spare_oobbuf = kzalloc(sizeof(mtd->oobsize), GFP_KERNEL);
 	engine_conf->calc_buf = kzalloc(sizeof(mtd->oobsize), GFP_KERNEL);
 	engine_conf->code_buf = kzalloc(sizeof(mtd->oobsize), GFP_KERNEL);
 	if (!engine_conf->calc_buf || !engine_conf->code_buf) {
-		kfree(engine_conf);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto free_bufs;
 	}
 
 	nand->ecc.ctx.priv = engine_conf;
 	nand->ecc.ctx.total = nsteps * code_size;
 
 	ret = nand_ecc_sw_bch_init(nand);
-	if (ret) {
-		kfree(engine_conf->spare_oobbuf);
-		kfree(engine_conf->calc_buf);
-		kfree(engine_conf->code_buf);
-		kfree(engine_conf);
-		return -ENOMEM;
-	}
+	if (ret)
+		goto free_bufs;
 
 	/* Verify the layout validity */
 	if (mtd_ooblayout_count_eccbytes(mtd) !=
 	    engine_conf->nsteps * engine_conf->code_size) {
 		pr_err("Invalid ECC layout\n");
-		nand_ecc_sw_bch_cleanup(nand);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto cleanup_bch_ctx;
 	}
 
 	return 0;
+
+cleanup_bch_ctx:
+	nand_ecc_sw_bch_cleanup(nand);
+free_bufs:
+	nand_ecc_cleanup_req_tweaking(&engine_conf->req_ctx);
+	kfree(engine_conf->calc_buf);
+	kfree(engine_conf->code_buf);
+free_engine_conf:
+	kfree(engine_conf);
+
+	return ret;
 }
 EXPORT_SYMBOL(nand_ecc_sw_bch_init_ctx);
 
@@ -271,7 +280,7 @@ void nand_ecc_sw_bch_cleanup_ctx(struct nand_device *nand)
 
 	if (engine_conf) {
 		nand_ecc_sw_bch_cleanup(nand);
-		kfree(engine_conf->spare_oobbuf);
+		nand_ecc_cleanup_req_tweaking(&engine_conf->req_ctx);
 		kfree(engine_conf->calc_buf);
 		kfree(engine_conf->code_buf);
 		kfree(engine_conf);
@@ -300,16 +309,7 @@ static int nand_ecc_sw_bch_prepare_io_req(struct nand_device *nand,
 	if (!req->datalen)
 		return 0;
 
-	/*
-	 * Ensure OOB area is fully read/written otherwise the software
-	 * correction cannot apply.
-	 */
-	engine_conf->reqooblen = req->ooblen;
-	if (!req->oobbuf.in) {
-		req->ooblen = nanddev_per_page_oobsize(nand);
-		req->oobbuf.in = engine_conf->spare_oobbuf;
-		memset(req->oobbuf.in, 0xff, nanddev_per_page_oobsize(nand));
-	}
+	nand_ecc_tweak_req(&engine_conf->req_ctx, req);
 
 	/* No more preparation for page read */
 	if (req->type == NAND_PAGE_READ)
@@ -346,12 +346,11 @@ static int nand_ecc_sw_bch_finish_io_req(struct nand_device *nand,
 	if (!req->datalen)
 		return 0;
 
-	/* Don't mess up with the upper layer: restore the original request */
-	req->ooblen = engine_conf->reqooblen;
-
-	/* Nothing more to do for page write */
-	if (req->type == NAND_PAGE_WRITE)
+	/* No more preparation for page write */
+	if (req->type == NAND_PAGE_WRITE) {
+		nand_ecc_restore_req(&engine_conf->req_ctx, req);
 		return 0;
+	}
 
 	/* Finish a page read: retrieve the (raw) ECC bytes*/
 	ret = mtd_ooblayout_get_eccbytes(mtd, ecccode, req->oobbuf.in, 0,
@@ -377,6 +376,8 @@ static int nand_ecc_sw_bch_finish_io_req(struct nand_device *nand,
 			max_bitflips = max_t(unsigned int, max_bitflips, stat);
 		}
 	}
+
+	nand_ecc_restore_req(&engine_conf->req_ctx, req);
 
 	return max_bitflips;
 }

@@ -11,8 +11,6 @@
 #define __LINUX_MTD_NAND_H
 
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/nand-ecc-sw-hamming.h>
-#include <linux/mtd/nand-ecc-sw-bch.h>
 
 struct nand_device;
 
@@ -284,6 +282,50 @@ struct nand_ecc_engine *nand_ecc_get_hw_engine(struct nand_device *nand);
 struct nand_ecc_engine *nand_ecc_match_hw_engine(struct device *dev);
 void nand_ecc_put_hw_engine(struct nand_device *nand);
 
+
+#if IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_BCH)
+struct nand_ecc_engine *nand_ecc_sw_bch_get_engine(void);
+#else
+static inline struct nand_ecc_engine *nand_ecc_sw_bch_get_engine(void)
+{
+	return NULL;
+}
+#endif /* CONFIG_MTD_NAND_ECC_SW_BCH */
+
+#if IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_HAMMING)
+struct nand_ecc_engine *nand_ecc_sw_hamming_get_engine(void);
+#else
+static inline struct nand_ecc_engine *nand_ecc_sw_hamming_get_engine(void)
+{
+	return NULL;
+}
+#endif /* CONFIG_MTD_NAND_ECC_SW_HAMMING */
+
+/**
+ * struct nand_ecc_req_tweak_ctx - Help for automatically tweaking requests
+ * @orig_req: Pointer to the original IO request
+ * @nand: Related NAND device, to have access to its memory organization
+ * @spare_databuf: Data bounce buffer
+ * @spare_oobbuf: OOB bounce buffer
+ * @bounce_data: Flag indicating a data bounce buffer is used
+ * @bounce_oob: Flag indicating an OOB bounce buffer is used
+ */
+struct nand_ecc_req_tweak_ctx {
+	struct nand_page_io_req orig_req;
+	struct nand_device *nand;
+	void *spare_databuf;
+	void *spare_oobbuf;
+	bool bounce_data;
+	bool bounce_oob;
+};
+
+int nand_ecc_init_req_tweaking(struct nand_ecc_req_tweak_ctx *ctx,
+			       struct nand_device *nand);
+void nand_ecc_cleanup_req_tweaking(struct nand_ecc_req_tweak_ctx *ctx);
+void nand_ecc_tweak_req(struct nand_ecc_req_tweak_ctx *ctx,
+			struct nand_page_io_req *req);
+void nand_ecc_restore_req(struct nand_ecc_req_tweak_ctx *ctx,
+			  struct nand_page_io_req *req);
 
 /**
  * struct nand_ecc - High-level ECC object
