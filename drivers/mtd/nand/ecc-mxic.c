@@ -150,7 +150,7 @@ static int mxic_ecc_ooblayout_free(struct mtd_info *mtd, int section,
 	return 0;
 }
 
-const struct mtd_ooblayout_ops mxic_ecc_ooblayout_ops = {
+static const struct mtd_ooblayout_ops mxic_ecc_ooblayout_ops = {
 	.ecc = mxic_ecc_ooblayout_ecc,
 	.free = mxic_ecc_ooblayout_free,
 };
@@ -778,7 +778,7 @@ static struct nand_ecc_engine_ops mxic_ecc_engine_pipelined_ops = {
 	.finish_io_req = mxic_ecc_finish_io_req_pipelined,
 };
 
-int mxic_ecc_probe(struct platform_device *pdev)
+static int mxic_ecc_probe(struct platform_device *pdev)
 {
 	const struct mxic_ecc_drvdata *d = of_device_get_match_data(&pdev->dev);
 	struct device *dev = &pdev->dev;
@@ -805,7 +805,7 @@ int mxic_ecc_probe(struct platform_device *pdev)
 	return 0;
 }
 
-int mxic_ecc_remove(struct platform_device *pdev)
+static int mxic_ecc_remove(struct platform_device *pdev)
 {
 	struct nand_ecc_engine *ecceng = nand_ecc_match_hw_engine(&pdev->dev);
 
