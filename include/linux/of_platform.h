@@ -54,11 +54,13 @@ extern struct platform_device *of_device_alloc(struct device_node *np,
 					 struct device *parent);
 #ifdef CONFIG_OF
 extern struct platform_device *of_find_device_by_node(struct device_node *np);
+extern void of_dev_put(struct platform_device *dev);
 #else
 static inline struct platform_device *of_find_device_by_node(struct device_node *np)
 {
 	return NULL;
 }
+static inline void of_dev_put(struct platform_device *dev) { }
 #endif
 
 /* Platform devices and busses creation */
