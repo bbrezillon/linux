@@ -616,11 +616,15 @@ static int mxic_ecc_prepare_io_req_pipelined(struct nand_device *nand,
 	nand_ecc_tweak_req(&eng->req_ctx, req);
 	eng->req = req;
 
-	if (req->mode == MTD_OPS_RAW && req->type == NAND_PAGE_WRITE)
-		mxic_ecc_deconstruct_raw_buffers(eng);
+	if (req->mode == MTD_OPS_RAW) {
+		if (req->type == NAND_PAGE_WRITE)
+			mxic_ecc_deconstruct_raw_buffers(eng);
 
-	if (req->mode == MTD_OPS_RAW)
 		return 0;
+	}
+
+	nand_ecc_tweak_req(&eng->req_ctx, req);
+	eng->req = req;
 
 	if (req->type == NAND_PAGE_READ) {
 		sg_set_buf(&eng->sg[0], req->databuf.in, req->datalen);
@@ -749,7 +753,8 @@ static int mxic_ecc_finish_io_req_pipelined(struct nand_device *nand,
 
 	mxic_ecc_disable_engine(eng);
 
-	dma_unmap_sg(eng->dev, eng->sg, 2, DMA_BIDIRECTIONAL);
+	if (req->mode != MTD_OPS_RAW)
+		dma_unmap_sg(eng->dev, eng->sg, 2, DMA_BIDIRECTIONAL);
 
 	if (req->type == NAND_PAGE_READ) {
 		if (req->mode == MTD_OPS_RAW) {
