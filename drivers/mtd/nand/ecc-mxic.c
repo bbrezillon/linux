@@ -661,6 +661,7 @@ bool mxic_ecc_use_engine(struct device *host_dev)
 
 	return eng ? eng->enabled : false;
 }
+EXPORT_SYMBOL_GPL(mxic_ecc_use_engine);
 
 int mxic_ecc_data_xfer(struct device *host_dev)
 {
@@ -668,6 +669,7 @@ int mxic_ecc_data_xfer(struct device *host_dev)
 
 	return mxic_ecc_process_data(eng);
 }
+EXPORT_SYMBOL_GPL(mxic_ecc_data_xfer);
 
 static int mxic_ecc_reconstruct_raw_buffers(struct mxic_ecc_engine *eng,
 					    bool has_stat_bytes)
