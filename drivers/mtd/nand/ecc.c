@@ -129,6 +129,16 @@ int nand_ecc_prepare_io_req(struct nand_device *nand,
 }
 EXPORT_SYMBOL(nand_ecc_prepare_io_req);
 
+int nand_ecc_do_page_io(struct nand_device *nand,
+			const struct nand_page_io_req *req)
+{
+	if (nand->ecc.engine && nand->ecc.engine->ops->do_page_io)
+		return nand->ecc.engine->ops->do_page_io(nand, req);
+
+	return nanddev_do_raw_page_io(nand, req);
+}
+EXPORT_SYMBOL(nand_ecc_do_page_io);
+
 int nand_ecc_finish_io_req(struct nand_device *nand,
 			   struct nand_page_io_req *req)
 {

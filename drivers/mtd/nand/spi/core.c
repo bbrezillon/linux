@@ -338,34 +338,75 @@ static int spinand_load_page_op(struct spinand_device *spinand,
 	return spi_mem_exec_op(spinand->spimem, &op);
 }
 
-static int spinand_read_from_cache_op(struct spinand_device *spinand,
-				      const struct nand_page_io_req *req)
+static int spinand_do_raw_page_io(struct nand_device *nand,
+				  const struct nand_page_io_req *req)
 {
-	struct nand_device *nand = spinand_to_nand(spinand);
-	struct spi_mem_dirmap_desc *rdesc;
-	unsigned int nbytes = 0;
+	struct spinand_device *spinand = nand_to_spinand(nand);
+	unsigned int nbytes = 0, column = 0;
+	struct spi_mem_dirmap_desc *desc;
 	void *buf = NULL;
-	u16 column = 0;
 	ssize_t ret;
 
-	if (req->datalen) {
-		buf = spinand->databuf;
-		nbytes = nanddev_page_size(nand);
-		column = 0;
-	}
+	if (req->type == NAND_PAGE_READ) {
+		desc = spinand->dirmaps[req->pos.plane].rdesc;
+		if (req->datalen) {
+			buf = spinand->databuf;
+			nbytes += nanddev_page_size(nand);
+			column = 0;
+		}
 
-	if (req->ooblen) {
-		nbytes += nanddev_per_page_oobsize(nand);
-		if (!buf) {
-			buf = spinand->oobbuf;
-			column = nanddev_page_size(nand);
+		if (req->ooblen) {
+			nbytes += nanddev_per_page_oobsize(nand);
+			if (!buf) {
+				buf = spinand->oobbuf;
+				column = nanddev_page_size(nand);
+			}
+		}
+	} else {
+		desc = spinand->dirmaps[req->pos.plane].wdesc;
+		buf = spinand->databuf;
+
+		/*
+		 * Looks like PROGRAM LOAD (AKA write cache) does not
+		 * necessarily reset the cache content to 0xFF (depends on
+		 * vendor implementation), so we must fill the page cache
+		 * entirely even if we only want to program the data portion
+		 * of the page, otherwise we might corrupt the BBM or user
+		 * data previously programmed in OOB area.
+		 *
+		 * Only reset the data buffer manually, the OOB buffer is
+		 * prepared by ECC engines ->prepare_io_req() callback.
+		 */
+		nbytes = nanddev_page_size(nand) +
+			 nanddev_per_page_oobsize(nand);
+		memset(buf, 0xff, nbytes);
+
+		if (req->datalen)
+			memcpy(spinand->databuf + req->dataoffs,
+			       req->databuf.out, req->datalen);
+
+		if (req->ooblen) {
+			if (req->mode == MTD_OPS_AUTO_OOB) {
+				struct mtd_info *mtd = spinand_to_mtd(spinand);
+
+				mtd_ooblayout_set_databytes(mtd,
+							    req->oobbuf.out,
+							    spinand->oobbuf,
+							    req->ooboffs,
+							    req->ooblen);
+			} else {
+				memcpy(spinand->oobbuf + req->ooboffs,
+				       req->oobbuf.out, req->ooblen);
+			}
 		}
 	}
 
-	rdesc = spinand->dirmaps[req->pos.plane].rdesc;
-
 	while (nbytes) {
-		ret = spi_mem_dirmap_read(rdesc, column, nbytes, buf);
+		if (req->type == NAND_PAGE_READ)
+			ret = spi_mem_dirmap_read(desc, column, nbytes, buf);
+		else
+			ret = spi_mem_dirmap_write(desc, column, nbytes, buf);
+
 		if (ret < 0)
 			return ret;
 
@@ -376,6 +417,9 @@ static int spinand_read_from_cache_op(struct spinand_device *spinand,
 		column += ret;
 		buf += ret;
 	}
+
+	if (req->type != NAND_PAGE_READ)
+		return 0;
 
 	if (req->datalen)
 		memcpy(req->databuf.in, spinand->databuf + req->dataoffs,
@@ -384,62 +428,6 @@ static int spinand_read_from_cache_op(struct spinand_device *spinand,
 	if (req->ooblen)
 		memcpy(req->oobbuf.in, spinand->oobbuf + req->ooboffs,
 		       req->ooblen);
-
-	return 0;
-}
-
-static int spinand_write_to_cache_op(struct spinand_device *spinand,
-				     const struct nand_page_io_req *req)
-{
-	struct nand_device *nand = spinand_to_nand(spinand);
-	struct mtd_info *mtd = spinand_to_mtd(spinand);
-	struct spi_mem_dirmap_desc *wdesc;
-	unsigned int nbytes, column = 0;
-	void *buf = spinand->databuf;
-	ssize_t ret;
-
-	/*
-	 * Looks like PROGRAM LOAD (AKA write cache) does not necessarily reset
-	 * the cache content to 0xFF (depends on vendor implementation), so we
-	 * must fill the page cache entirely even if we only want to program
-	 * the data portion of the page, otherwise we might corrupt the BBM or
-	 * user data previously programmed in OOB area.
-	 *
-	 * Only reset the data buffer manually, the OOB buffer is prepared by
-	 * ECC engines ->prepare_io_req() callback.
-	 */
-	nbytes = nanddev_page_size(nand) + nanddev_per_page_oobsize(nand);
-	memset(spinand->databuf, 0xff, nanddev_page_size(nand));
-
-	if (req->datalen)
-		memcpy(spinand->databuf + req->dataoffs, req->databuf.out,
-		       req->datalen);
-
-	if (req->ooblen) {
-		if (req->mode == MTD_OPS_AUTO_OOB)
-			mtd_ooblayout_set_databytes(mtd, req->oobbuf.out,
-						    spinand->oobbuf,
-						    req->ooboffs,
-						    req->ooblen);
-		else
-			memcpy(spinand->oobbuf + req->ooboffs, req->oobbuf.out,
-			       req->ooblen);
-	}
-
-	wdesc = spinand->dirmaps[req->pos.plane].wdesc;
-
-	while (nbytes) {
-		ret = spi_mem_dirmap_write(wdesc, column, nbytes, buf);
-		if (ret < 0)
-			return ret;
-
-		if (!ret || ret > nbytes)
-			return -EIO;
-
-		nbytes -= ret;
-		column += ret;
-		buf += ret;
-	}
 
 	return 0;
 }
@@ -545,7 +533,7 @@ static int spinand_read_page(struct spinand_device *spinand,
 
 	spinand_ondie_ecc_save_status(nand, status);
 
-	ret = spinand_read_from_cache_op(spinand, req);
+	ret = nand_ecc_do_page_io(nand, req);
 	if (ret)
 		return ret;
 
@@ -567,7 +555,7 @@ static int spinand_write_page(struct spinand_device *spinand,
 	if (ret)
 		return ret;
 
-	ret = spinand_write_to_cache_op(spinand, req);
+	ret = nand_ecc_do_page_io(nand, req);
 	if (ret)
 		return ret;
 
@@ -853,6 +841,7 @@ static const struct nand_ops spinand_ops = {
 	.erase = spinand_erase,
 	.markbad = spinand_markbad,
 	.isbad = spinand_isbad,
+	.do_raw_page_io = spinand_do_raw_page_io,
 };
 
 static const struct spinand_manufacturer *spinand_manufacturers[] = {

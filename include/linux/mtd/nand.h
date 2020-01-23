@@ -217,6 +217,8 @@ struct nand_ops {
 	int (*erase)(struct nand_device *nand, const struct nand_pos *pos);
 	int (*markbad)(struct nand_device *nand, const struct nand_pos *pos);
 	bool (*isbad)(struct nand_device *nand, const struct nand_pos *pos);
+	int (*do_raw_page_io)(struct nand_device *nand,
+			      const struct nand_page_io_req *req);
 };
 
 /**
@@ -248,6 +250,8 @@ struct nand_ecc_engine_ops {
 	void (*cleanup_ctx)(struct nand_device *nand);
 	int (*prepare_io_req)(struct nand_device *nand,
 			      struct nand_page_io_req *req);
+	int (*do_page_io)(struct nand_device *nand,
+			  const struct nand_page_io_req *req);
 	int (*finish_io_req)(struct nand_device *nand,
 			     struct nand_page_io_req *req);
 };
@@ -271,6 +275,8 @@ int nand_ecc_init_ctx(struct nand_device *nand);
 void nand_ecc_cleanup_ctx(struct nand_device *nand);
 int nand_ecc_prepare_io_req(struct nand_device *nand,
 			    struct nand_page_io_req *req);
+int nand_ecc_do_page_io(struct nand_device *nand,
+			const struct nand_page_io_req *req);
 int nand_ecc_finish_io_req(struct nand_device *nand,
 			   struct nand_page_io_req *req);
 bool nand_ecc_correction_is_enough(struct nand_device *nand);
@@ -909,6 +915,12 @@ bool nanddev_isbad(struct nand_device *nand, const struct nand_pos *pos);
 bool nanddev_isreserved(struct nand_device *nand, const struct nand_pos *pos);
 int nanddev_erase(struct nand_device *nand, const struct nand_pos *pos);
 int nanddev_markbad(struct nand_device *nand, const struct nand_pos *pos);
+
+static inline int nanddev_do_raw_page_io(struct nand_device *nand,
+					 const struct nand_page_io_req *req)
+{
+	return nand->ops->do_raw_page_io(nand, req);
+}
 
 /* ECC related functions */
 int nanddev_ecc_engine_init(struct nand_device *nand);
