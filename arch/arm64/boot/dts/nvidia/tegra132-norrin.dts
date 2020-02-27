@@ -767,7 +767,7 @@
 
 				google,remote-bus = <0>;
 
-				charger: bq24735 {
+				charger: charger@9 {
 					compatible = "ti,bq24735";
 					reg = <0x9>;
 					interrupt-parent = <&gpio>;
@@ -778,7 +778,7 @@
 							GPIO_ACTIVE_HIGH>;
 				};
 
-				battery: smart-battery {
+				battery: battery@b {
 					compatible = "sbs,sbs-battery";
 					reg = <0xb>;
 					battery-name = "battery";
