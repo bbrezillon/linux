@@ -25,11 +25,28 @@
 #define NCTL_CMD1W			0x00080000
 #define NCTL_READ			0x00100000
 #define NCTL_WRITE			0x00200000
+/* When the SPECADDR is set CMD1 is interpreted as a single ADDR cycle */
 #define NCTL_SPECADDR			0x01000000
 #define NCTL_READY			0x04000000
 #define NCTL_ERR			0x08000000
+/*
+ * Number of DATA cycles to issue when NCTL_{READ,WRITE} is set. The minimum
+ * value is 1 and the maximum value is 4. Those bytes are then stored in the
+ * BCMA_CC_NFLASH_DATA register.
+ */
+#define NCTL_DATA_CYCLES(x)		((((x) - 1) & 0x3) << 28)
+/*
+ * The CS pin seems to be asserted even if NCTL_CSA is not set. All this bit
+ * seems to encode is whether the CS line should stay asserted after the
+ * operation has been executed. In other words, you should only set it if you
+ * intend to do more operations on the NAND bus.
+ */
 #define NCTL_CSA			0x40000000
 #define NCTL_START			0x80000000
+
+#define CONF_MAGIC_BIT			0x00000002
+#define CONF_COL_BYTES(x)		(((x) - 1) << 4)
+#define CONF_ROW_BYTES(x)		(((x) - 1) << 6)
 
 /**************************************************
  * Various helpers
@@ -118,7 +135,7 @@ static void bcm47xxnflash_ops_bcm4706_read(struct mtd_info *mtd, uint8_t *buf,
 
 		/* Eventually read some data :) */
 		for (i = 0; i < toread; i += 4, dest++) {
-			ctlcode = NCTL_CSA | 0x30000000 | NCTL_READ;
+			ctlcode = NCTL_CSA | NCTL_DATA_CYCLES(4) | NCTL_READ;
 			if (i == toread - 4) /* Last read goes without that */
 				ctlcode &= ~NCTL_CSA;
 			if (bcm47xxnflash_ops_bcm4706_ctl_cmd(b47n->cc,
@@ -150,7 +167,7 @@ static void bcm47xxnflash_ops_bcm4706_write(struct mtd_info *mtd,
 	for (i = 0; i < len; i += 4, data++) {
 		bcma_cc_write32(cc, BCMA_CC_NFLASH_DATA, *data);
 
-		ctlcode = NCTL_CSA | 0x30000000 | NCTL_WRITE;
+		ctlcode = NCTL_CSA | NCTL_DATA_CYCLES(4) | NCTL_WRITE;
 		if (i == len - 4) /* Last read goes without that */
 			ctlcode &= ~NCTL_CSA;
 		if (bcm47xxnflash_ops_bcm4706_ctl_cmd(cc, ctlcode)) {
@@ -229,7 +246,7 @@ static void bcm47xxnflash_ops_bcm4706_cmdfunc(struct nand_chip *nand_chip,
 		nand_wait_ready(nand_chip);
 		break;
 	case NAND_CMD_READID:
-		ctlcode = NCTL_CSA | 0x01000000 | NCTL_CMD1W | NCTL_CMD0;
+		ctlcode = NCTL_CSA | NCTL_SPECADDR | NCTL_CMD1W | NCTL_CMD0;
 		ctlcode |= NAND_CMD_READID;
 		if (bcm47xxnflash_ops_bcm4706_ctl_cmd(b47n->cc, ctlcode)) {
 			pr_err("READID error\n");
@@ -242,7 +259,7 @@ static void bcm47xxnflash_ops_bcm4706_cmdfunc(struct nand_chip *nand_chip,
 		 * to perform, so cache everything.
 		 */
 		for (i = 0; i < ARRAY_SIZE(b47n->id_data); i++) {
-			ctlcode = NCTL_CSA | NCTL_READ;
+			ctlcode = NCTL_CSA | NCTL_READ | NCTL_DATA_CYCLES(1);
 			if (i == ARRAY_SIZE(b47n->id_data) - 1)
 				ctlcode &= ~NCTL_CSA;
 			if (bcm47xxnflash_ops_bcm4706_ctl_cmd(b47n->cc,
@@ -285,7 +302,7 @@ static void bcm47xxnflash_ops_bcm4706_cmdfunc(struct nand_chip *nand_chip,
 				b47n->curr_page_addr);
 
 		/* Prepare to write */
-		ctlcode = 0x40000000 | NCTL_ROW | NCTL_COL | NCTL_CMD0;
+		ctlcode = NCTL_CSA | NCTL_ROW | NCTL_COL | NCTL_CMD0;
 		ctlcode |= NAND_CMD_SEQIN;
 		if (bcm47xxnflash_ops_bcm4706_ctl_cmd(cc, ctlcode))
 			pr_err("SEQIN failed\n");
@@ -320,7 +337,9 @@ static u8 bcm47xxnflash_ops_bcm4706_read_byte(struct nand_chip *nand_chip)
 		}
 		return b47n->id_data[b47n->curr_column++];
 	case NAND_CMD_STATUS:
-		if (bcm47xxnflash_ops_bcm4706_ctl_cmd(cc, NCTL_READ))
+		if (bcm47xxnflash_ops_bcm4706_ctl_cmd(cc,
+						      NCTL_READ |
+						      NCTL_DATA_CYCLES(1)))
 			return 0;
 		return bcma_cc_read32(cc, BCMA_CC_NFLASH_DATA) & 0xff;
 	case NAND_CMD_READOOB:
@@ -439,7 +458,8 @@ int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n)
 	row_bits = tbits - col_bits + 1;
 	row_bsize = (row_bits + 7) / 8;
 
-	val = ((row_bsize - 1) << 6) | ((col_size - 1) << 4) | 2;
+	val = CONF_ROW_BYTES(row_bsize) | CONF_COL_BYTES(col_size) |
+	      CONF_MAGIC_BIT;
 	bcma_cc_write32(b47n->cc, BCMA_CC_NFLASH_CONF, val);
 
 exit:
