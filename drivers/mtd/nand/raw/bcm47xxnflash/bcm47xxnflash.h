@@ -10,6 +10,7 @@
 #include <linux/mtd/rawnand.h>
 
 struct bcm47xxnflash {
+	struct nand_controller base;
 	struct bcma_drv_cc *cc;
 
 	struct nand_chip nand_chip;

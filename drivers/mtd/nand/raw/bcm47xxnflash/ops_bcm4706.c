@@ -382,6 +382,135 @@ static void bcm47xxnflash_ops_bcm4706_write_buf(struct nand_chip *nand_chip,
 	pr_err("Invalid command for buf write: 0x%X\n", b47n->curr_command);
 }
 
+static int
+bcm47xxnflash_ops_bcm4706_exec_cmd_addr(struct nand_chip *chip,
+					const struct nand_subop *subop)
+{
+	struct bcm47xxnflash *b47n = nand_get_controller_data(chip);
+	u32 nctl = 0, col = 0, row = 0, ncols = 0, nrows = 0;
+	unsigned int i, j;
+
+	for (i = 0; i < subop->ninstrs; i++) {
+		const struct nand_op_instr *instr = &subop->instrs[i];
+
+		switch (instr->type) {
+		case NAND_OP_CMD_INSTR:
+			if (WARN_ON_ONCE((nctl & NCTL_CMD0) &&
+					 (nctl & NCTL_CMD1W)))
+				return -EINVAL;
+			else if (nctl & NCTL_CMD0)
+				nctl |= NCTL_CMD1W |
+					((u32)instr->ctx.cmd.opcode << 8);
+			else
+				nctl |= NCTL_CMD0 | instr->ctx.cmd.opcode;
+			break;
+		case NAND_OP_ADDR_INSTR:
+			for (j = 0; j < instr->ctx.addr.naddrs; j++) {
+				u32 addr = instr->ctx.addr.addrs[j];
+
+				if (j < 2) {
+					col |= addr << (j * 8);
+					nctl |= NCTL_COL;
+					ncols++;
+				} else {
+					row |= addr << ((j - 2) * 8);
+					nctl |= NCTL_ROW;
+					nrows++;
+				}
+			}
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
+
+	/* Keep the CS line asserted if there's something else to execute. */
+	if (!subop->is_last)
+		nctl |= NCTL_CSA;
+
+	bcma_cc_write32(b47n->cc, BCMA_CC_NFLASH_CONF,
+			CONF_MAGIC_BIT |
+			CONF_COL_BYTES(ncols) |
+			CONF_ROW_BYTES(nrows));
+	return bcm47xxnflash_ops_bcm4706_ctl_cmd(b47n->cc, nctl);
+}
+
+static int
+bcm47xxnflash_ops_bcm4706_exec_waitrdy(struct nand_chip *chip,
+				       const struct nand_subop *subop)
+{
+	struct bcm47xxnflash *b47n = nand_get_controller_data(chip);
+	const struct nand_op_instr *instr = &subop->instrs[0];
+
+	return nand_poll(bcma_cc_read32(b47n->cc, BCMA_CC_NFLASH_CTL) & NCTL_READY,
+			 10, 100, instr->ctx.waitrdy.timeout_ms, false);
+}
+
+static int
+bcm47xxnflash_ops_bcm4706_exec_rw(struct nand_chip *chip,
+				  const struct nand_subop *subop)
+{
+	struct bcm47xxnflash *b47n = nand_get_controller_data(chip);
+	const struct nand_op_instr *instr = &subop->instrs[0];
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < instr->ctx.data.len; i += 4) {
+		unsigned int nbytes = min_t(unsigned int,
+					    instr->ctx.data.len - i, 4);
+		u32 nctl, data;
+
+		nctl = NCTL_CSA | NCTL_DATA_CYCLES(nbytes);
+		if (instr->type == NAND_OP_DATA_IN_INSTR) {
+			nctl |= NCTL_READ;
+		} else {
+			nctl |= NCTL_WRITE;
+			memcpy(&data, instr->ctx.data.buf.in + i, nbytes);
+			bcma_cc_write32(b47n->cc, BCMA_CC_NFLASH_DATA, data);
+		}
+
+		if (i + nbytes < instr->ctx.data.len)
+			nctl |= NCTL_CSA;
+
+		ret = bcm47xxnflash_ops_bcm4706_ctl_cmd(b47n->cc, nctl);
+		if (ret)
+			return ret;
+
+		if (instr->type == NAND_OP_DATA_IN_INSTR) {
+			data = bcma_cc_read32(b47n->cc, BCMA_CC_NFLASH_DATA);
+			memcpy(instr->ctx.data.buf.in + i, &data, nbytes);
+		}
+	}
+
+	return 0;
+}
+
+static const struct nand_op_parser bcm47xxnflash_op_parser = NAND_OP_PARSER(
+	NAND_OP_PARSER_PATTERN(bcm47xxnflash_ops_bcm4706_exec_cmd_addr,
+			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
+			       NAND_OP_PARSER_PAT_ADDR_ELEM(true, 5),
+			       NAND_OP_PARSER_PAT_CMD_ELEM(true)),
+	NAND_OP_PARSER_PATTERN(bcm47xxnflash_ops_bcm4706_exec_waitrdy,
+			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(false)),
+	NAND_OP_PARSER_PATTERN(bcm47xxnflash_ops_bcm4706_exec_rw,
+			       NAND_OP_PARSER_PAT_DATA_IN_ELEM(false, 0x200)),
+	NAND_OP_PARSER_PATTERN(bcm47xxnflash_ops_bcm4706_exec_rw,
+			       NAND_OP_PARSER_PAT_DATA_OUT_ELEM(false, 0x200)),
+);
+
+static int
+bcm47xxnflash_ops_bcm4706_exec_op(struct nand_chip *chip,
+				  const struct nand_operation *op,
+				  bool check_only)
+{
+	return nand_op_parser_exec_op(chip, &bcm47xxnflash_op_parser, op,
+				      check_only);
+}
+
+static const struct nand_controller_ops bcm47xxnflash_ops = {
+	.exec_op = bcm47xxnflash_ops_bcm4706_exec_op,
+};
+
 /**************************************************
  * Init
  **************************************************/
@@ -398,6 +527,9 @@ int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n)
 	u8 tbits, col_bits, col_size, row_bits, row_bsize;
 	u32 val;
 
+	nand_controller_init(&b47n->base);
+	b47n->base.ops = &bcm47xxnflash_ops;
+	b47n->nand_chip.controller = &b47n->base;
 	nand_chip->legacy.select_chip = bcm47xxnflash_ops_bcm4706_select_chip;
 	nand_chip->legacy.cmd_ctrl = bcm47xxnflash_ops_bcm4706_cmd_ctrl;
 	nand_chip->legacy.dev_ready = bcm47xxnflash_ops_bcm4706_dev_ready;
