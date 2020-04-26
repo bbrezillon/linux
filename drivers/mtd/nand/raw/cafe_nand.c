@@ -150,12 +150,7 @@ struct cafe_priv {
 	struct pci_dev *pdev;
 	void __iomem *mmio;
 	struct rs_control *rs;
-	uint32_t ctl1;
 	uint32_t ctl2;
-	int datalen;
-	int nr_data;
-	int data_pos;
-	int page_addr;
 	bool usedma;
 	dma_addr_t dmaaddr;
 	unsigned char *dmabuf;
@@ -182,249 +177,6 @@ static const char *part_probes[] = { "cmdlinepart", "RedBoot", NULL };
 /* Make it easier to switch to PIO if we need to */
 #define cafe_readl(cafe, addr)			readl((cafe)->mmio + CAFE_##addr)
 #define cafe_writel(cafe, datum, addr)		writel(datum, (cafe)->mmio + CAFE_##addr)
-
-static int cafe_device_ready(struct nand_chip *chip)
-{
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-	int result = !!(cafe_readl(cafe, NAND_STATUS) &
-			CAFE_NAND_STATUS_FLASH_BUSY);
-	uint32_t irqs = cafe_readl(cafe, NAND_IRQ);
-
-	cafe_writel(cafe, irqs, NAND_IRQ);
-
-	dev_dbg(&cafe->pdev->dev, "NAND device is%s ready, IRQ %x (%x) (%x,%x)\n",
-		result?"":" not", irqs, cafe_readl(cafe, NAND_IRQ),
-		cafe_readl(cafe, GLOBAL_IRQ), cafe_readl(cafe, GLOBAL_IRQ_MASK));
-
-	return result;
-}
-
-
-static void cafe_write_buf(struct nand_chip *chip, const uint8_t *buf, int len)
-{
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-
-	if (cafe->usedma)
-		memcpy(cafe->dmabuf + cafe->datalen, buf, len);
-	else
-		memcpy_toio(cafe->mmio + CAFE_NAND_WRITE_DATA + cafe->datalen, buf, len);
-
-	cafe->datalen += len;
-
-	dev_dbg(&cafe->pdev->dev, "Copy 0x%x bytes to write buffer. datalen 0x%x\n",
-		len, cafe->datalen);
-}
-
-static void cafe_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
-{
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-
-	if (cafe->usedma)
-		memcpy(buf, cafe->dmabuf + cafe->datalen, len);
-	else
-		memcpy_fromio(buf, cafe->mmio + CAFE_NAND_READ_DATA + cafe->datalen, len);
-
-	dev_dbg(&cafe->pdev->dev, "Copy 0x%x bytes from position 0x%x in read buffer.\n",
-		len, cafe->datalen);
-	cafe->datalen += len;
-}
-
-static uint8_t cafe_read_byte(struct nand_chip *chip)
-{
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-	uint8_t d;
-
-	cafe_read_buf(chip, &d, 1);
-	dev_dbg(&cafe->pdev->dev, "Read %02x\n", d);
-
-	return d;
-}
-
-static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
-			      int column, int page_addr)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-	int adrbytes = 0;
-	uint32_t ctl1;
-	uint32_t doneint = CAFE_NAND_IRQ_CMD_DONE;
-
-	dev_dbg(&cafe->pdev->dev, "cmdfunc %02x, 0x%x, 0x%x\n",
-		command, column, page_addr);
-
-	if (command == NAND_CMD_ERASE2 || command == NAND_CMD_PAGEPROG) {
-		/* Second half of a command we already calculated */
-		cafe_writel(cafe,
-			    cafe->ctl2 |
-			    CAFE_NAND_CTRL2_HAS_CMD2 |
-			    CAFE_FIELD_PREP(NAND_CTRL2, CMD2, command),
-			    NAND_CTRL2);
-		ctl1 = cafe->ctl1;
-		dev_dbg(&cafe->pdev->dev, "Continue command, ctl1 %08x, #data %d\n",
-			cafe->ctl1, cafe->nr_data);
-		goto do_command;
-	}
-	/* Reset ECC engine */
-	cafe_writel(cafe, 0, NAND_CTRL2);
-
-	/* Emulate NAND_CMD_READOOB on large-page chips */
-	if (mtd->writesize > 512 &&
-	    command == NAND_CMD_READOOB) {
-		column += mtd->writesize;
-		command = NAND_CMD_READ0;
-	}
-
-	/* FIXME: Do we need to send read command before sending data
-	   for small-page chips, to position the buffer correctly? */
-
-	if (column != -1) {
-		cafe_writel(cafe, column, NAND_ADDR1);
-		adrbytes = 2;
-		if (page_addr != -1)
-			goto write_adr2;
-	} else if (page_addr != -1) {
-		cafe_writel(cafe, page_addr & 0xffff, NAND_ADDR1);
-		page_addr >>= 16;
-	write_adr2:
-		cafe_writel(cafe, page_addr, NAND_ADDR2);
-		adrbytes += 2;
-		if (mtd->size > mtd->writesize << 16)
-			adrbytes++;
-	}
-
-	cafe->data_pos = cafe->datalen = 0;
-
-	/* Set command valid bit, mask in the chip select bit  */
-	ctl1 = CAFE_NAND_CTRL1_HAS_CMD |
-	       CAFE_FIELD_PREP(NAND_CTRL1, CMD, command) |
-	       (cafe->ctl1 & CAFE_NAND_CTRL1_CE);
-
-	/* Set RD or WR bits as appropriate */
-	if (command == NAND_CMD_READID || command == NAND_CMD_STATUS) {
-		ctl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
-		/* Always 5 bytes, for now */
-		cafe->datalen = 4;
-		/* And one address cycle -- even for STATUS, since the controller doesn't work without */
-		adrbytes = 1;
-	} else if (command == NAND_CMD_READ0 || command == NAND_CMD_READ1 ||
-		   command == NAND_CMD_READOOB || command == NAND_CMD_RNDOUT) {
-		ctl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
-		/* For now, assume just read to end of page */
-		cafe->datalen = mtd->writesize + mtd->oobsize - column;
-	} else if (command == NAND_CMD_SEQIN)
-		ctl1 |= CAFE_NAND_CTRL1_HAS_DATA_OUT;
-
-	/* Set number of address bytes */
-	if (adrbytes)
-		ctl1 |= CAFE_NAND_CTRL1_HAS_ADDR |
-			CAFE_FIELD_PREP(NAND_CTRL1, NUM_ADDR_CYC, adrbytes - 1);
-
-	if (command == NAND_CMD_SEQIN || command == NAND_CMD_ERASE1) {
-		/* Ignore the first command of a pair; the hardware
-		   deals with them both at once, later */
-		cafe->ctl1 = ctl1;
-		dev_dbg(&cafe->pdev->dev, "Setup for delayed command, ctl1 %08x, dlen %x\n",
-			cafe->ctl1, cafe->datalen);
-		return;
-	}
-	/* RNDOUT and READ0 commands need a following byte */
-	if (command == NAND_CMD_RNDOUT)
-		cafe_writel(cafe,
-			    cafe->ctl2 | CAFE_NAND_CTRL2_HAS_CMD2 |
-			    CAFE_FIELD_PREP(NAND_CTRL2, CMD2, NAND_CMD_RNDOUTSTART),
-			    NAND_CTRL2);
-	else if (command == NAND_CMD_READ0 && mtd->writesize > 512)
-		cafe_writel(cafe,
-			    cafe->ctl2 | CAFE_NAND_CTRL2_HAS_CMD2 |
-			    CAFE_FIELD_PREP(NAND_CTRL2, CMD2, NAND_CMD_READSTART),
-			    NAND_CTRL2);
-
- do_command:
-	dev_dbg(&cafe->pdev->dev, "dlen %x, ctl1 %x, ctl2 %x\n",
-		cafe->datalen, ctl1, cafe_readl(cafe, NAND_CTRL2));
-
-	/* NB: The datasheet lies -- we really should be subtracting 1 here */
-	cafe_writel(cafe, cafe->datalen, NAND_DATA_LEN);
-	cafe_writel(cafe, CAFE_NAND_IRQ_CMD_DONE | CAFE_NAND_IRQ_DMA_DONE,
-		    NAND_IRQ);
-	if (cafe->usedma &&
-	    (ctl1 & (CAFE_NAND_CTRL1_HAS_DATA_IN |
-		     CAFE_NAND_CTRL1_HAS_DATA_OUT))) {
-		uint32_t dmactl = CAFE_NAND_DMA_CTRL_ENABLE |
-				  CAFE_NAND_DMA_CTRL_RESERVED;
-
-		dmactl |= CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
-					  cafe->datalen);
-		/* If WR or RD bits set, set up DMA */
-		if (ctl1 & CAFE_NAND_CTRL1_HAS_DATA_IN) {
-			/* It's a read */
-			dmactl |= CAFE_NAND_DMA_CTRL_DATA_IN;
-			/* ... so it's done when the DMA is done, not just
-			   the command. */
-			doneint = CAFE_NAND_IRQ_DMA_DONE;
-		}
-		cafe_writel(cafe, dmactl, NAND_DMA_CTRL);
-	}
-	cafe->datalen = 0;
-
-	if (unlikely(regdebug)) {
-		int i;
-		printk("About to write command %08x to register 0\n", ctl1);
-		for (i=4; i< 0x5c; i+=4)
-			printk("Register %x: %08x\n", i, readl(cafe->mmio + i));
-	}
-
-	cafe_writel(cafe, ctl1, NAND_CTRL1);
-	/* Apply this short delay always to ensure that we do wait tWB in
-	 * any case on any machine. */
-	ndelay(100);
-
-	if (1) {
-		int c;
-		uint32_t irqs;
-
-		for (c = 500000; c != 0; c--) {
-			irqs = cafe_readl(cafe, NAND_IRQ);
-			if (irqs & doneint)
-				break;
-			udelay(1);
-			if (!(c % 100000))
-				dev_dbg(&cafe->pdev->dev, "Wait for ready, IRQ %x\n", irqs);
-			cpu_relax();
-		}
-		cafe_writel(cafe, doneint, NAND_IRQ);
-		dev_dbg(&cafe->pdev->dev, "Command %x completed after %d usec, irqs %x (%x)\n",
-			command, 500000-c, irqs, cafe_readl(cafe, NAND_IRQ));
-	}
-
-	switch (command) {
-
-	case NAND_CMD_CACHEDPROG:
-	case NAND_CMD_PAGEPROG:
-	case NAND_CMD_ERASE1:
-	case NAND_CMD_ERASE2:
-	case NAND_CMD_SEQIN:
-	case NAND_CMD_RNDIN:
-	case NAND_CMD_STATUS:
-	case NAND_CMD_RNDOUT:
-		cafe_writel(cafe, cafe->ctl2, NAND_CTRL2);
-		return;
-	}
-	nand_wait_ready(chip);
-	cafe_writel(cafe, cafe->ctl2, NAND_CTRL2);
-}
-
-static void cafe_select_chip(struct nand_chip *chip, int chipnr)
-{
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-
-	dev_dbg(&cafe->pdev->dev, "select_chip %d\n", chipnr);
-
-	/* Mask the appropriate bit into the stored value of ctl1
-	   which will be used by cafe_nand_cmdfunc() */
-	cafe->ctl1 &= ~CAFE_NAND_CTRL1_CE;
-	cafe->ctl1 |= CAFE_FIELD_PREP(NAND_CTRL1, CE, chipnr);
-}
 
 static int cafe_nand_write_oob(struct nand_chip *chip, int page)
 {
@@ -786,7 +538,6 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 	bool waitrdy = false;
 	unsigned int i, j;
 
-	cafe->datalen = 0;
 	ctrl1 |= CAFE_FIELD_PREP(NAND_CTRL1, CE, subop->cs);
 
 	for (i = 0; i < subop->ninstrs; i++) {
@@ -1032,17 +783,6 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 		err = -ENOMEM;
 		goto out_ior;
 	}
-
-	cafe->nand.legacy.cmdfunc = cafe_nand_cmdfunc;
-	cafe->nand.legacy.dev_ready = cafe_device_ready;
-	cafe->nand.legacy.read_byte = cafe_read_byte;
-	cafe->nand.legacy.read_buf = cafe_read_buf;
-	cafe->nand.legacy.write_buf = cafe_write_buf;
-	cafe->nand.legacy.select_chip = cafe_select_chip;
-	cafe->nand.legacy.set_features = nand_get_set_features_notsupp;
-	cafe->nand.legacy.get_features = nand_get_set_features_notsupp;
-
-	cafe->nand.legacy.chip_delay = 0;
 
 	/* Enable the following for a flash based bad block table */
 	cafe->nand.bbt_options = NAND_BBT_USE_FLASH;
