@@ -820,7 +820,7 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 
 	pci_set_master(pdev);
 
-	cafe = kzalloc(sizeof(*cafe), GFP_KERNEL);
+	cafe = devm_kzalloc(&pdev->dev, sizeof(*cafe), GFP_KERNEL);
 	if (!cafe)
 		return  -ENOMEM;
 
@@ -832,8 +832,7 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	cafe->mmio = pci_iomap(pdev, 0, 0);
 	if (!cafe->mmio) {
 		dev_warn(&pdev->dev, "failed to iomap\n");
-		err = -ENOMEM;
-		goto out_free_mtd;
+		return -ENOMEM;
 	}
 
 	cafe->rs = init_rs_non_canonical(12, &cafe_mul, 0, 1, 8);
@@ -904,8 +903,6 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	nand_cleanup(&cafe->nand);
  out_ior:
 	pci_iounmap(pdev, cafe->mmio);
- out_free_mtd:
-	kfree(cafe);
  out:
 	return err;
 }
@@ -923,7 +920,6 @@ static void cafe_nand_remove(struct pci_dev *pdev)
 	free_rs(cafe->rs);
 	pci_iounmap(pdev, cafe->mmio);
 	dma_free_coherent(&cafe->pdev->dev, 2112, cafe->dmabuf, cafe->dmaaddr);
-	kfree(cafe);
 }
 
 static const struct pci_device_id cafe_nand_tbl[] = {
