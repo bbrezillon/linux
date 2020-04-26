@@ -9,6 +9,7 @@
  * Copyright © 2006 David Woodhouse <dwmw2@infradead.org>
  */
 
+#include <linux/bitfield.h>
 #define DEBUG
 
 #include <linux/device.h>
@@ -25,37 +26,127 @@
 #include <linux/module.h>
 #include <linux/io.h>
 
-#define CAFE_NAND_CTRL1		0x00
-#define CAFE_NAND_CTRL2		0x04
-#define CAFE_NAND_CTRL3		0x08
-#define CAFE_NAND_STATUS	0x0c
-#define CAFE_NAND_IRQ		0x10
-#define CAFE_NAND_IRQ_MASK	0x14
-#define CAFE_NAND_DATA_LEN	0x18
-#define CAFE_NAND_ADDR1		0x1c
-#define CAFE_NAND_ADDR2		0x20
-#define CAFE_NAND_TIMING1	0x24
-#define CAFE_NAND_TIMING2	0x28
-#define CAFE_NAND_TIMING3	0x2c
-#define CAFE_NAND_NONMEM	0x30
-#define CAFE_NAND_ECC_RESULT	0x3C
-#define CAFE_NAND_DMA_CTRL	0x40
-#define CAFE_NAND_DMA_ADDR0	0x44
-#define CAFE_NAND_DMA_ADDR1	0x48
-#define CAFE_NAND_ECC_SYN01	0x50
-#define CAFE_NAND_ECC_SYN23	0x54
-#define CAFE_NAND_ECC_SYN45	0x58
-#define CAFE_NAND_ECC_SYN67	0x5c
-#define CAFE_NAND_READ_DATA	0x1000
-#define CAFE_NAND_WRITE_DATA	0x2000
+#define CAFE_NAND_CTRL1				0x00
+#define CAFE_NAND_CTRL1_HAS_CMD			BIT(31)
+#define CAFE_NAND_CTRL1_HAS_ADDR		BIT(30)
+#define CAFE_NAND_CTRL1_NUM_ADDR_CYC		GENMASK(29, 27)
+#define CAFE_NAND_CTRL1_HAS_DATA_IN		BIT(26)
+#define CAFE_NAND_CTRL1_HAS_DATA_OUT		BIT(25)
+#define CAFE_NAND_CTRL1_NUM_NONMEM_READ_HIGH	GENMASK(24, 22)
+#define CAFE_NAND_CTRL1_WAIT_BSY_AFTER_SEQ	BIT(21)
+#define CAFE_NAND_CTRL1_NUM_NONMEM_READ_LOW	BIT(20)
+#define CAFE_NAND_CTRL1_CE			BIT(19)
+#define CAFE_NAND_CTRL1_CMD			GENMASK(7, 0)
 
-#define CAFE_GLOBAL_CTRL	0x3004
-#define CAFE_GLOBAL_IRQ		0x3008
-#define CAFE_GLOBAL_IRQ_MASK	0x300c
-#define CAFE_NAND_RESET		0x3034
+#define CAFE_NAND_CTRL2				0x04
+#define CAFE_NAND_CTRL2_AUTO_WRITE_ECC		BIT(30)
+#define CAFE_NAND_CTRL2_PAGE_SIZE		GENMASK(29, 28)
+#define CAFE_NAND_CTRL2_ECC_ALG_RS		BIT(27)
+#define CAFE_NAND_CTRL2_HAS_CMD2		BIT(8)
+#define CAFE_NAND_CTRL2_CMD2			GENMASK(7, 0)
 
-/* Missing from the datasheet: bit 19 of CTRL1 sets CE0 vs. CE1 */
-#define CTRL1_CHIPSELECT	(1<<19)
+#define CAFE_NAND_CTRL3				0x08
+#define CAFE_NAND_CTRL3_READ_BUSY_RESET		BIT(31)
+#define CAFE_NAND_CTRL3_WP			BIT(30)
+
+#define CAFE_NAND_STATUS			0x0c
+#define CAFE_NAND_STATUS_CONTROLLER_BUSY	BIT(31)
+#define CAFE_NAND_STATUS_FLASH_BUSY		BIT(30)
+
+#define CAFE_NAND_IRQ				0x10
+#define CAFE_NAND_IRQ_MASK			0x14
+#define CAFE_NAND_IRQ_CMD_DONE			BIT(31)
+#define CAFE_NAND_IRQ_FLASH_RDY			BIT(30)
+#define CAFE_NAND_IRQ_DMA_DONE			BIT(28)
+#define CAFE_NAND_IRQ_BOOT_DONE			BIT(27)
+
+#define CAFE_NAND_DATA_LEN			0x18
+#define CAFE_NAND_ADDR1				0x1c
+#define CAFE_NAND_ADDR2				0x20
+
+#define CAFE_NAND_TIMING1			0x24
+#define CAFE_NAND_TIMING1_TCLS			GENMASK(31, 28)
+#define CAFE_NAND_TIMING1_TCLH			GENMASK(27, 24)
+#define CAFE_NAND_TIMING1_TALS			GENMASK(23, 20)
+#define CAFE_NAND_TIMING1_TALH			GENMASK(19, 16)
+#define CAFE_NAND_TIMING1_TWB			GENMASK(15, 8)
+#define CAFE_NAND_TIMING1_TRB			GENMASK(7, 0)
+
+#define CAFE_NAND_TIMING2			0x28
+#define CAFE_NAND_TIMING2_TRR			GENMASK(31, 28)
+#define CAFE_NAND_TIMING2_TREA			GENMASK(27, 24)
+#define CAFE_NAND_TIMING2_TDH			GENMASK(23, 20)
+#define CAFE_NAND_TIMING2_TDS			GENMASK(19, 16)
+#define CAFE_NAND_TIMING2_TRH			GENMASK(15, 12)
+#define CAFE_NAND_TIMING2_TRP			GENMASK(11, 8)
+#define CAFE_NAND_TIMING2_TWH			GENMASK(7, 4)
+#define CAFE_NAND_TIMING2_TWP			GENMASK(3, 0)
+
+#define CAFE_NAND_TIMING3			0x2c
+#define CAFE_NAND_TIMING3_TAR			GENMASK(31, 28)
+#define CAFE_NAND_TIMING3_TCLR			GENMASK(27, 24)
+
+#define CAFE_NAND_NONMEM_READ_DATA		0x30
+#define CAFE_NAND_ECC_READ_CODE			0x38
+
+#define CAFE_NAND_ECC_RESULT			0x3C
+#define CAFE_NAND_ECC_RESULT_RS_ERRORS		BIT(18)
+#define CAFE_NAND_ECC_RESULT_STATUS		GENMASK(17, 16)
+#define CAFE_NAND_ECC_RESULT_NO_ERROR		(0 << 16)
+#define CAFE_NAND_ECC_RESULT_CORRECTABLE_ERRS	(1 << 16)
+#define CAFE_NAND_ECC_RESULT_UNCORRECTABLE_ERRS	(2 << 16)
+#define CAFE_NAND_ECC_RESULT_FAIL_BIT_LOC	GENMASK(13, 0)
+
+#define CAFE_NAND_DMA_CTRL			0x40
+#define CAFE_NAND_DMA_CTRL_ENABLE		BIT(31)
+#define CAFE_NAND_DMA_CTRL_RESERVED		BIT(30)
+#define CAFE_NAND_DMA_CTRL_DATA_IN		BIT(29)
+#define CAFE_NAND_DMA_CTRL_DATA_LEN		GENMASK(11, 0)
+
+#define CAFE_NAND_DMA_ADDR0			0x44
+#define CAFE_NAND_DMA_ADDR1			0x48
+#define CAFE_NAND_ECC_SYN_REG(x)		(((x) / 2) + 0x50)
+#define CAFE_NAND_ECC_SYN_FIELD(x)		(((x) % 2) ? GENMASK(31, 16) : GENMASK(15, 0))
+
+#define CAFE_NAND_CTRL4				0x60
+#define CAFE_NAND_CTRL4_NO_READ_DELAY		BIT(8)
+
+#define CAFE_NAND_DRIVE_STRENGTH		0x64
+#define CAFE_NAND_DRIVE_STRENGTH_VAL		GENMASK(4, 0)
+
+#define CAFE_NAND_READ_DATA			0x1000
+#define CAFE_NAND_WRITE_DATA			0x2000
+
+#define CAFE_GLOBAL_CTRL			0x3004
+#define CAFE_GLOBAL_CCIC_CLK_ENABLE		BIT(14)
+#define CAFE_GLOBAL_SDH_CLK_ENABLE		BIT(13)
+#define CAFE_GLOBAL_NAND_CLK_ENABLE		BIT(12)
+#define CAFE_GLOBAL_CLKRUN_ENABLE_SET		BIT(11)
+#define CAFE_GLOBAL_CLKRUN_ENABLE_CLEAR		BIT(10)
+#define CAFE_GLOBAL_SW_IRQ_SET			BIT(7)
+#define CAFE_GLOBAL_SW_IRQ_CLEAR		BIT(6)
+#define CAFE_GLOBAL_STOP_MASTER_DONE		BIT(5)
+#define CAFE_GLOBAL_STOP_MASTER			BIT(4)
+#define CAFE_GLOBAL_MASTER_RESET_CLEAR		BIT(3)
+#define CAFE_GLOBAL_MASTER_RESET_SET		BIT(2)
+#define CAFE_GLOBAL_SW_RESET_CLEAR		BIT(1)
+#define CAFE_GLOBAL_SW_RESET_SET		BIT(0)
+
+#define CAFE_GLOBAL_IRQ				0x3008
+#define CAFE_GLOBAL_IRQ_MASK			0x300c
+#define CAFE_GLOBAL_IRQ_PCI_ERROR		BIT(31)
+#define CAFE_GLOBAL_IRQ_VPD_TWSI		BIT(26)
+#define CAFE_GLOBAL_IRQ_CCIC			BIT(2)
+#define CAFE_GLOBAL_IRQ_SDH			BIT(1)
+#define CAFE_GLOBAL_IRQ_NAND			BIT(0)
+
+#define CAFE_GLOBAL_RESET			0x3034
+#define CAFE_GLOBAL_RESET_CCIC			BIT(2)
+#define CAFE_GLOBAL_RESET_SDH			BIT(1)
+#define CAFE_GLOBAL_RESET_NAND			BIT(0)
+
+#define CAFE_FIELD_PREP(reg, field, val)	FIELD_PREP(CAFE_##reg##_##field, val)
+#define CAFE_FIELD_GET(reg, field, val)		FIELD_GET(CAFE_##reg##_##field, val)
 
 struct cafe_priv {
 	struct nand_chip nand;
@@ -104,7 +195,8 @@ static const char *part_probes[] = { "cmdlinepart", "RedBoot", NULL };
 static int cafe_device_ready(struct nand_chip *chip)
 {
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
-	int result = !!(cafe_readl(cafe, NAND_STATUS) & 0x40000000);
+	int result = !!(cafe_readl(cafe, NAND_STATUS) &
+			CAFE_NAND_STATUS_FLASH_BUSY);
 	uint32_t irqs = cafe_readl(cafe, NAND_IRQ);
 
 	cafe_writel(cafe, irqs, NAND_IRQ);
@@ -164,16 +256,20 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	int adrbytes = 0;
 	uint32_t ctl1;
-	uint32_t doneint = 0x80000000;
+	uint32_t doneint = CAFE_NAND_IRQ_CMD_DONE;
 
 	cafe_dev_dbg(&cafe->pdev->dev, "cmdfunc %02x, 0x%x, 0x%x\n",
 		command, column, page_addr);
 
 	if (command == NAND_CMD_ERASE2 || command == NAND_CMD_PAGEPROG) {
 		/* Second half of a command we already calculated */
-		cafe_writel(cafe, cafe->ctl2 | 0x100 | command, NAND_CTRL2);
+		cafe_writel(cafe,
+			    cafe->ctl2 |
+			    CAFE_NAND_CTRL2_HAS_CMD2 |
+			    CAFE_FIELD_PREP(NAND_CTRL2, CMD2, command),
+			    NAND_CTRL2);
 		ctl1 = cafe->ctl1;
-		cafe->ctl2 &= ~(1<<30);
+		cafe->ctl2 &= ~CAFE_NAND_CTRL2_AUTO_WRITE_ECC;
 		cafe_dev_dbg(&cafe->pdev->dev, "Continue command, ctl1 %08x, #data %d\n",
 			  cafe->ctl1, cafe->nr_data);
 		goto do_command;
@@ -209,26 +305,29 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 	cafe->data_pos = cafe->datalen = 0;
 
 	/* Set command valid bit, mask in the chip select bit  */
-	ctl1 = 0x80000000 | command | (cafe->ctl1 & CTRL1_CHIPSELECT);
+	ctl1 = CAFE_NAND_CTRL1_HAS_CMD |
+	       CAFE_FIELD_PREP(NAND_CTRL1, CMD, command) |
+	       (cafe->ctl1 & CAFE_NAND_CTRL1_CE);
 
 	/* Set RD or WR bits as appropriate */
 	if (command == NAND_CMD_READID || command == NAND_CMD_STATUS) {
-		ctl1 |= (1<<26); /* rd */
+		ctl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
 		/* Always 5 bytes, for now */
 		cafe->datalen = 4;
 		/* And one address cycle -- even for STATUS, since the controller doesn't work without */
 		adrbytes = 1;
 	} else if (command == NAND_CMD_READ0 || command == NAND_CMD_READ1 ||
 		   command == NAND_CMD_READOOB || command == NAND_CMD_RNDOUT) {
-		ctl1 |= 1<<26; /* rd */
+		ctl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
 		/* For now, assume just read to end of page */
 		cafe->datalen = mtd->writesize + mtd->oobsize - column;
 	} else if (command == NAND_CMD_SEQIN)
-		ctl1 |= 1<<25; /* wr */
+		ctl1 |= CAFE_NAND_CTRL1_HAS_DATA_OUT;
 
 	/* Set number of address bytes */
 	if (adrbytes)
-		ctl1 |= ((adrbytes-1)|8) << 27;
+		ctl1 |= CAFE_NAND_CTRL1_HAS_ADDR |
+			CAFE_FIELD_PREP(NAND_CTRL1, NUM_ADDR_CYC, adrbytes - 1);
 
 	if (command == NAND_CMD_SEQIN || command == NAND_CMD_ERASE1) {
 		/* Ignore the first command of a pair; the hardware
@@ -240,9 +339,15 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 	}
 	/* RNDOUT and READ0 commands need a following byte */
 	if (command == NAND_CMD_RNDOUT)
-		cafe_writel(cafe, cafe->ctl2 | 0x100 | NAND_CMD_RNDOUTSTART, NAND_CTRL2);
+		cafe_writel(cafe,
+			    cafe->ctl2 | CAFE_NAND_CTRL2_HAS_CMD2 |
+			    CAFE_FIELD_PREP(NAND_CTRL2, CMD2, NAND_CMD_RNDOUTSTART),
+			    NAND_CTRL2);
 	else if (command == NAND_CMD_READ0 && mtd->writesize > 512)
-		cafe_writel(cafe, cafe->ctl2 | 0x100 | NAND_CMD_READSTART, NAND_CTRL2);
+		cafe_writel(cafe,
+			    cafe->ctl2 | CAFE_NAND_CTRL2_HAS_CMD2 |
+			    CAFE_FIELD_PREP(NAND_CTRL2, CMD2, NAND_CMD_READSTART),
+			    NAND_CTRL2);
 
  do_command:
 	cafe_dev_dbg(&cafe->pdev->dev, "dlen %x, ctl1 %x, ctl2 %x\n",
@@ -250,16 +355,23 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 
 	/* NB: The datasheet lies -- we really should be subtracting 1 here */
 	cafe_writel(cafe, cafe->datalen, NAND_DATA_LEN);
-	cafe_writel(cafe, 0x90000000, NAND_IRQ);
-	if (cafe->usedma && (ctl1 & (3<<25))) {
-		uint32_t dmactl = 0xc0000000 + cafe->datalen;
+	cafe_writel(cafe, CAFE_NAND_IRQ_CMD_DONE | CAFE_NAND_IRQ_DMA_DONE,
+		    NAND_IRQ);
+	if (cafe->usedma &&
+	    (ctl1 & (CAFE_NAND_CTRL1_HAS_DATA_IN |
+		     CAFE_NAND_CTRL1_HAS_DATA_OUT))) {
+		uint32_t dmactl = CAFE_NAND_DMA_CTRL_ENABLE |
+				  CAFE_NAND_DMA_CTRL_RESERVED;
+
+		dmactl |= CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
+					  cafe->datalen);
 		/* If WR or RD bits set, set up DMA */
-		if (ctl1 & (1<<26)) {
+		if (ctl1 & CAFE_NAND_CTRL1_HAS_DATA_IN) {
 			/* It's a read */
-			dmactl |= (1<<29);
+			dmactl |= CAFE_NAND_DMA_CTRL_DATA_IN;
 			/* ... so it's done when the DMA is done, not just
 			   the command. */
-			doneint = 0x10000000;
+			doneint = CAFE_NAND_IRQ_DMA_DONE;
 		}
 		cafe_writel(cafe, dmactl, NAND_DMA_CTRL);
 	}
@@ -295,7 +407,7 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 			     command, 500000-c, irqs, cafe_readl(cafe, NAND_IRQ));
 	}
 
-	WARN_ON(cafe->ctl2 & (1<<30));
+	WARN_ON(cafe->ctl2 & CAFE_NAND_CTRL2_AUTO_WRITE_ECC);
 
 	switch (command) {
 
@@ -322,10 +434,8 @@ static void cafe_select_chip(struct nand_chip *chip, int chipnr)
 
 	/* Mask the appropriate bit into the stored value of ctl1
 	   which will be used by cafe_nand_cmdfunc() */
-	if (chipnr)
-		cafe->ctl1 |= CTRL1_CHIPSELECT;
-	else
-		cafe->ctl1 &= ~CTRL1_CHIPSELECT;
+	cafe->ctl1 &= ~CAFE_NAND_CTRL1_CE;
+	cafe->ctl1 |= CAFE_FIELD_PREP(NAND_CTRL1, CE, chipnr);
 }
 
 static irqreturn_t cafe_nand_interrupt(int irq, void *id)
@@ -334,7 +444,9 @@ static irqreturn_t cafe_nand_interrupt(int irq, void *id)
 	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	uint32_t irqs = cafe_readl(cafe, NAND_IRQ);
-	cafe_writel(cafe, irqs & ~0x90000000, NAND_IRQ);
+	cafe_writel(cafe,
+		    irqs & ~(CAFE_NAND_IRQ_CMD_DONE | CAFE_NAND_IRQ_DMA_DONE),
+		    NAND_IRQ);
 	if (!irqs)
 		return IRQ_NONE;
 
@@ -368,25 +480,31 @@ static int cafe_nand_read_page(struct nand_chip *chip, uint8_t *buf,
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	unsigned int max_bitflips = 0;
+	u32 ecc_result, status;
 
 	cafe_dev_dbg(&cafe->pdev->dev, "ECC result %08x SYN1,2 %08x\n",
 		     cafe_readl(cafe, NAND_ECC_RESULT),
-		     cafe_readl(cafe, NAND_ECC_SYN01));
+		     cafe_readl(cafe, NAND_ECC_SYN_REG(0)));
 
 	nand_read_page_op(chip, page, 0, buf, mtd->writesize);
 	chip->legacy.read_buf(chip, chip->oob_poi, mtd->oobsize);
 
-	if (checkecc && cafe_readl(cafe, NAND_ECC_RESULT) & (1<<18)) {
+	ecc_result = cafe_readl(cafe, NAND_ECC_RESULT);
+	status = CAFE_FIELD_GET(NAND_ECC_RESULT, STATUS, ecc_result);
+	if (checkecc && status == CAFE_NAND_ECC_RESULT_CORRECTABLE_ERRS) {
 		unsigned short syn[8], pat[4];
 		int pos[4];
 		u8 *oob = chip->oob_poi;
 		int i, n;
 
 		for (i=0; i<8; i+=2) {
-			uint32_t tmp = cafe_readl(cafe, NAND_ECC_SYN01 + (i*2));
+			uint32_t tmp = cafe_readl(cafe, NAND_ECC_SYN_REG(i));
+			uint16_t idx;
 
-			syn[i] = cafe->rs->codec->index_of[tmp & 0xfff];
-			syn[i+1] = cafe->rs->codec->index_of[(tmp >> 16) & 0xfff];
+			idx = FIELD_GET(CAFE_NAND_ECC_SYN_FIELD(i), tmp);
+			syn[i] = cafe->rs->codec->index_of[idx];
+			idx = FIELD_GET(CAFE_NAND_ECC_SYN_FIELD(i + 1), tmp);
+			syn[i+1] = cafe->rs->codec->index_of[idx];
 		}
 
 		n = decode_rs16(cafe->rs, NULL, NULL, 1367, syn, 0, pos, 0,
@@ -536,7 +654,7 @@ static int cafe_nand_write_page(struct nand_chip *chip,
 	chip->legacy.write_buf(chip, chip->oob_poi, mtd->oobsize);
 
 	/* Set up ECC autogeneration */
-	cafe->ctl2 |= (1<<30);
+	cafe->ctl2 |= CAFE_NAND_CTRL2_AUTO_WRITE_ECC;
 
 	return nand_prog_page_end_op(chip);
 }
@@ -604,9 +722,9 @@ static int cafe_nand_attach_chip(struct nand_chip *chip)
 	/* Restore the DMA flag */
 	cafe->usedma = usedma;
 
-	cafe->ctl2 = BIT(27); /* Reed-Solomon ECC */
-	if (mtd->writesize == 2048)
-		cafe->ctl2 |= BIT(29); /* 2KiB page size */
+	cafe->ctl2 = CAFE_NAND_CTRL2_ECC_ALG_RS |
+		     CAFE_FIELD_PREP(NAND_CTRL2, PAGE_SIZE,
+				     mtd->writesize / 512);
 
 	/* Set up ECC according to the type of chip we found */
 	mtd_set_ooblayout(mtd, &cafe_ooblayout_ops);
@@ -734,8 +852,8 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	}
 
 	/* Start off by resetting the NAND controller completely */
-	cafe_writel(cafe, 1, NAND_RESET);
-	cafe_writel(cafe, 0, NAND_RESET);
+	cafe_writel(cafe, CAFE_GLOBAL_RESET_NAND, GLOBAL_RESET);
+	cafe_writel(cafe, 0, GLOBAL_RESET);
 
 	cafe_writel(cafe, timing[0], NAND_TIMING1);
 	cafe_writel(cafe, timing[1], NAND_TIMING2);
@@ -751,17 +869,49 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 
 	/* Disable master reset, enable NAND clock */
 	ctrl = cafe_readl(cafe, GLOBAL_CTRL);
-	ctrl &= 0xffffeff0;
-	ctrl |= 0x00007000;
-	cafe_writel(cafe, ctrl | 0x05, GLOBAL_CTRL);
-	cafe_writel(cafe, ctrl | 0x0a, GLOBAL_CTRL);
+	ctrl &= ~(CAFE_GLOBAL_SW_RESET_SET |
+		  CAFE_GLOBAL_SW_RESET_CLEAR |
+		  CAFE_GLOBAL_MASTER_RESET_SET |
+		  CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		  CAFE_GLOBAL_NAND_CLK_ENABLE);
+	ctrl |= CAFE_GLOBAL_NAND_CLK_ENABLE |
+		CAFE_GLOBAL_SDH_CLK_ENABLE |
+		CAFE_GLOBAL_CCIC_CLK_ENABLE;
+	cafe_writel(cafe,
+		    ctrl |
+		    CAFE_GLOBAL_MASTER_RESET_SET |
+		    CAFE_GLOBAL_SW_RESET_SET,
+		    GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    ctrl |
+		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+
 	cafe_writel(cafe, 0, NAND_DMA_CTRL);
 
-	cafe_writel(cafe, 0x7006, GLOBAL_CTRL);
-	cafe_writel(cafe, 0x700a, GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_NAND_CLK_ENABLE |
+		    CAFE_GLOBAL_SDH_CLK_ENABLE |
+		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
+		    CAFE_GLOBAL_MASTER_RESET_SET |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_NAND_CLK_ENABLE |
+		    CAFE_GLOBAL_SDH_CLK_ENABLE |
+		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
+		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
 
 	/* Enable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe, 0x80000007, GLOBAL_IRQ_MASK);
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_IRQ_PCI_ERROR |
+		    CAFE_GLOBAL_IRQ_CCIC |
+		    CAFE_GLOBAL_IRQ_SDH |
+		    CAFE_GLOBAL_IRQ_NAND,
+		    GLOBAL_IRQ_MASK);
 	cafe_dev_dbg(&cafe->pdev->dev, "Control %x, IRQ mask %x\n",
 		cafe_readl(cafe, GLOBAL_CTRL),
 		cafe_readl(cafe, GLOBAL_IRQ_MASK));
@@ -788,7 +938,9 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	nand_cleanup(&cafe->nand);
  out_irq:
 	/* Disable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe, ~1 & cafe_readl(cafe, GLOBAL_IRQ_MASK), GLOBAL_IRQ_MASK);
+	cafe_writel(cafe,
+		    cafe_readl(cafe, GLOBAL_IRQ_MASK) & ~CAFE_GLOBAL_IRQ_NAND,
+		    GLOBAL_IRQ_MASK);
 	free_irq(pdev->irq, mtd);
  out_ior:
 	pci_iounmap(pdev, cafe->mmio);
@@ -806,7 +958,9 @@ static void cafe_nand_remove(struct pci_dev *pdev)
 	int ret;
 
 	/* Disable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe, ~1 & cafe_readl(cafe, GLOBAL_IRQ_MASK), GLOBAL_IRQ_MASK);
+	cafe_writel(cafe,
+		    cafe_readl(cafe, GLOBAL_IRQ_MASK) & ~CAFE_GLOBAL_IRQ_NAND,
+		    GLOBAL_IRQ_MASK);
 	free_irq(pdev->irq, mtd);
 	ret = mtd_device_unregister(mtd);
 	WARN_ON(ret);
@@ -833,8 +987,8 @@ static int cafe_nand_resume(struct pci_dev *pdev)
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 
        /* Start off by resetting the NAND controller completely */
-	cafe_writel(cafe, 1, NAND_RESET);
-	cafe_writel(cafe, 0, NAND_RESET);
+	cafe_writel(cafe, CAFE_GLOBAL_RESET_NAND, GLOBAL_RESET);
+	cafe_writel(cafe, 0, GLOBAL_RESET);
 	cafe_writel(cafe, 0xffffffff, NAND_IRQ_MASK);
 
 	/* Restore timing configuration */
@@ -844,13 +998,41 @@ static int cafe_nand_resume(struct pci_dev *pdev)
 
         /* Disable master reset, enable NAND clock */
 	ctrl = cafe_readl(cafe, GLOBAL_CTRL);
-	ctrl &= 0xffffeff0;
-	ctrl |= 0x00007000;
-	cafe_writel(cafe, ctrl | 0x05, GLOBAL_CTRL);
-	cafe_writel(cafe, ctrl | 0x0a, GLOBAL_CTRL);
+	ctrl &= ~(CAFE_GLOBAL_SW_RESET_SET |
+		  CAFE_GLOBAL_SW_RESET_CLEAR |
+		  CAFE_GLOBAL_MASTER_RESET_SET |
+		  CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		  CAFE_GLOBAL_NAND_CLK_ENABLE);
+	ctrl |= CAFE_GLOBAL_NAND_CLK_ENABLE |
+		CAFE_GLOBAL_SDH_CLK_ENABLE |
+		CAFE_GLOBAL_CCIC_CLK_ENABLE;
+	cafe_writel(cafe,
+		    ctrl |
+		    CAFE_GLOBAL_MASTER_RESET_SET |
+		    CAFE_GLOBAL_SW_RESET_SET,
+		    GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    ctrl |
+		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+
 	cafe_writel(cafe, 0, NAND_DMA_CTRL);
-	cafe_writel(cafe, 0x7006, GLOBAL_CTRL);
-	cafe_writel(cafe, 0x700a, GLOBAL_CTRL);
+
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_NAND_CLK_ENABLE |
+		    CAFE_GLOBAL_SDH_CLK_ENABLE |
+		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
+		    CAFE_GLOBAL_MASTER_RESET_SET |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_NAND_CLK_ENABLE |
+		    CAFE_GLOBAL_SDH_CLK_ENABLE |
+		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
+		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
 
 	/* Set up DMA address */
 	cafe_writel(cafe, cafe->dmaaddr & 0xffffffff, NAND_DMA_ADDR0);
@@ -861,7 +1043,12 @@ static int cafe_nand_resume(struct pci_dev *pdev)
 		cafe_writel(cafe, 0, NAND_DMA_ADDR1);
 
 	/* Enable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe, 0x80000007, GLOBAL_IRQ_MASK);
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_IRQ_PCI_ERROR |
+		    CAFE_GLOBAL_IRQ_CCIC |
+		    CAFE_GLOBAL_IRQ_SDH |
+		    CAFE_GLOBAL_IRQ_NAND,
+		    GLOBAL_IRQ_MASK);
 	return 0;
 }
 
