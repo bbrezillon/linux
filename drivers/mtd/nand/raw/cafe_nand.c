@@ -357,13 +357,8 @@ static int cafe_nand_read_oob(struct nand_chip *chip, int page)
 
 	return nand_read_oob_op(chip, page, 0, chip->oob_poi, mtd->oobsize);
 }
-/**
- * cafe_nand_read_page_syndrome - [REPLACEABLE] hardware ecc syndrome based page read
- * @mtd:	mtd info structure
- * @chip:	nand chip info structure
- * @buf:	buffer to store read data
- * @oob_required:	caller expects OOB data read to chip->oob_poi
- *
+
+/*
  * The hw generator calculates the error syndrome automatically. Therefore
  * we need a special oob layout and handling.
  */
