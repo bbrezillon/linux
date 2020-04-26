@@ -145,6 +145,7 @@
 #define CAFE_FIELD_GET(reg, field, val)		FIELD_GET(CAFE_##reg##_##field, val)
 
 struct cafe_priv {
+	struct nand_controller base;
 	struct nand_chip nand;
 	struct pci_dev *pdev;
 	void __iomem *mmio;
@@ -885,7 +886,9 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	cafe->usedma = 0;
 
 	/* Scan to find existence of the device */
-	cafe->nand.legacy.dummy_controller.ops = &cafe_nand_controller_ops;
+	nand_controller_init(&cafe->base);
+	cafe->base.ops = &cafe_nand_controller_ops;
+	cafe->nand.controller = &cafe->base;
 	err = nand_scan(&cafe->nand, 2);
 	if (err)
 		goto out_ior;
