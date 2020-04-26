@@ -20,7 +20,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/io.h>
+#include <linux/iopoll.h>
 
 #define CAFE_NAND_CTRL1				0x00
 #define CAFE_NAND_CTRL1_HAS_CMD			BIT(31)
@@ -753,9 +753,150 @@ static void cafe_nand_detach_chip(struct nand_chip *chip)
 	dma_free_coherent(&cafe->pdev->dev, 2112, cafe->dmabuf, cafe->dmaaddr);
 }
 
+static int cafe_nand_exec_subop(struct nand_chip *chip,
+				const struct nand_subop *subop)
+{
+	struct cafe_priv *cafe = nand_get_controller_data(chip);
+	u32 ctrl1 = 0, ctrl2 = cafe->ctl2, addr1 = 0, addr2 = 0;
+	u32 status, wait = CAFE_NAND_IRQ_CMD_DONE;
+	int ret, data_instr = -1;
+	bool waitrdy = false;
+	unsigned int i, j;
+
+	cafe->datalen = 0;
+	ctrl1 |= CAFE_FIELD_PREP(NAND_CTRL1, CE, subop->cs);
+
+	for (i = 0; i < subop->ninstrs; i++) {
+		const struct nand_op_instr *instr = &subop->instrs[i];
+
+		switch (instr->type) {
+		case NAND_OP_CMD_INSTR:
+			if (!(ctrl1 & CAFE_NAND_CTRL1_HAS_CMD))
+				ctrl1 |= CAFE_NAND_CTRL1_HAS_CMD |
+					 CAFE_FIELD_PREP(NAND_CTRL1, CMD,
+							 instr->ctx.cmd.opcode);
+			else
+				ctrl2 |= CAFE_NAND_CTRL2_HAS_CMD2 |
+					 CAFE_FIELD_PREP(NAND_CTRL2, CMD2,
+							 instr->ctx.cmd.opcode);
+			break;
+
+		case NAND_OP_ADDR_INSTR:
+			for (j = nand_subop_get_addr_start_off(subop, i);
+			     j < nand_subop_get_num_addr_cyc(subop, i); j++) {
+				u32 addr = instr->ctx.addr.addrs[j];
+
+				if (j < 2)
+					addr1 |= addr << (8 * j);
+				else
+					addr2 |= addr << (8 * (j - 2));
+			}
+
+			ctrl1 |= CAFE_NAND_CTRL1_HAS_ADDR |
+				 CAFE_FIELD_PREP(NAND_CTRL1, NUM_ADDR_CYC,
+						 instr->ctx.addr.naddrs - 1);
+			cafe_writel(cafe, addr1, NAND_ADDR1);
+			cafe_writel(cafe, addr2, NAND_ADDR2);
+			break;
+
+		case NAND_OP_DATA_IN_INSTR:
+			data_instr = i;
+			ctrl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
+			break;
+
+		case NAND_OP_DATA_OUT_INSTR:
+			data_instr = i;
+			ctrl1 |= CAFE_NAND_CTRL1_HAS_DATA_OUT;
+			cafe_write_buf(chip,
+				       instr->ctx.data.buf.out +
+				       nand_subop_get_data_start_off(subop, i),
+				       nand_subop_get_data_len(subop, i));
+			break;
+
+		case NAND_OP_WAITRDY_INSTR:
+			wait |= CAFE_NAND_IRQ_FLASH_RDY;
+			waitrdy = true;
+			break;
+		}
+	}
+
+	if (data_instr >= 0) {
+		cafe_writel(cafe, nand_subop_get_data_len(subop, data_instr),
+			    NAND_DATA_LEN);
+	}
+
+	if (cafe->usedma && data_instr >= 0) {
+		u32 dmactrl = CAFE_NAND_DMA_CTRL_ENABLE |
+			      CAFE_NAND_DMA_CTRL_RESERVED;
+
+		dmactrl |= CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
+					   nand_subop_get_data_len(subop,
+								   data_instr));
+		if (ctrl1 & CAFE_NAND_CTRL1_HAS_DATA_IN)
+			dmactrl |= CAFE_NAND_DMA_CTRL_DATA_IN;
+
+		cafe_writel(cafe, dmactrl, NAND_DMA_CTRL);
+
+		/*
+		 * If the last instruction is a data transfer and we're using
+		 * DMA, we should wait on DMA_DONE only, otherwise, keep
+		 * waiting on CMD_DONE.
+		 */
+		if (data_instr == subop->ninstrs - 1) {
+			wait &= ~CAFE_NAND_IRQ_CMD_DONE;
+			wait |= CAFE_NAND_IRQ_DMA_DONE;
+		}
+	}
+
+	/* Clear pending interrupts before starting the operation. */
+	cafe_writel(cafe, wait, NAND_IRQ);
+
+	cafe_writel(cafe, ctrl2, NAND_CTRL2);
+	cafe_writel(cafe, ctrl1, NAND_CTRL1);
+
+	ret = readl_poll_timeout_atomic(cafe->mmio + CAFE_NAND_IRQ, status,
+					(status & wait) == wait, 1,
+					USEC_PER_SEC);
+	if (ret)
+		return ret;
+
+	if (ctrl1 & CAFE_NAND_CTRL1_HAS_DATA_IN) {
+		cafe_read_buf(chip,
+			      subop->instrs[data_instr].ctx.data.buf.in +
+			      nand_subop_get_data_start_off(subop, data_instr),
+			      nand_subop_get_data_len(subop, data_instr));
+	}
+
+	return 0;
+}
+
+static const struct nand_op_parser cafe_nand_op_parser = NAND_OP_PARSER(
+	NAND_OP_PARSER_PATTERN(cafe_nand_exec_subop,
+			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
+			       NAND_OP_PARSER_PAT_ADDR_ELEM(true, 5),
+			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
+			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(true),
+			       NAND_OP_PARSER_PAT_DATA_IN_ELEM(true, 2112)),
+	NAND_OP_PARSER_PATTERN(cafe_nand_exec_subop,
+			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
+			       NAND_OP_PARSER_PAT_ADDR_ELEM(true, 5),
+			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
+			       NAND_OP_PARSER_PAT_DATA_IN_ELEM(true, 2112),
+			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(true))
+);
+
+static int cafe_nand_exec_op(struct nand_chip *chip,
+			     const struct nand_operation *op,
+			     bool check_only)
+{
+	return nand_op_parser_exec_op(chip, &cafe_nand_op_parser, op,
+				      check_only);
+}
+
 static const struct nand_controller_ops cafe_nand_controller_ops = {
 	.attach_chip = cafe_nand_attach_chip,
 	.detach_chip = cafe_nand_detach_chip,
+	.exec_op = cafe_nand_exec_op,
 };
 
 static void cafe_nand_init(struct cafe_priv *cafe)
