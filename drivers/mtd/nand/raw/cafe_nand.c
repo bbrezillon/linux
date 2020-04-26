@@ -10,10 +10,7 @@
  */
 
 #include <linux/bitfield.h>
-#define DEBUG
-
 #include <linux/device.h>
-#undef DEBUG
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
 #include <linux/mtd/partitions.h>
@@ -170,9 +167,6 @@ module_param(usedma, int, 0644);
 static int skipbbt = 0;
 module_param(skipbbt, int, 0644);
 
-static int debug = 0;
-module_param(debug, int, 0644);
-
 static int regdebug = 0;
 module_param(regdebug, int, 0644);
 
@@ -184,9 +178,6 @@ static int timing[3];
 module_param_array(timing, int, &numtimings, 0644);
 
 static const char *part_probes[] = { "cmdlinepart", "RedBoot", NULL };
-
-/* Hrm. Why isn't this already conditional on something in the struct device? */
-#define cafe_dev_dbg(dev, args...) do { if (debug) dev_dbg(dev, ##args); } while(0)
 
 /* Make it easier to switch to PIO if we need to */
 #define cafe_readl(cafe, addr)			readl((cafe)->mmio + CAFE_##addr)
@@ -201,7 +192,7 @@ static int cafe_device_ready(struct nand_chip *chip)
 
 	cafe_writel(cafe, irqs, NAND_IRQ);
 
-	cafe_dev_dbg(&cafe->pdev->dev, "NAND device is%s ready, IRQ %x (%x) (%x,%x)\n",
+	dev_dbg(&cafe->pdev->dev, "NAND device is%s ready, IRQ %x (%x) (%x,%x)\n",
 		result?"":" not", irqs, cafe_readl(cafe, NAND_IRQ),
 		cafe_readl(cafe, GLOBAL_IRQ), cafe_readl(cafe, GLOBAL_IRQ_MASK));
 
@@ -220,7 +211,7 @@ static void cafe_write_buf(struct nand_chip *chip, const uint8_t *buf, int len)
 
 	cafe->datalen += len;
 
-	cafe_dev_dbg(&cafe->pdev->dev, "Copy 0x%x bytes to write buffer. datalen 0x%x\n",
+	dev_dbg(&cafe->pdev->dev, "Copy 0x%x bytes to write buffer. datalen 0x%x\n",
 		len, cafe->datalen);
 }
 
@@ -233,8 +224,8 @@ static void cafe_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
 	else
 		memcpy_fromio(buf, cafe->mmio + CAFE_NAND_READ_DATA + cafe->datalen, len);
 
-	cafe_dev_dbg(&cafe->pdev->dev, "Copy 0x%x bytes from position 0x%x in read buffer.\n",
-		  len, cafe->datalen);
+	dev_dbg(&cafe->pdev->dev, "Copy 0x%x bytes from position 0x%x in read buffer.\n",
+		len, cafe->datalen);
 	cafe->datalen += len;
 }
 
@@ -244,7 +235,7 @@ static uint8_t cafe_read_byte(struct nand_chip *chip)
 	uint8_t d;
 
 	cafe_read_buf(chip, &d, 1);
-	cafe_dev_dbg(&cafe->pdev->dev, "Read %02x\n", d);
+	dev_dbg(&cafe->pdev->dev, "Read %02x\n", d);
 
 	return d;
 }
@@ -258,7 +249,7 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 	uint32_t ctl1;
 	uint32_t doneint = CAFE_NAND_IRQ_CMD_DONE;
 
-	cafe_dev_dbg(&cafe->pdev->dev, "cmdfunc %02x, 0x%x, 0x%x\n",
+	dev_dbg(&cafe->pdev->dev, "cmdfunc %02x, 0x%x, 0x%x\n",
 		command, column, page_addr);
 
 	if (command == NAND_CMD_ERASE2 || command == NAND_CMD_PAGEPROG) {
@@ -270,8 +261,8 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 			    NAND_CTRL2);
 		ctl1 = cafe->ctl1;
 		cafe->ctl2 &= ~CAFE_NAND_CTRL2_AUTO_WRITE_ECC;
-		cafe_dev_dbg(&cafe->pdev->dev, "Continue command, ctl1 %08x, #data %d\n",
-			  cafe->ctl1, cafe->nr_data);
+		dev_dbg(&cafe->pdev->dev, "Continue command, ctl1 %08x, #data %d\n",
+			cafe->ctl1, cafe->nr_data);
 		goto do_command;
 	}
 	/* Reset ECC engine */
@@ -333,8 +324,8 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 		/* Ignore the first command of a pair; the hardware
 		   deals with them both at once, later */
 		cafe->ctl1 = ctl1;
-		cafe_dev_dbg(&cafe->pdev->dev, "Setup for delayed command, ctl1 %08x, dlen %x\n",
-			  cafe->ctl1, cafe->datalen);
+		dev_dbg(&cafe->pdev->dev, "Setup for delayed command, ctl1 %08x, dlen %x\n",
+			cafe->ctl1, cafe->datalen);
 		return;
 	}
 	/* RNDOUT and READ0 commands need a following byte */
@@ -350,7 +341,7 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 			    NAND_CTRL2);
 
  do_command:
-	cafe_dev_dbg(&cafe->pdev->dev, "dlen %x, ctl1 %x, ctl2 %x\n",
+	dev_dbg(&cafe->pdev->dev, "dlen %x, ctl1 %x, ctl2 %x\n",
 		cafe->datalen, ctl1, cafe_readl(cafe, NAND_CTRL2));
 
 	/* NB: The datasheet lies -- we really should be subtracting 1 here */
@@ -399,12 +390,12 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 				break;
 			udelay(1);
 			if (!(c % 100000))
-				cafe_dev_dbg(&cafe->pdev->dev, "Wait for ready, IRQ %x\n", irqs);
+				dev_dbg(&cafe->pdev->dev, "Wait for ready, IRQ %x\n", irqs);
 			cpu_relax();
 		}
 		cafe_writel(cafe, doneint, NAND_IRQ);
-		cafe_dev_dbg(&cafe->pdev->dev, "Command %x completed after %d usec, irqs %x (%x)\n",
-			     command, 500000-c, irqs, cafe_readl(cafe, NAND_IRQ));
+		dev_dbg(&cafe->pdev->dev, "Command %x completed after %d usec, irqs %x (%x)\n",
+			command, 500000-c, irqs, cafe_readl(cafe, NAND_IRQ));
 	}
 
 	WARN_ON(cafe->ctl2 & CAFE_NAND_CTRL2_AUTO_WRITE_ECC);
@@ -430,7 +421,7 @@ static void cafe_select_chip(struct nand_chip *chip, int chipnr)
 {
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 
-	cafe_dev_dbg(&cafe->pdev->dev, "select_chip %d\n", chipnr);
+	dev_dbg(&cafe->pdev->dev, "select_chip %d\n", chipnr);
 
 	/* Mask the appropriate bit into the stored value of ctl1
 	   which will be used by cafe_nand_cmdfunc() */
@@ -450,7 +441,7 @@ static irqreturn_t cafe_nand_interrupt(int irq, void *id)
 	if (!irqs)
 		return IRQ_NONE;
 
-	cafe_dev_dbg(&cafe->pdev->dev, "irq, bits %x (%x)\n", irqs, cafe_readl(cafe, NAND_IRQ));
+	dev_dbg(&cafe->pdev->dev, "irq, bits %x (%x)\n", irqs, cafe_readl(cafe, NAND_IRQ));
 	return IRQ_HANDLED;
 }
 
@@ -482,9 +473,9 @@ static int cafe_nand_read_page(struct nand_chip *chip, uint8_t *buf,
 	unsigned int max_bitflips = 0;
 	u32 ecc_result;
 
-	cafe_dev_dbg(&cafe->pdev->dev, "ECC result %08x SYN1,2 %08x\n",
-		     cafe_readl(cafe, NAND_ECC_RESULT),
-		     cafe_readl(cafe, NAND_ECC_SYN_REG(0)));
+	dev_dbg(&cafe->pdev->dev, "ECC result %08x SYN1,2 %08x\n",
+		cafe_readl(cafe, NAND_ECC_RESULT),
+		cafe_readl(cafe, NAND_ECC_SYN_REG(0)));
 
 	nand_read_page_op(chip, page, 0, buf, mtd->writesize);
 	chip->legacy.read_buf(chip, chip->oob_poi, mtd->oobsize);
@@ -715,8 +706,8 @@ static int cafe_nand_attach_chip(struct nand_chip *chip)
 	cafe_writel(cafe, lower_32_bits(cafe->dmaaddr), NAND_DMA_ADDR0);
 	cafe_writel(cafe, upper_32_bits(cafe->dmaaddr), NAND_DMA_ADDR1);
 
-	cafe_dev_dbg(&cafe->pdev->dev, "Set DMA address to %x (virt %p)\n",
-		     cafe_readl(cafe, NAND_DMA_ADDR0), cafe->dmabuf);
+	dev_dbg(&cafe->pdev->dev, "Set DMA address to %x (virt %p)\n",
+		cafe_readl(cafe, NAND_DMA_ADDR0), cafe->dmabuf);
 
 	/* Restore the DMA flag */
 	cafe->usedma = usedma;
@@ -898,16 +889,16 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	}
 
 	if (numtimings == 3) {
-		cafe_dev_dbg(&cafe->pdev->dev, "Using provided timings (%08x %08x %08x)\n",
-			     timing[0], timing[1], timing[2]);
+		dev_dbg(&cafe->pdev->dev, "Using provided timings (%08x %08x %08x)\n",
+			timing[0], timing[1], timing[2]);
 	} else {
 		timing[0] = cafe_readl(cafe, NAND_TIMING1);
 		timing[1] = cafe_readl(cafe, NAND_TIMING2);
 		timing[2] = cafe_readl(cafe, NAND_TIMING3);
 
 		if (timing[0] | timing[1] | timing[2]) {
-			cafe_dev_dbg(&cafe->pdev->dev, "Timing registers already set (%08x %08x %08x)\n",
-				     timing[0], timing[1], timing[2]);
+			dev_dbg(&cafe->pdev->dev, "Timing registers already set (%08x %08x %08x)\n",
+				timing[0], timing[1], timing[2]);
 		} else {
 			dev_warn(&cafe->pdev->dev, "Timing registers unset; using most conservative defaults\n");
 			timing[0] = timing[1] = timing[2] = 0xffffffff;
