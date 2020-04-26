@@ -771,12 +771,76 @@ static const struct nand_controller_ops cafe_nand_controller_ops = {
 	.detach_chip = cafe_nand_detach_chip,
 };
 
+static void cafe_nand_init(struct cafe_priv *cafe)
+{
+	u32 ctrl;
+
+	/* Start off by resetting the NAND controller completely */
+	cafe_writel(cafe, CAFE_GLOBAL_RESET_NAND, GLOBAL_RESET);
+	cafe_writel(cafe, 0, GLOBAL_RESET);
+	cafe_writel(cafe, 0xffffffff, NAND_IRQ_MASK);
+
+	/* Restore timing configuration */
+	cafe_writel(cafe, timing[0], NAND_TIMING1);
+	cafe_writel(cafe, timing[1], NAND_TIMING2);
+	cafe_writel(cafe, timing[2], NAND_TIMING3);
+
+	/* Disable master reset, enable NAND clock */
+	ctrl = cafe_readl(cafe, GLOBAL_CTRL);
+	ctrl &= ~(CAFE_GLOBAL_SW_RESET_SET |
+		  CAFE_GLOBAL_SW_RESET_CLEAR |
+		  CAFE_GLOBAL_MASTER_RESET_SET |
+		  CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		  CAFE_GLOBAL_NAND_CLK_ENABLE);
+	ctrl |= CAFE_GLOBAL_NAND_CLK_ENABLE |
+		CAFE_GLOBAL_SDH_CLK_ENABLE |
+		CAFE_GLOBAL_CCIC_CLK_ENABLE;
+	cafe_writel(cafe,
+		    ctrl |
+		    CAFE_GLOBAL_MASTER_RESET_SET |
+		    CAFE_GLOBAL_SW_RESET_SET,
+		    GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    ctrl |
+		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+
+	cafe_writel(cafe, 0, NAND_DMA_CTRL);
+
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_NAND_CLK_ENABLE |
+		    CAFE_GLOBAL_SDH_CLK_ENABLE |
+		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
+		    CAFE_GLOBAL_MASTER_RESET_SET |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_NAND_CLK_ENABLE |
+		    CAFE_GLOBAL_SDH_CLK_ENABLE |
+		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
+		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
+		    CAFE_GLOBAL_SW_RESET_CLEAR,
+		    GLOBAL_CTRL);
+
+	/* Set up DMA address */
+	cafe_writel(cafe, lower_32_bits(cafe->dmaaddr), NAND_DMA_ADDR0);
+	cafe_writel(cafe, upper_32_bits(cafe->dmaaddr), NAND_DMA_ADDR1);
+
+	/* Enable NAND IRQ in global IRQ mask register */
+	cafe_writel(cafe,
+		    CAFE_GLOBAL_IRQ_PCI_ERROR |
+		    CAFE_GLOBAL_IRQ_CCIC |
+		    CAFE_GLOBAL_IRQ_SDH |
+		    CAFE_GLOBAL_IRQ_NAND,
+		    GLOBAL_IRQ_MASK);
+}
+
 static int cafe_nand_probe(struct pci_dev *pdev,
 				     const struct pci_device_id *ent)
 {
 	struct mtd_info *mtd;
 	struct cafe_priv *cafe;
-	uint32_t ctrl;
 	int err = 0;
 
 	/* Very old versions shared the same PCI ident for all three
@@ -850,70 +914,14 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 		}
 	}
 
-	/* Start off by resetting the NAND controller completely */
-	cafe_writel(cafe, CAFE_GLOBAL_RESET_NAND, GLOBAL_RESET);
-	cafe_writel(cafe, 0, GLOBAL_RESET);
+	cafe_nand_init(cafe);
 
-	cafe_writel(cafe, timing[0], NAND_TIMING1);
-	cafe_writel(cafe, timing[1], NAND_TIMING2);
-	cafe_writel(cafe, timing[2], NAND_TIMING3);
-
-	cafe_writel(cafe, 0xffffffff, NAND_IRQ_MASK);
 	err = request_irq(pdev->irq, &cafe_nand_interrupt, IRQF_SHARED,
 			  "CAFE NAND", mtd);
 	if (err) {
 		dev_warn(&pdev->dev, "Could not register IRQ %d\n", pdev->irq);
 		goto out_ior;
 	}
-
-	/* Disable master reset, enable NAND clock */
-	ctrl = cafe_readl(cafe, GLOBAL_CTRL);
-	ctrl &= ~(CAFE_GLOBAL_SW_RESET_SET |
-		  CAFE_GLOBAL_SW_RESET_CLEAR |
-		  CAFE_GLOBAL_MASTER_RESET_SET |
-		  CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		  CAFE_GLOBAL_NAND_CLK_ENABLE);
-	ctrl |= CAFE_GLOBAL_NAND_CLK_ENABLE |
-		CAFE_GLOBAL_SDH_CLK_ENABLE |
-		CAFE_GLOBAL_CCIC_CLK_ENABLE;
-	cafe_writel(cafe,
-		    ctrl |
-		    CAFE_GLOBAL_MASTER_RESET_SET |
-		    CAFE_GLOBAL_SW_RESET_SET,
-		    GLOBAL_CTRL);
-	cafe_writel(cafe,
-		    ctrl |
-		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-
-	cafe_writel(cafe, 0, NAND_DMA_CTRL);
-
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_NAND_CLK_ENABLE |
-		    CAFE_GLOBAL_SDH_CLK_ENABLE |
-		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
-		    CAFE_GLOBAL_MASTER_RESET_SET |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_NAND_CLK_ENABLE |
-		    CAFE_GLOBAL_SDH_CLK_ENABLE |
-		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
-		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-
-	/* Enable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_IRQ_PCI_ERROR |
-		    CAFE_GLOBAL_IRQ_CCIC |
-		    CAFE_GLOBAL_IRQ_SDH |
-		    CAFE_GLOBAL_IRQ_NAND,
-		    GLOBAL_IRQ_MASK);
-	cafe_dev_dbg(&cafe->pdev->dev, "Control %x, IRQ mask %x\n",
-		cafe_readl(cafe, GLOBAL_CTRL),
-		cafe_readl(cafe, GLOBAL_IRQ_MASK));
 
 	/* Do not use the DMA during the NAND identification */
 	cafe->usedma = 0;
@@ -980,74 +988,12 @@ MODULE_DEVICE_TABLE(pci, cafe_nand_tbl);
 
 static int cafe_nand_resume(struct pci_dev *pdev)
 {
-	uint32_t ctrl;
 	struct mtd_info *mtd = pci_get_drvdata(pdev);
 	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 
-       /* Start off by resetting the NAND controller completely */
-	cafe_writel(cafe, CAFE_GLOBAL_RESET_NAND, GLOBAL_RESET);
-	cafe_writel(cafe, 0, GLOBAL_RESET);
-	cafe_writel(cafe, 0xffffffff, NAND_IRQ_MASK);
+	cafe_nand_init(cafe);
 
-	/* Restore timing configuration */
-	cafe_writel(cafe, timing[0], NAND_TIMING1);
-	cafe_writel(cafe, timing[1], NAND_TIMING2);
-	cafe_writel(cafe, timing[2], NAND_TIMING3);
-
-        /* Disable master reset, enable NAND clock */
-	ctrl = cafe_readl(cafe, GLOBAL_CTRL);
-	ctrl &= ~(CAFE_GLOBAL_SW_RESET_SET |
-		  CAFE_GLOBAL_SW_RESET_CLEAR |
-		  CAFE_GLOBAL_MASTER_RESET_SET |
-		  CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		  CAFE_GLOBAL_NAND_CLK_ENABLE);
-	ctrl |= CAFE_GLOBAL_NAND_CLK_ENABLE |
-		CAFE_GLOBAL_SDH_CLK_ENABLE |
-		CAFE_GLOBAL_CCIC_CLK_ENABLE;
-	cafe_writel(cafe,
-		    ctrl |
-		    CAFE_GLOBAL_MASTER_RESET_SET |
-		    CAFE_GLOBAL_SW_RESET_SET,
-		    GLOBAL_CTRL);
-	cafe_writel(cafe,
-		    ctrl |
-		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-
-	cafe_writel(cafe, 0, NAND_DMA_CTRL);
-
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_NAND_CLK_ENABLE |
-		    CAFE_GLOBAL_SDH_CLK_ENABLE |
-		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
-		    CAFE_GLOBAL_MASTER_RESET_SET |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_NAND_CLK_ENABLE |
-		    CAFE_GLOBAL_SDH_CLK_ENABLE |
-		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
-		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-
-	/* Set up DMA address */
-	cafe_writel(cafe, cafe->dmaaddr & 0xffffffff, NAND_DMA_ADDR0);
-	if (sizeof(cafe->dmaaddr) > 4)
-	/* Shift in two parts to shut the compiler up */
-		cafe_writel(cafe, (cafe->dmaaddr >> 16) >> 16, NAND_DMA_ADDR1);
-	else
-		cafe_writel(cafe, 0, NAND_DMA_ADDR1);
-
-	/* Enable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_IRQ_PCI_ERROR |
-		    CAFE_GLOBAL_IRQ_CCIC |
-		    CAFE_GLOBAL_IRQ_SDH |
-		    CAFE_GLOBAL_IRQ_NAND,
-		    GLOBAL_IRQ_MASK);
 	return 0;
 }
 
