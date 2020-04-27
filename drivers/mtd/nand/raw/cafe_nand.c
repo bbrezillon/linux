@@ -525,9 +525,9 @@ static struct nand_bbt_descr cafe_bbt_mirror_descr_512 = {
 };
 
 
-static int cafe_nand_write_page_lowlevel(struct nand_chip *chip,
-					 const uint8_t *buf, int oob_required,
-					 int page)
+static int cafe_nand_write_page(struct nand_chip *chip,
+				const uint8_t *buf, int oob_required,
+				int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
@@ -628,7 +628,7 @@ static int cafe_nand_attach_chip(struct nand_chip *chip)
 	cafe->nand.ecc.size = mtd->writesize;
 	cafe->nand.ecc.bytes = 14;
 	cafe->nand.ecc.strength = 4;
-	cafe->nand.ecc.write_page = cafe_nand_write_page_lowlevel;
+	cafe->nand.ecc.write_page = cafe_nand_write_page;
 	cafe->nand.ecc.write_oob = cafe_nand_write_oob;
 	cafe->nand.ecc.read_page = cafe_nand_read_page;
 	cafe->nand.ecc.read_oob = cafe_nand_read_oob;
