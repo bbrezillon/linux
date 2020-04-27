@@ -150,7 +150,7 @@ struct cafe_priv {
 	struct pci_dev *pdev;
 	void __iomem *mmio;
 	struct rs_control *rs;
-	uint32_t ctl2;
+	u32 ctl2;
 	bool usedma;
 	dma_addr_t dmaaddr;
 	unsigned char *dmabuf;
@@ -198,7 +198,7 @@ static int cafe_nand_read_oob(struct nand_chip *chip, int page)
  * The hw generator calculates the error syndrome automatically. Therefore
  * we need a special oob layout and handling.
  */
-static int cafe_nand_read_page(struct nand_chip *chip, uint8_t *buf,
+static int cafe_nand_read_page(struct nand_chip *chip, u8 *buf,
 			       int oob_required, int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
@@ -225,8 +225,8 @@ static int cafe_nand_read_page(struct nand_chip *chip, uint8_t *buf,
 		int i, n;
 
 		for (i=0; i<8; i+=2) {
-			uint32_t tmp = cafe_readl(cafe, NAND_ECC_SYN_REG(i));
-			uint16_t idx;
+			u32 tmp = cafe_readl(cafe, NAND_ECC_SYN_REG(i));
+			u16 idx;
 
 			idx = FIELD_GET(CAFE_NAND_ECC_SYN_FIELD(i), tmp);
 			syn[i] = cafe->rs->codec->index_of[idx];
@@ -322,11 +322,11 @@ static const struct mtd_ooblayout_ops cafe_ooblayout_ops = {
 
 /* Ick. The BBT code really ought to be able to work this bit out
    for itself from the above, at least for the 2KiB case */
-static uint8_t cafe_bbt_pattern_2048[] = { 'B', 'b', 't', '0' };
-static uint8_t cafe_mirror_pattern_2048[] = { '1', 't', 'b', 'B' };
+static u8 cafe_bbt_pattern_2048[] = { 'B', 'b', 't', '0' };
+static u8 cafe_mirror_pattern_2048[] = { '1', 't', 'b', 'B' };
 
-static uint8_t cafe_bbt_pattern_512[] = { 0xBB };
-static uint8_t cafe_mirror_pattern_512[] = { 0xBC };
+static u8 cafe_bbt_pattern_512[] = { 0xBB };
+static u8 cafe_mirror_pattern_512[] = { 0xBC };
 
 
 static struct nand_bbt_descr cafe_bbt_main_descr_2048 = {
@@ -371,7 +371,7 @@ static struct nand_bbt_descr cafe_bbt_mirror_descr_512 = {
 
 
 static int cafe_nand_write_page(struct nand_chip *chip,
-				const uint8_t *buf, int oob_required,
+				const u8 *buf, int oob_required,
 				int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
