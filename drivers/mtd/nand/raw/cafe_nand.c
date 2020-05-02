@@ -174,10 +174,6 @@ module_param_array(timing, int, &numtimings, 0644);
 
 static const char *part_probes[] = { "cmdlinepart", "RedBoot", NULL };
 
-/* Make it easier to switch to PIO if we need to */
-#define cafe_readl(cafe, addr)			readl((cafe)->mmio + CAFE_##addr)
-#define cafe_writel(cafe, datum, addr)		writel(datum, (cafe)->mmio + CAFE_##addr)
-
 static int cafe_nand_write_oob(struct nand_chip *chip, int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
@@ -208,8 +204,8 @@ static int cafe_nand_read_page(struct nand_chip *chip, u8 *buf,
 	u32 ecc_result;
 
 	dev_dbg(&cafe->pdev->dev, "ECC result %08x SYN1,2 %08x\n",
-		cafe_readl(cafe, NAND_ECC_RESULT),
-		cafe_readl(cafe, NAND_ECC_SYN_REG(0)));
+		readl(cafe->mmio + CAFE_NAND_ECC_RESULT),
+		readl(cafe->mmio + CAFE_NAND_ECC_SYN_REG(0)));
 
 	nand_read_page_op(chip, page, 0, pagebuf,
 			  mtd->writesize + mtd->oobsize);
@@ -217,7 +213,7 @@ static int cafe_nand_read_page(struct nand_chip *chip, u8 *buf,
 	if (buf != pagebuf)
 		memcpy(buf, pagebuf, mtd->writesize);
 
-	ecc_result = cafe_readl(cafe, NAND_ECC_RESULT);
+	ecc_result = readl(cafe->mmio + CAFE_NAND_ECC_RESULT);
 	if (checkecc && (ecc_result & CAFE_NAND_ECC_RESULT_RS_ERRORS)) {
 		unsigned short syn[8], pat[4];
 		int pos[4];
@@ -225,7 +221,7 @@ static int cafe_nand_read_page(struct nand_chip *chip, u8 *buf,
 		int i, n;
 
 		for (i=0; i<8; i+=2) {
-			u32 tmp = cafe_readl(cafe, NAND_ECC_SYN_REG(i));
+			u32 tmp = readl(cafe->mmio + CAFE_NAND_ECC_SYN_REG(i));
 			u16 idx;
 
 			idx = FIELD_GET(CAFE_NAND_ECC_SYN_FIELD(i), tmp);
@@ -272,10 +268,12 @@ static int cafe_nand_read_page(struct nand_chip *chip, u8 *buf,
 		}
 
 		if (n < 0) {
-			dev_dbg(&cafe->pdev->dev, "Failed to correct ECC at %08x\n",
-				cafe_readl(cafe, NAND_ADDR2) * 2048);
+			dev_dbg(&cafe->pdev->dev,
+				"Failed to correct ECC at %08x\n",
+				readl(cafe->mmio + CAFE_NAND_ADDR2) * 2048);
 			for (i = 0; i < 0x5c; i += 4)
-				printk("Register %x: %08x\n", i, readl(cafe->mmio + i));
+				printk("Register %x: %08x\n", i,
+				       readl(cafe->mmio + i));
 			mtd->ecc_stats.failed++;
 		} else {
 			dev_dbg(&cafe->pdev->dev, "Corrected %d symbol errors\n", n);
@@ -451,11 +449,11 @@ static int cafe_nand_attach_chip(struct nand_chip *chip)
 		return -ENOMEM;
 
 	/* Set up DMA address */
-	cafe_writel(cafe, lower_32_bits(cafe->dmaaddr), NAND_DMA_ADDR0);
-	cafe_writel(cafe, upper_32_bits(cafe->dmaaddr), NAND_DMA_ADDR1);
+	writel(lower_32_bits(cafe->dmaaddr), cafe->mmio + CAFE_NAND_DMA_ADDR0);
+	writel(upper_32_bits(cafe->dmaaddr), cafe->mmio + CAFE_NAND_DMA_ADDR1);
 
 	dev_dbg(&cafe->pdev->dev, "Set DMA address to %x (virt %p)\n",
-		cafe_readl(cafe, NAND_DMA_ADDR0), cafe->dmabuf);
+		readl(cafe->mmio + CAFE_NAND_DMA_ADDR0), cafe->dmabuf);
 
 	/* Restore the DMA flag */
 	cafe->usedma = usedma;
@@ -518,7 +516,7 @@ static void cafe_data_in(struct cafe_priv *cafe, bool non_mem_read,
                          void *buf, unsigned int len)
 {
 	if (non_mem_read) {
-		u32 rd = cafe_readl(cafe, NAND_NONMEM_READ_DATA);
+		u32 rd = readl(cafe->mmio + CAFE_NAND_NONMEM_READ_DATA);
 
 		memcpy(buf, &rd, min_t(unsigned int, len, 4));
 	} else if (cafe->usedma) {
@@ -569,8 +567,8 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 			ctrl1 |= CAFE_NAND_CTRL1_HAS_ADDR |
 				 CAFE_FIELD_PREP(NAND_CTRL1, NUM_ADDR_CYC,
 						 instr->ctx.addr.naddrs - 1);
-			cafe_writel(cafe, addr1, NAND_ADDR1);
-			cafe_writel(cafe, addr2, NAND_ADDR2);
+			writel(addr1, cafe->mmio + CAFE_NAND_ADDR1);
+			writel(addr2, cafe->mmio + CAFE_NAND_ADDR2);
 			break;
 
 		case NAND_OP_DATA_IN_INSTR:
@@ -600,8 +598,8 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 	}
 
 	if (data_instr >= 0) {
-		cafe_writel(cafe, nand_subop_get_data_len(subop, data_instr),
-			    NAND_DATA_LEN);
+		writel(nand_subop_get_data_len(subop, data_instr),
+		       cafe->mmio + CAFE_NAND_DATA_LEN);
 	}
 
 	if (cafe->usedma && data_instr >= 0 &&
@@ -633,11 +631,11 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 	}
 
 	/* Clear pending interrupts before starting the operation. */
-	cafe_writel(cafe, wait, NAND_IRQ);
+	writel(wait, cafe->mmio + CAFE_NAND_IRQ);
 
-	cafe_writel(cafe, dmactrl, NAND_DMA_CTRL);
-	cafe_writel(cafe, ctrl2, NAND_CTRL2);
-	cafe_writel(cafe, ctrl1, NAND_CTRL1);
+	writel(dmactrl, cafe->mmio + CAFE_NAND_DMA_CTRL);
+	writel(ctrl2, cafe->mmio + CAFE_NAND_CTRL2);
+	writel(ctrl1, cafe->mmio + CAFE_NAND_CTRL1);
 
 	ret = readl_poll_timeout_atomic(cafe->mmio + CAFE_NAND_IRQ, status,
 					(status & wait) == wait, 1,
@@ -693,17 +691,17 @@ static void cafe_nand_init(struct cafe_priv *cafe)
 	u32 ctrl;
 
 	/* Start off by resetting the NAND controller completely */
-	cafe_writel(cafe, CAFE_GLOBAL_RESET_NAND, GLOBAL_RESET);
-	cafe_writel(cafe, 0, GLOBAL_RESET);
-	cafe_writel(cafe, 0xffffffff, NAND_IRQ_MASK);
+	writel(CAFE_GLOBAL_RESET_NAND, cafe->mmio + CAFE_GLOBAL_RESET);
+	writel(0, cafe->mmio + CAFE_GLOBAL_RESET);
+	writel(0xffffffff, cafe->mmio + CAFE_NAND_IRQ_MASK);
 
 	/* Restore timing configuration */
-	cafe_writel(cafe, timing[0], NAND_TIMING1);
-	cafe_writel(cafe, timing[1], NAND_TIMING2);
-	cafe_writel(cafe, timing[2], NAND_TIMING3);
+	writel(timing[0], cafe->mmio + CAFE_NAND_TIMING1);
+	writel(timing[1], cafe->mmio + CAFE_NAND_TIMING2);
+	writel(timing[2], cafe->mmio + CAFE_NAND_TIMING3);
 
 	/* Disable master reset, enable NAND clock */
-	ctrl = cafe_readl(cafe, GLOBAL_CTRL);
+	ctrl = readl(cafe->mmio + CAFE_GLOBAL_CTRL);
 	ctrl &= ~(CAFE_GLOBAL_SW_RESET_SET |
 		  CAFE_GLOBAL_SW_RESET_CLEAR |
 		  CAFE_GLOBAL_MASTER_RESET_SET |
@@ -712,37 +710,26 @@ static void cafe_nand_init(struct cafe_priv *cafe)
 	ctrl |= CAFE_GLOBAL_NAND_CLK_ENABLE |
 		CAFE_GLOBAL_SDH_CLK_ENABLE |
 		CAFE_GLOBAL_CCIC_CLK_ENABLE;
-	cafe_writel(cafe,
-		    ctrl |
-		    CAFE_GLOBAL_MASTER_RESET_SET |
-		    CAFE_GLOBAL_SW_RESET_SET,
-		    GLOBAL_CTRL);
-	cafe_writel(cafe,
-		    ctrl |
-		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
+	writel(ctrl | CAFE_GLOBAL_MASTER_RESET_SET | CAFE_GLOBAL_SW_RESET_SET,
+	       cafe->mmio + CAFE_GLOBAL_CTRL);
+	writel(ctrl | CAFE_GLOBAL_MASTER_RESET_CLEAR |
+	       CAFE_GLOBAL_SW_RESET_CLEAR,
+	       cafe->mmio + CAFE_GLOBAL_CTRL);
 
-	cafe_writel(cafe, 0, NAND_DMA_CTRL);
+	writel(0, cafe->mmio + CAFE_NAND_DMA_CTRL);
 
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_NAND_CLK_ENABLE |
-		    CAFE_GLOBAL_SDH_CLK_ENABLE |
-		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
-		    CAFE_GLOBAL_MASTER_RESET_SET |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_NAND_CLK_ENABLE |
-		    CAFE_GLOBAL_SDH_CLK_ENABLE |
-		    CAFE_GLOBAL_CCIC_CLK_ENABLE |
-		    CAFE_GLOBAL_MASTER_RESET_CLEAR |
-		    CAFE_GLOBAL_SW_RESET_CLEAR,
-		    GLOBAL_CTRL);
+	writel(CAFE_GLOBAL_NAND_CLK_ENABLE | CAFE_GLOBAL_SDH_CLK_ENABLE |
+	       CAFE_GLOBAL_CCIC_CLK_ENABLE | CAFE_GLOBAL_MASTER_RESET_SET |
+	       CAFE_GLOBAL_SW_RESET_CLEAR,
+	       cafe->mmio + CAFE_GLOBAL_CTRL);
+	writel(CAFE_GLOBAL_NAND_CLK_ENABLE | CAFE_GLOBAL_SDH_CLK_ENABLE |
+	       CAFE_GLOBAL_CCIC_CLK_ENABLE | CAFE_GLOBAL_MASTER_RESET_CLEAR |
+	       CAFE_GLOBAL_SW_RESET_CLEAR,
+	       cafe->mmio + CAFE_GLOBAL_CTRL);
 
 	/* Set up DMA address */
-	cafe_writel(cafe, lower_32_bits(cafe->dmaaddr), NAND_DMA_ADDR0);
-	cafe_writel(cafe, upper_32_bits(cafe->dmaaddr), NAND_DMA_ADDR1);
+	writel(lower_32_bits(cafe->dmaaddr), cafe->mmio + CAFE_NAND_DMA_ADDR0);
+	writel(upper_32_bits(cafe->dmaaddr), cafe->mmio + CAFE_NAND_DMA_ADDR1);
 }
 
 static int cafe_nand_probe(struct pci_dev *pdev,
@@ -798,9 +785,9 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 		dev_dbg(&cafe->pdev->dev, "Using provided timings (%08x %08x %08x)\n",
 			timing[0], timing[1], timing[2]);
 	} else {
-		timing[0] = cafe_readl(cafe, NAND_TIMING1);
-		timing[1] = cafe_readl(cafe, NAND_TIMING2);
-		timing[2] = cafe_readl(cafe, NAND_TIMING3);
+		timing[0] = readl(cafe->mmio + CAFE_NAND_TIMING1);
+		timing[1] = readl(cafe->mmio + CAFE_NAND_TIMING2);
+		timing[2] = readl(cafe->mmio + CAFE_NAND_TIMING3);
 
 		if (timing[0] | timing[1] | timing[2]) {
 			dev_dbg(&cafe->pdev->dev, "Timing registers already set (%08x %08x %08x)\n",
