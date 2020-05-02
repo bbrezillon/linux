@@ -743,20 +743,36 @@ unsigned int nand_subop_get_data_start_off(const struct nand_subop *subop,
 unsigned int nand_subop_get_data_len(const struct nand_subop *subop,
 				     unsigned int op_id);
 
+
+/**
+ * struct nand_op_parser_cmd_constraints - Constraints for command instructions
+ * @fixed: when set to true the opcode is fixed and must match the value in
+ *	   @opcode
+ * @opcode: fixed opcode to match against
+ */
+struct nand_op_parser_cmd_constraints {
+	bool fixed;
+	u8 opcode;
+};
+
 /**
  * struct nand_op_parser_addr_constraints - Constraints for address instructions
+ * @mincycles: minimum number of address cycles the controller can issue
  * @maxcycles: maximum number of address cycles the controller can issue in a
  *	       single step
  */
 struct nand_op_parser_addr_constraints {
+	unsigned int mincycles;
 	unsigned int maxcycles;
 };
 
 /**
  * struct nand_op_parser_data_constraints - Constraints for data instructions
+ * @minlen: minimum number of data cycles the controller can issue
  * @maxlen: maximum data length that the controller can handle in a single step
  */
 struct nand_op_parser_data_constraints {
+	unsigned int minlen;
 	unsigned int maxlen;
 };
 
@@ -772,6 +788,7 @@ struct nand_op_parser_pattern_elem {
 	enum nand_op_instr_type type;
 	bool optional;
 	union {
+		struct nand_op_parser_cmd_constraints cmd;
 		struct nand_op_parser_addr_constraints addr;
 		struct nand_op_parser_data_constraints data;
 	} ctx;
@@ -783,26 +800,64 @@ struct nand_op_parser_pattern_elem {
 		.optional = _opt,				\
 	}
 
-#define NAND_OP_PARSER_PAT_ADDR_ELEM(_opt, _maxcycles)		\
+#define NAND_OP_PARSER_PAT_FIXED_CMD_ELEM(_opt, _opcode)	\
+	{							\
+		.type = NAND_OP_CMD_INSTR,			\
+		.optional = _opt,				\
+		.ctx.cmd.fixed = true,				\
+		.ctx.cmd.opcode = _opcode,			\
+	}
+
+#define NAND_OP_PARSER_PAT_MIN_MAX_ADDR_ELEM(_opt, _mincycles,	\
+					     _maxcycles)	\
 	{							\
 		.type = NAND_OP_ADDR_INSTR,			\
 		.optional = _opt,				\
+		.ctx.addr.mincycles = _mincycles,		\
 		.ctx.addr.maxcycles = _maxcycles,		\
 	}
 
-#define NAND_OP_PARSER_PAT_DATA_IN_ELEM(_opt, _maxlen)		\
+#define NAND_OP_PARSER_PAT_ADDR_ELEM(_opt, _maxcycles)		\
+	NAND_OP_PARSER_PAT_MIN_MAX_ADDR_ELEM(_opt, 0,		\
+					     _maxcycles)
+
+#define NAND_OP_PARSER_PAT_FIXED_ADDR_ELEM(_opt, _numcycles)	\
+	NAND_OP_PARSER_PAT_MIN_MAX_ADDR_ELEM(_opt, _numcycles,	\
+					     _numcycles)
+
+#define NAND_OP_PARSER_PAT_MIN_MAX_DATA_IN_ELEM(_opt, _minlen,	\
+						_maxlen)	\
 	{							\
 		.type = NAND_OP_DATA_IN_INSTR,			\
 		.optional = _opt,				\
+		.ctx.data.minlen = _minlen,			\
+		.ctx.data.maxlen = _maxlen,			\
+	}
+
+#define NAND_OP_PARSER_PAT_DATA_IN_ELEM(_opt, _maxlen)		\
+	NAND_OP_PARSER_PAT_MIN_MAX_DATA_IN_ELEM(_opt, 0,	\
+						_maxlen)
+
+#define NAND_OP_PARSER_PAT_FIXED_DATA_IN_ELEM(_opt, _len)	\
+	NAND_OP_PARSER_PAT_MIN_MAX_DATA_IN_ELEM(_opt, _len,	\
+						_len)
+
+#define NAND_OP_PARSER_PAT_MIN_MAX_DATA_OUT_ELEM(_opt, _minlen,	\
+						 _maxlen)	\
+	{							\
+		.type = NAND_OP_DATA_OUT_INSTR,			\
+		.optional = _opt,				\
+		.ctx.data.minlen = _minlen,			\
 		.ctx.data.maxlen = _maxlen,			\
 	}
 
 #define NAND_OP_PARSER_PAT_DATA_OUT_ELEM(_opt, _maxlen)		\
-	{							\
-		.type = NAND_OP_DATA_OUT_INSTR,			\
-		.optional = _opt,				\
-		.ctx.data.maxlen = _maxlen,			\
-	}
+	NAND_OP_PARSER_PAT_MIN_MAX_DATA_OUT_ELEM(_opt, 0,	\
+						 _maxlen)
+
+#define NAND_OP_PARSER_PAT_FIXED_DATA_OUT_ELEM(_opt, _len)	\
+	NAND_OP_PARSER_PAT_MIN_MAX_DATA_OUT_ELEM(_opt, _len,	\
+						 _len)
 
 #define NAND_OP_PARSER_PAT_WAITRDY_ELEM(_opt)			\
 	{							\
