@@ -2143,6 +2143,61 @@ nand_op_parser_must_split_instr(const struct nand_op_parser_pattern_elem *pat,
 }
 
 /**
+ * nand_op_parser_pat_elem_matches() - Checks if a pattern element matches an
+ *				       instruction
+ * @elem: pattern element to check
+ * @instruction: NAND instruction to check against
+ * @instr_offset: offset withing the instruction in case of address or data
+ *		  instructions
+ */
+static bool
+nand_op_parser_pat_elem_matches(const struct nand_op_parser_pattern_elem *elem,
+				const struct nand_op_instr *instr,
+				unsigned int instr_offset)
+{
+	unsigned int len;
+
+	if (instr->type != elem->type)
+		return false;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		if (elem->ctx.cmd.fixed &&
+		    elem->ctx.cmd.opcode != instr->ctx.cmd.opcode)
+			return false;
+		break;
+
+	case NAND_OP_ADDR_INSTR:
+		/*
+		 * No need to check max cycles here, as we try to split
+		 * operations if they're longer than what the hardware
+		 * supports.
+		 */
+		len = instr->ctx.addr.naddrs - instr_offset;
+		if (len < elem->ctx.addr.mincycles)
+			return false;
+		break;
+
+	case NAND_OP_DATA_IN_INSTR:
+	case NAND_OP_DATA_OUT_INSTR:
+		/*
+		 * No need to check max data len here, as we try to split
+		 * operations if they're longer than what the hardware
+		 * supports.
+		 */
+		len = instr->ctx.data.len - instr_offset;
+		if (len < elem->ctx.data.minlen)
+			return false;
+		break;
+
+	default:
+		break;
+	}
+
+	return true;
+}
+
+/**
  * nand_op_parser_match_pat - Checks if a pattern matches the instructions
  *			      remaining in the parser context
  * @pat: the pattern to test
@@ -2170,7 +2225,17 @@ nand_op_parser_match_pat(const struct nand_op_parser_pattern *pat,
 		 * to the next one. If the element is mandatory, there's no
 		 * match and we can return false directly.
 		 */
-		if (instr->type != pat->elems[i].type) {
+		if (!nand_op_parser_pat_elem_matches(&pat->elems[i], instr,
+						     instr_offset)) {
+			if (!pat->elems[i].optional)
+				return false;
+
+			continue;
+		}
+
+		if (instr->type == NAND_OP_CMD_INSTR &&
+		    pat->elems[i].ctx.cmd.fixed &&
+		    pat->elems[i].ctx.cmd.opcode != instr->ctx.cmd.opcode) {
 			if (!pat->elems[i].optional)
 				return false;
 
