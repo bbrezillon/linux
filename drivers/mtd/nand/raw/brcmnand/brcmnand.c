@@ -1662,6 +1662,77 @@ static int brcmnand_low_level_op(struct brcmnand_host *host,
 	return brcmnand_waitfunc(chip);
 }
 
+static void brcmnand_exec_instr(struct brcmnand_host *host,
+				const struct nand_op_instr *instr,
+				bool last_op)
+{
+	unsigned int i;
+	const u8 *out;
+	u8 *in;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		brcmnand_low_level_op(host, LL_OP_CMD,
+				      instr->ctx.cmd.opcode, last_op);
+		break;
+
+	case NAND_OP_ADDR_INSTR:
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			brcmnand_low_level_op(host, LL_OP_ADDR,
+					      instr->ctx.addr.addrs[i],
+					      last_op);
+		break;
+
+	case NAND_OP_DATA_IN_INSTR:
+		in = instr->ctx.data.buf.in;
+		for (i = 0; i < instr->ctx.data.len; i++) {
+			brcmnand_low_level_op(host, LL_OP_RD, 0, last_op);
+			in[i] = brcmnand_read_reg(host->ctrl,
+						  BRCMNAND_LL_RDATA);
+		}
+		break;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		out = instr->ctx.data.buf.out;
+		for (i = 0; i < instr->ctx.data.len; i++)
+			brcmnand_low_level_op(host, LL_OP_WR, out[i], last_op);
+		break;
+
+	case NAND_OP_WAITRDY_INSTR:
+		/*
+		 * Nothing to do here, brcmnand_low_level_op() already waits on
+		 * FLASH_READY every time it's called.
+		 */
+		break;
+
+	default:
+		break;
+	}
+}
+
+static int brcmnand_exec_op(struct nand_chip *chip,
+			    const struct nand_operation *op,
+			    bool check_only)
+{
+	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	unsigned int i;
+
+	if (check_only)
+		return 0;
+
+	if (op->deassert_wp)
+		brcmnand_wp(mtd, 0);
+
+	for (i = 0; i < op->ninstrs; i++)
+		brcmnand_exec_instr(host, &op->instrs[i], i == op->ninstrs - 1);
+
+	if (op->deassert_wp)
+		brcmnand_wp(mtd, 1);
+
+	return 0;
+}
+
 static void brcmnand_cmdfunc(struct nand_chip *chip, unsigned command,
 			     int column, int page_addr)
 {
@@ -2691,6 +2762,7 @@ static int brcmnand_attach_chip(struct nand_chip *chip)
 
 static const struct nand_controller_ops brcmnand_controller_ops = {
 	.attach_chip = brcmnand_attach_chip,
+	.exec_op = brcmnand_exec_op,
 };
 
 static int brcmnand_init_cs(struct brcmnand_host *host, struct device_node *dn)
