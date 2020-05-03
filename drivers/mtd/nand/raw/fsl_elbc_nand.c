@@ -32,6 +32,11 @@
 #define ERR_BYTE 0xFF /* Value returned for read bytes when read failed */
 #define FCM_TIMEOUT_MSECS 500 /* Maximum number of mSecs to wait for FCM */
 
+#define FIR_OP(idx, type)	((type) << (28 - ((idx * 4))))
+#define FIR_OP_CM(idx)		((idx) + 4)
+
+#define FMR_AL(al)		(((al) - 2) << 4)
+
 /* mtd information per set */
 
 struct fsl_elbc_mtd {
@@ -44,6 +49,7 @@ struct fsl_elbc_mtd {
 	int page_size;          /* NAND page size (0=512, 1=2048)    */
 	unsigned int fmr;       /* FCM Flash Mode Register value     */
 	u32 br;			/* BR (Base Register) value          */
+	u32 or;			/* OR (Option Register) value        */
 };
 
 /* Freescale eLBC FCM controller information */
@@ -275,6 +281,102 @@ static void fsl_elbc_do_read(struct nand_chip *chip, int oob)
 		else
 			out_be32(&lbc->fcr, NAND_CMD_READ0 << FCR_CMD0_SHIFT);
 	}
+}
+
+struct fsl_elbc_seq {
+	unsigned int ninstrs;
+	u32 fir;
+	unsigned int num_cms : 3;
+	unsigned int num_uas : 3;
+	unsigned int has_pa : 1;
+	unsigned int has_ca : 1;
+	u32 fpar;
+	u32 fpbr;
+	u32 fmr;
+	u32 mdr;
+}
+
+static bool fsl_elb_queue_instr(struct nand_chip *chip,
+				struct fsl_elbc_seq *seq,
+				const struct nand_op_instr *instr,
+				unsigned int *instr_offset)
+{
+	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	unsigned int ca_cycles = priv->or & OR_FCM_PGS ? 2 : 1;
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	unsigned int remaining, i;
+
+	if (ninstrs == 8)
+		return true;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		if (seq->num_cms == 4)
+			return true;
+
+		seq->fir |= FIR_OP(seq->ninstrs, FIR_OP_CM(seq->num_cms));
+		seq->num_cms++;
+		break;
+	case NAND_OP_ADDR_INSTR:
+		remaining = instr->addr.naddrs - *instr_offset;
+		for (i = *instr_offset; i < instr->addr.naddrs; ) {
+			if (instr->addr.naddrs - i == 1 &&
+			    !(priv->or & OR_FCM_PGS) &&
+			    !seq->has_ca) {
+				seq->fpar |= (u32)ca << 23;
+				seq->fir |= FIR_OP(seq->ninstrs, FIR_OP_CA);
+				seq->has_ca = true;
+				i++;
+				continue;
+			}
+
+			if (instr->addr.naddrs - i == 2 &&
+			    (priv->or & OR_FCM_PGS) && !seq->has_ca) {
+			}
+
+			if (instr->addr.naddrs - i == 1 ||
+			    seq->has_pa) {
+				if (seq->num_uas == 4)
+					return true;
+
+				seq->fir |= FIR_OP(seq->ninstrs, FIR_OP_UA);
+				seq->mdr |= intr->addr.addrs[i] << (seq->num_uas * 8);
+				seq->num_uas++;
+				i++;
+			} else {
+				u32 al = instr->addr.naddrs - i;
+				u32 pa = 0;
+				unsigned int j;
+
+				if (al > 4)
+					al = 4;
+
+				for (j = 0; j < al; j++)
+					pa |= instr->addr.addrs[i + j] << (j * 8);
+
+				seq->fir |= FIR_OP(seq->ninstrs, FIR_OP_PA);
+				seq->fmr |= FMR_AL(al);
+				if (priv->or & OR_FCM_PGS)
+					seq->fpar |= (pa & GENMASK(5, 0)) << 14;
+				else
+					seq->fpar |= (pa & GENMASK(4, 0)) << 17;
+				seq->has_pa = true;
+				i += al;
+			}
+		}
+	}
+
+	ninstrs++;
+	return ninstrs == 8 ? true : false;
+}
+
+static int fsl_elbc_exec_op(struct nand_chip *chip,
+			    const struct nand_operation *op, bool check_only)
+{
+	if (check_only)
+		return 0;
+
+	return 0;
 }
 
 /* cmdfunc send commands to the FCM */
