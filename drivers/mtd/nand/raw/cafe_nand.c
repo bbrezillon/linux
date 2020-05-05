@@ -272,8 +272,9 @@ static int cafe_nand_read_page(struct nand_chip *chip, u8 *buf,
 				"Failed to correct ECC at %08x\n",
 				readl(cafe->mmio + CAFE_NAND_ADDR2) * 2048);
 			for (i = 0; i < 0x5c; i += 4)
-				printk("Register %x: %08x\n", i,
-				       readl(cafe->mmio + i));
+				dev_dbg(&cafe->pdev->dev,
+					"Register %x: %08x\n", i,
+					readl(cafe->mmio + i));
 			mtd->ecc_stats.failed++;
 		} else {
 			dev_dbg(&cafe->pdev->dev, "Corrected %d symbol errors\n", n);
