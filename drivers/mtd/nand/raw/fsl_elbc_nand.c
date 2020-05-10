@@ -43,6 +43,7 @@ struct fsl_elbc_mtd {
 	u8 __iomem *vbase;      /* Chip select base virtual address  */
 	int page_size;          /* NAND page size (0=512, 1=2048)    */
 	unsigned int fmr;       /* FCM Flash Mode Register value     */
+	u32 br;			/* BR (Base Register) value          */
 };
 
 /* Freescale eLBC FCM controller information */
@@ -614,6 +615,7 @@ static int fsl_elbc_read_page(struct nand_chip *chip, uint8_t *buf,
 	unsigned int i;
 	u32 lteccr;
 
+	out_be32(&lbc->bank[priv->bank].br, priv->br | BR_DECC_CHK_GEN);
 	nand_read_page_op(chip, page, 0, buf, mtd->writesize);
 	if (oob_required)
 		fsl_elbc_read_buf(chip, chip->oob_poi, mtd->oobsize);
@@ -637,6 +639,7 @@ static int fsl_elbc_read_page(struct nand_chip *chip, uint8_t *buf,
 
 	/* Cleat lteccr */
 	out_be32(&lbc->lteccr, 0x000F000F);
+	out_be32(&lbc->bank[priv->bank].br, priv->br);
 
 	return has_bitflips ? 1 : 0;
 }
@@ -647,10 +650,15 @@ static int fsl_elbc_read_page(struct nand_chip *chip, uint8_t *buf,
 static int fsl_elbc_write_page(struct nand_chip *chip, const uint8_t *buf,
 			       int oob_required, int page)
 {
+	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 	struct mtd_info *mtd = nand_to_mtd(chip);
 
+	out_be32(&lbc->bank[priv->bank].br, priv->br | BR_DECC_CHK_GEN);
 	nand_prog_page_begin_op(chip, page, 0, buf, mtd->writesize);
 	fsl_elbc_write_buf(chip, chip->oob_poi, mtd->oobsize);
+	out_be32(&lbc->bank[priv->bank].br, priv->br);
 
 	return nand_prog_page_end_op(chip);
 }
@@ -662,11 +670,17 @@ static int fsl_elbc_write_subpage(struct nand_chip *chip, uint32_t offset,
 				  uint32_t data_len, const uint8_t *buf,
 				  int oob_required, int page)
 {
+	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 	struct mtd_info *mtd = nand_to_mtd(chip);
 
+	out_be32(&lbc->bank[priv->bank].br, priv->br | BR_DECC_CHK_GEN);
 	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 	fsl_elbc_write_buf(chip, buf, mtd->writesize);
 	fsl_elbc_write_buf(chip, chip->oob_poi, mtd->oobsize);
+	out_be32(&lbc->bank[priv->bank].br, priv->br);
+
 	return nand_prog_page_end_op(chip);
 }
 
@@ -724,8 +738,10 @@ static int fsl_elbc_attach_chip(struct nand_chip *chip)
 	case NAND_ECC_HW:
 		chip->ecc.algo = NAND_ECC_HAMMING;
 		chip->ecc.read_page = fsl_elbc_read_page;
+		chip->ecc.read_page_raw = nand_read_page_raw;
 		chip->ecc.write_page = fsl_elbc_write_page;
 		chip->ecc.write_subpage = fsl_elbc_write_subpage;
+		chip->ecc.write_page_raw = nand_write_page_raw;
 
 		mtd_set_ooblayout(mtd, &fsl_elbc_ooblayout_ops);
 		chip->ecc.size = 512;
@@ -914,10 +930,18 @@ static int fsl_elbc_nand_probe(struct platform_device *pdev)
 	 * Note that this default will be overriden by the nand-ecc-mode value
 	 * if defined.
 	 */
-	if ((in_be32(&lbc->bank[priv->bank].br) & BR_DECC) == BR_DECC_CHK_GEN)
+	priv->br = in_be32(&lbc->bank[priv->bank].br);
+	if ((priv->br & BR_DECC) == BR_DECC_CHK_GEN)
 		priv->chip.ecc.mode = NAND_ECC_HW;
 	else
 		priv->chip.ecc.mode = NAND_ECC_SOFT;
+
+	/*
+	 * Disable the ECC engine. It will be re-enabled everytime we do a
+	 * non-raw page read/write.
+	 */
+	priv->br &= ~(BR_DECC_CHK | BR_DECC_CHK_GEN);
+	out_be32(&lbc->bank[priv->bank].br, priv->br);
 
 	priv->chip.controller->ops = &fsl_elbc_controller_ops;
 	ret = nand_scan(&priv->chip, 1);
