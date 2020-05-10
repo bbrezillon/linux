@@ -728,35 +728,22 @@ static int fsl_elbc_attach_chip(struct nand_chip *chip)
 	unsigned int al;
 
 	switch (chip->ecc.mode) {
-	/*
-	 * if ECC was not chosen in DT, decide whether to use HW or SW ECC from
-	 * CS Base Register
-	 */
-	case NAND_ECC_NONE:
-		/* If CS Base Register selects full hardware ECC then use it */
-		if ((in_be32(&lbc->bank[priv->bank].br) & BR_DECC) ==
-		    BR_DECC_CHK_GEN) {
-			chip->ecc.read_page = fsl_elbc_read_page;
-			chip->ecc.write_page = fsl_elbc_write_page;
-			chip->ecc.write_subpage = fsl_elbc_write_subpage;
+	case NAND_ECC_HW:
+		chip->ecc.algo = NAND_ECC_HAMMING;
+		chip->ecc.read_page = fsl_elbc_read_page;
+		chip->ecc.write_page = fsl_elbc_write_page;
+		chip->ecc.write_subpage = fsl_elbc_write_subpage;
 
-			chip->ecc.mode = NAND_ECC_HW;
-			mtd_set_ooblayout(mtd, &fsl_elbc_ooblayout_ops);
-			chip->ecc.size = 512;
-			chip->ecc.bytes = 3;
-			chip->ecc.strength = 1;
-		} else {
-			/* otherwise fall back to default software ECC */
-			chip->ecc.mode = NAND_ECC_SOFT;
-			chip->ecc.algo = NAND_ECC_HAMMING;
-		}
+		mtd_set_ooblayout(mtd, &fsl_elbc_ooblayout_ops);
+		chip->ecc.size = 512;
+		chip->ecc.bytes = 3;
+		chip->ecc.strength = 1;
 		break;
 
-	/* if SW ECC was chosen in DT, we do not need to set anything here */
 	case NAND_ECC_SOFT:
+		chip->ecc.algo = NAND_ECC_HAMMING;
 		break;
 
-	/* should we also implement NAND_ECC_HW to do as the code above? */
 	default:
 		return -EINVAL;
 	}
@@ -927,6 +914,17 @@ static int fsl_elbc_nand_probe(struct platform_device *pdev)
 	ret = fsl_elbc_chip_init(priv);
 	if (ret)
 		goto err;
+
+	/*
+	 * Set default ECC mode: if CS Base Register selects full hardware ECC
+	 * then use it HW ECC, otherwise use SW ECC.
+	 * Note that this default will be overriden by the nand-ecc-mode value
+	 * if defined.
+	 */
+	if ((in_be32(&lbc->bank[priv->bank].br) & BR_DECC) == BR_DECC_CHK_GEN)
+		priv->chip.ecc.mode = NAND_ECC_HW;
+	else
+		priv->chip.ecc.mode = NAND_ECC_SOFT;
 
 	priv->chip.controller->ops = &fsl_elbc_controller_ops;
 	ret = nand_scan(&priv->chip, 1);
