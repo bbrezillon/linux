@@ -61,7 +61,6 @@ struct fsl_elbc_fcm_ctrl {
 	unsigned int use_mdr;    /* Non zero if the MDR is to be set      */
 	unsigned int oob;        /* Non zero if operating on OOB data     */
 	unsigned int counter;	 /* counter for the initializations	  */
-	unsigned int max_bitflips;  /* Saved during READ0 cmd		  */
 };
 
 /* These map to the positions used by the FCM hardware ECC generator */
@@ -242,32 +241,6 @@ static int fsl_elbc_run_command(struct mtd_info *mtd)
 		         in_be32(&lbc->fir), in_be32(&lbc->fcr),
 			 elbc_fcm_ctrl->status, elbc_fcm_ctrl->mdr);
 		return -EIO;
-	}
-
-	if (chip->ecc.mode != NAND_ECC_HW)
-		return 0;
-
-	elbc_fcm_ctrl->max_bitflips = 0;
-
-	if (elbc_fcm_ctrl->read_bytes == mtd->writesize + mtd->oobsize) {
-		uint32_t lteccr = in_be32(&lbc->lteccr);
-		/*
-		 * if command was a full page read and the ELBC
-		 * has the LTECCR register, then bits 12-15 (ppc order) of
-		 * LTECCR indicates which 512 byte sub-pages had fixed errors.
-		 * bits 28-31 are uncorrectable errors, marked elsewhere.
-		 * for small page nand only 1 bit is used.
-		 * if the ELBC doesn't have the lteccr register it reads 0
-		 * FIXME: 4 bits can be corrected on NANDs with 2k pages, so
-		 * count the number of sub-pages with bitflips and update
-		 * ecc_stats.corrected accordingly.
-		 */
-		if (lteccr & 0x000F000F)
-			out_be32(&lbc->lteccr, 0x000F000F); /* clear lteccr */
-		if (lteccr & 0x000F0000) {
-			mtd->ecc_stats.corrected++;
-			elbc_fcm_ctrl->max_bitflips = 1;
-		}
 	}
 
 	return 0;
@@ -636,13 +609,36 @@ static int fsl_elbc_read_page(struct nand_chip *chip, uint8_t *buf,
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
-	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = ctrl->nand;
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
+	bool has_bitflips = false;
+	unsigned int i;
+	u32 lteccr;
 
 	nand_read_page_op(chip, page, 0, buf, mtd->writesize);
 	if (oob_required)
 		fsl_elbc_read_buf(chip, chip->oob_poi, mtd->oobsize);
 
-	return elbc_fcm_ctrl->max_bitflips;
+	/*
+	 * Bits 12-15 (ppc order) of LTECCR indicates which 512 byte sub-pages
+	 * had fixed errors.
+	 * Bits 28-31 are uncorrectable errors, marked elsewhere.
+	 * For small page nand only 1 bit is used.
+	 * If the ELBC doesn't have the lteccr register it reads 0.
+	 */
+	lteccr = in_be32(&lbc->lteccr);
+	for (i = 0; i < 4; i++) {
+		if (lteccr & BIT(i)) {
+			mtd->ecc_stats.failed++;
+		} else if (lteccr & BIT(i + 16)) {
+			mtd->ecc_stats.corrected++;
+			has_bitflips = true;
+		}
+	}
+
+	/* Cleat lteccr */
+	out_be32(&lbc->lteccr, 0x000F000F);
+
+	return has_bitflips ? 1 : 0;
 }
 
 /* ECC will be calculated automatically, and errors will be detected in
