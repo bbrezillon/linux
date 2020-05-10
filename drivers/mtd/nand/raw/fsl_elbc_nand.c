@@ -642,9 +642,6 @@ static int fsl_elbc_read_page(struct nand_chip *chip, uint8_t *buf,
 	if (oob_required)
 		fsl_elbc_read_buf(chip, chip->oob_poi, mtd->oobsize);
 
-	if (fsl_elbc_wait(chip) & NAND_STATUS_FAIL)
-		mtd->ecc_stats.failed++;
-
 	return elbc_fcm_ctrl->max_bitflips;
 }
 
