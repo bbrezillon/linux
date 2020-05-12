@@ -261,6 +261,7 @@ struct atmel_hsmc_nand_controller {
 	struct regmap *io;
 	struct atmel_nfc_op op;
 	struct completion complete;
+	u32 cfg;
 	int irq;
 
 	/* Only used when instantiating from legacy DT bindings. */
@@ -534,9 +535,9 @@ static int atmel_hsmc_nand_waitrdy(struct atmel_nand *nand,
 
 	nc = to_hsmc_nand_controller(nand->base.controller);
 	mask = ATMEL_HSMC_NFC_SR_RBEDGE(nand->activecs->rb.id);
-	return regmap_read_poll_timeout(nc->base.smc, ATMEL_HSMC_NFC_SR,
-					status, status & mask,
-					20, timeout_ms * 1000);
+	return regmap_read_poll_timeout_atomic(nc->base.smc, ATMEL_HSMC_NFC_SR,
+					       status, status & mask,
+					       10, timeout_ms * 1000);
 }
 
 static void atmel_nand_select_target(struct atmel_nand *nand,
@@ -550,17 +551,22 @@ static void atmel_hsmc_nand_select_target(struct atmel_nand *nand,
 {
 	struct mtd_info *mtd = nand_to_mtd(&nand->base);
 	struct atmel_hsmc_nand_controller *nc;
+	u32 cfg = ATMEL_HSMC_NFC_CFG_PAGESIZE(mtd->writesize) |
+		  ATMEL_HSMC_NFC_CFG_SPARESIZE(mtd->oobsize) |
+		  ATMEL_HSMC_NFC_CFG_RSPARE;
 
 	nand->activecs = &nand->cs[cs];
 	nc = to_hsmc_nand_controller(nand->base.controller);
+	if (nc->cfg == cfg)
+		return;
+
 	regmap_update_bits(nc->base.smc, ATMEL_HSMC_NFC_CFG,
 			   ATMEL_HSMC_NFC_CFG_PAGESIZE_MASK |
 			   ATMEL_HSMC_NFC_CFG_SPARESIZE_MASK |
 			   ATMEL_HSMC_NFC_CFG_RSPARE |
 			   ATMEL_HSMC_NFC_CFG_WSPARE,
-			   ATMEL_HSMC_NFC_CFG_PAGESIZE(mtd->writesize) |
-			   ATMEL_HSMC_NFC_CFG_SPARESIZE(mtd->oobsize) |
-			   ATMEL_HSMC_NFC_CFG_RSPARE);
+			   cfg);
+	nc->cfg = cfg;
 }
 
 static int atmel_smc_nand_exec_instr(struct atmel_nand *nand,
@@ -944,8 +950,8 @@ static int atmel_nand_pmecc_read_pg(struct nand_chip *chip, u8 *buf,
 	if (ret)
 		return ret;
 
-	nand_read_data_op(chip, buf, mtd->writesize, false);
-	nand_read_data_op(chip, chip->oob_poi, mtd->oobsize, false);
+	nand_read_data_op(chip, buf, mtd->writesize, false, false);
+	nand_read_data_op(chip, chip->oob_poi, mtd->oobsize, false, false);
 
 	ret = atmel_nand_pmecc_correct_data(chip, buf, raw);
 
