@@ -17,7 +17,6 @@
 #include <linux/rslib.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
-#include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -429,22 +428,6 @@ static void cafe_select_chip(struct nand_chip *chip, int chipnr)
 	cafe->ctl1 |= CAFE_FIELD_PREP(NAND_CTRL1, CE, chipnr);
 }
 
-static irqreturn_t cafe_nand_interrupt(int irq, void *id)
-{
-	struct mtd_info *mtd = id;
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct cafe_priv *cafe = nand_get_controller_data(chip);
-	uint32_t irqs = cafe_readl(cafe, NAND_IRQ);
-	cafe_writel(cafe,
-		    irqs & ~(CAFE_NAND_IRQ_CMD_DONE | CAFE_NAND_IRQ_DMA_DONE),
-		    NAND_IRQ);
-	if (!irqs)
-		return IRQ_NONE;
-
-	dev_dbg(&cafe->pdev->dev, "irq, bits %x (%x)\n", irqs, cafe_readl(cafe, NAND_IRQ));
-	return IRQ_HANDLED;
-}
-
 static int cafe_nand_write_oob(struct nand_chip *chip, int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
@@ -817,14 +800,6 @@ static void cafe_nand_init(struct cafe_priv *cafe)
 	/* Set up DMA address */
 	cafe_writel(cafe, lower_32_bits(cafe->dmaaddr), NAND_DMA_ADDR0);
 	cafe_writel(cafe, upper_32_bits(cafe->dmaaddr), NAND_DMA_ADDR1);
-
-	/* Enable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe,
-		    CAFE_GLOBAL_IRQ_PCI_ERROR |
-		    CAFE_GLOBAL_IRQ_CCIC |
-		    CAFE_GLOBAL_IRQ_SDH |
-		    CAFE_GLOBAL_IRQ_NAND,
-		    GLOBAL_IRQ_MASK);
 }
 
 static int cafe_nand_probe(struct pci_dev *pdev,
@@ -907,13 +882,6 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 
 	cafe_nand_init(cafe);
 
-	err = request_irq(pdev->irq, &cafe_nand_interrupt, IRQF_SHARED,
-			  "CAFE NAND", mtd);
-	if (err) {
-		dev_warn(&pdev->dev, "Could not register IRQ %d\n", pdev->irq);
-		goto out_ior;
-	}
-
 	/* Do not use the DMA during the NAND identification */
 	cafe->usedma = 0;
 
@@ -921,7 +889,7 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 	cafe->nand.legacy.dummy_controller.ops = &cafe_nand_controller_ops;
 	err = nand_scan(&cafe->nand, 2);
 	if (err)
-		goto out_irq;
+		goto out_ior;
 
 	pci_set_drvdata(pdev, mtd);
 
@@ -934,12 +902,6 @@ static int cafe_nand_probe(struct pci_dev *pdev,
 
  out_cleanup_nand:
 	nand_cleanup(&cafe->nand);
- out_irq:
-	/* Disable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe,
-		    cafe_readl(cafe, GLOBAL_IRQ_MASK) & ~CAFE_GLOBAL_IRQ_NAND,
-		    GLOBAL_IRQ_MASK);
-	free_irq(pdev->irq, mtd);
  out_ior:
 	pci_iounmap(pdev, cafe->mmio);
  out_free_mtd:
@@ -955,11 +917,6 @@ static void cafe_nand_remove(struct pci_dev *pdev)
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	int ret;
 
-	/* Disable NAND IRQ in global IRQ mask register */
-	cafe_writel(cafe,
-		    cafe_readl(cafe, GLOBAL_IRQ_MASK) & ~CAFE_GLOBAL_IRQ_NAND,
-		    GLOBAL_IRQ_MASK);
-	free_irq(pdev->irq, mtd);
 	ret = mtd_device_unregister(mtd);
 	WARN_ON(ret);
 	nand_cleanup(chip);
