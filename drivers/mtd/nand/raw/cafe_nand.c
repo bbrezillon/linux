@@ -724,7 +724,7 @@ static int cafe_nand_attach_chip(struct nand_chip *chip)
 
 	cafe->ctl2 = CAFE_NAND_CTRL2_ECC_ALG_RS |
 		     CAFE_FIELD_PREP(NAND_CTRL2, PAGE_SIZE,
-				     mtd->writesize / 512);
+				     mtd->writesize / 1024);
 
 	/* Set up ECC according to the type of chip we found */
 	mtd_set_ooblayout(mtd, &cafe_ooblayout_ops);
