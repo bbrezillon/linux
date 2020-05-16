@@ -480,7 +480,7 @@ static int cafe_nand_read_page(struct nand_chip *chip, uint8_t *buf,
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	unsigned int max_bitflips = 0;
-	u32 ecc_result, status;
+	u32 ecc_result;
 
 	cafe_dev_dbg(&cafe->pdev->dev, "ECC result %08x SYN1,2 %08x\n",
 		     cafe_readl(cafe, NAND_ECC_RESULT),
@@ -490,8 +490,7 @@ static int cafe_nand_read_page(struct nand_chip *chip, uint8_t *buf,
 	chip->legacy.read_buf(chip, chip->oob_poi, mtd->oobsize);
 
 	ecc_result = cafe_readl(cafe, NAND_ECC_RESULT);
-	status = CAFE_FIELD_GET(NAND_ECC_RESULT, STATUS, ecc_result);
-	if (checkecc && status == CAFE_NAND_ECC_RESULT_CORRECTABLE_ERRS) {
+	if (checkecc && (ecc_result & CAFE_NAND_ECC_RESULT_RS_ERRORS)) {
 		unsigned short syn[8], pat[4];
 		int pos[4];
 		u8 *oob = chip->oob_poi;
