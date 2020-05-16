@@ -880,8 +880,8 @@ static const struct nand_op_parser cafe_nand_op_parser = NAND_OP_PARSER(
 	NAND_OP_PARSER_PATTERN(cafe_nand_exec_subop,
 			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
 			       NAND_OP_PARSER_PAT_ADDR_ELEM(true, 5),
+			       NAND_OP_PARSER_PAT_DATA_OUT_ELEM(true, 2112),
 			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
-			       NAND_OP_PARSER_PAT_DATA_IN_ELEM(true, 2112),
 			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(true))
 );
 
