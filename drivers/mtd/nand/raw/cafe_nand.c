@@ -105,7 +105,7 @@
 
 #define CAFE_NAND_DMA_ADDR0			0x44
 #define CAFE_NAND_DMA_ADDR1			0x48
-#define CAFE_NAND_ECC_SYN_REG(x)		(((x) / 2) + 0x50)
+#define CAFE_NAND_ECC_SYN_REG(x)		((((x) / 2) * 4) + 0x50)
 #define CAFE_NAND_ECC_SYN_FIELD(x)		(((x) % 2) ? GENMASK(31, 16) : GENMASK(15, 0))
 
 #define CAFE_NAND_CTRL4				0x60
