@@ -397,8 +397,6 @@ static void cafe_nand_cmdfunc(struct nand_chip *chip, unsigned command,
 			command, 500000-c, irqs, cafe_readl(cafe, NAND_IRQ));
 	}
 
-	WARN_ON(cafe->ctl2 & CAFE_NAND_CTRL2_AUTO_WRITE_ECC);
-
 	switch (command) {
 
 	case NAND_CMD_CACHEDPROG:
