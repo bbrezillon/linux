@@ -30,7 +30,8 @@ Optional children node properties:
 - nand-ecc-strength: ECC strength (max number of correctable bits).
 - nand-ecc-mode: String, operation mode of the NAND ecc mode. "hw" by default
 - nand-on-flash-bbt: boolean to enable on flash bbt option, if not present false
-- rb-gpios: GPIO specifier for the busy pin.
+- rb-gpios: GPIO specifier for the ready/busy pin. The active state (ready)
+            should be high unless the signal is inverted.
 - wp-gpios: GPIO specifier for the write protect pin.
 
 Optional child node of NAND chip nodes:
