@@ -776,7 +776,7 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 {
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	u32 ctrl1 = 0, ctrl2 = cafe->ctl2, addr1 = 0, addr2 = 0;
-	u32 status, wait = CAFE_NAND_IRQ_CMD_DONE;
+	u32 status, dmactrl = 0, wait = CAFE_NAND_IRQ_CMD_DONE;
 	int ret, data_instr = -1;
 	bool waitrdy = false;
 	bool usedma = false;
@@ -847,16 +847,13 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 	 */
 	if (cafe->usedma && data_instr >= 0 &&
 	    (ctrl1 & CAFE_NAND_CTRL1_HAS_ADDR)) {
-		u32 dmactrl = CAFE_NAND_DMA_CTRL_ENABLE |
-			      CAFE_NAND_DMA_CTRL_RESERVED;
-
-		dmactrl |= CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
+		dmactrl |= CAFE_NAND_DMA_CTRL_ENABLE |
+			   CAFE_NAND_DMA_CTRL_RESERVED |
+			   CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
 					   nand_subop_get_data_len(subop,
 								   data_instr));
 		if (ctrl1 & CAFE_NAND_CTRL1_HAS_DATA_IN)
 			dmactrl |= CAFE_NAND_DMA_CTRL_DATA_IN;
-
-		cafe_writel(cafe, dmactrl, NAND_DMA_CTRL);
 
 		/*
 		 * If the last instruction is a data transfer and we're using
@@ -880,6 +877,7 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 	/* Clear pending interrupts before starting the operation. */
 	cafe_writel(cafe, wait, NAND_IRQ);
 
+	cafe_writel(cafe, dmactrl, NAND_DMA_CTRL);
 	cafe_writel(cafe, ctrl2, NAND_CTRL2);
 	cafe_writel(cafe, ctrl1, NAND_CTRL1);
 
