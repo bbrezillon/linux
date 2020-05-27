@@ -84,9 +84,9 @@ int nand_bbm_get_next_page(struct nand_chip *chip, int page);
 int nand_markbad_bbm(struct nand_chip *chip, loff_t ofs);
 int nand_erase_nand(struct nand_chip *chip, struct erase_info *instr,
 		    int allowbbt);
-int onfi_fill_data_interface(struct nand_chip *chip,
-			     enum nand_data_interface_type type,
-			     int timing_mode);
+int onfi_fill_interface_config(struct nand_chip *chip,
+			      enum nand_interface_type type,
+			      int timing_mode);
 int nand_get_features(struct nand_chip *chip, int addr, u8 *subfeature_param);
 int nand_set_features(struct nand_chip *chip, int addr, u8 *subfeature_param);
 int nand_read_page_raw_notsupp(struct nand_chip *chip, u8 *buf,
@@ -133,7 +133,7 @@ static inline int nand_exec_op(struct nand_chip *chip,
 static inline bool nand_has_setup_data_iface(struct nand_chip *chip)
 {
 	if (!chip->controller || !chip->controller->ops ||
-	    !chip->controller->ops->setup_data_interface)
+	    !chip->controller->ops->setup_interface)
 		return false;
 
 	if (chip->options & NAND_KEEP_TIMINGS)

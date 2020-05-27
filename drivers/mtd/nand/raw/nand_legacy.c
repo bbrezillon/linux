@@ -366,7 +366,7 @@ static void nand_ccs_delay(struct nand_chip *chip)
 	 * (which should be safe for all NANDs).
 	 */
 	if (nand_has_setup_data_iface(chip))
-		ndelay(chip->data_interface.timings.sdr.tCCS_min / 1000);
+		ndelay(chip->interface_config.timings.sdr.tCCS_min / 1000);
 	else
 		ndelay(500);
 }

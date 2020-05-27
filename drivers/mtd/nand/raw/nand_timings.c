@@ -12,7 +12,7 @@
 
 #define ONFI_DYN_TIMING_MAX U16_MAX
 
-static const struct nand_data_interface onfi_sdr_timings[] = {
+static const struct nand_interface_config onfi_sdr_timings[] = {
 	/* Mode 0 */
 	{
 		.type = NAND_SDR_IFACE,
@@ -274,15 +274,15 @@ static const struct nand_data_interface onfi_sdr_timings[] = {
 };
 
 /**
- * onfi_fill_data_interface - [NAND Interface] Initialize a data interface from
- * given ONFI mode
+ * onfi_fill_interface_config - Initialize an interface config from the given
+ *				ONFI mode
  * @mode: The ONFI timing mode
  */
-int onfi_fill_data_interface(struct nand_chip *chip,
-			     enum nand_data_interface_type type,
+int onfi_fill_interface_config(struct nand_chip *chip,
+			     enum nand_interface_type type,
 			     int timing_mode)
 {
-	struct nand_data_interface *iface = &chip->data_interface;
+	struct nand_interface_config *iface = &chip->interface_config;
 	struct onfi_params *onfi = chip->parameters.onfi;
 
 	if (type != NAND_SDR_IFACE)
