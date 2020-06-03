@@ -335,7 +335,7 @@ static int lpc32xx_xmit_dma(struct mtd_info *mtd, void *mem, int len,
 		goto out1;
 	}
 
-	init_completion(&host->comp_dma);
+	reinit_completion(&host->comp_dma);
 	desc->callback = lpc32xx_dma_complete_func;
 	desc->callback_param = &host->comp_dma;
 
@@ -783,6 +783,7 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 
 	init_completion(&host->comp_nand);
 	init_completion(&host->comp_controller);
+	init_completion(&host->comp_dma);
 
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0) {
