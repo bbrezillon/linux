@@ -274,37 +274,6 @@ static void lpc32xx_nand_setup(struct lpc32xx_nand_host *host)
 	writel(MLCCEH_NORMAL, MLC_CEH(host->io_base));
 }
 
-/*
- * Hardware specific access to control lines
- */
-static void lpc32xx_nand_cmd_ctrl(struct nand_chip *nand_chip, int cmd,
-				  unsigned int ctrl)
-{
-	struct lpc32xx_nand_host *host = nand_get_controller_data(nand_chip);
-
-	if (cmd != NAND_CMD_NONE) {
-		if (ctrl & NAND_CLE)
-			writel(cmd, MLC_CMD(host->io_base));
-		else
-			writel(cmd, MLC_ADDR(host->io_base));
-	}
-}
-
-/*
- * Read Device Ready (NAND device _and_ controller ready)
- */
-static int lpc32xx_nand_device_ready(struct nand_chip *nand_chip)
-{
-	struct lpc32xx_nand_host *host = nand_get_controller_data(nand_chip);
-
-	if ((readb(MLC_ISR(host->io_base)) &
-	     (MLCISR_CONTROLLER_READY | MLCISR_NAND_READY)) ==
-	    (MLCISR_CONTROLLER_READY | MLCISR_NAND_READY))
-		return  1;
-
-	return 0;
-}
-
 static irqreturn_t lpc3xxx_nand_irq(int irq, struct lpc32xx_nand_host *host)
 {
 	uint8_t sr;
@@ -317,26 +286,6 @@ static irqreturn_t lpc3xxx_nand_irq(int irq, struct lpc32xx_nand_host *host)
 		complete(&host->comp_controller);
 
 	return IRQ_HANDLED;
-}
-
-static int lpc32xx_waitfunc_nand(struct nand_chip *chip)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-
-	if (readb(MLC_ISR(host->io_base)) & MLCISR_NAND_READY)
-		goto exit;
-
-	wait_for_completion(&host->comp_nand);
-
-	while (!(readb(MLC_ISR(host->io_base)) & MLCISR_NAND_READY)) {
-		/* Seems to be delayed sometimes by controller */
-		dev_dbg(&mtd->dev, "Warning: NAND not ready.\n");
-		cpu_relax();
-	}
-
-exit:
-	return NAND_STATUS_READY;
 }
 
 static int lpc32xx_waitfunc_controller(struct nand_chip *chip)
@@ -356,14 +305,6 @@ static int lpc32xx_waitfunc_controller(struct nand_chip *chip)
 	}
 
 exit:
-	return NAND_STATUS_READY;
-}
-
-static int lpc32xx_waitfunc(struct nand_chip *chip)
-{
-	lpc32xx_waitfunc_nand(chip);
-	lpc32xx_waitfunc_controller(chip);
-
 	return NAND_STATUS_READY;
 }
 
@@ -815,11 +756,6 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	nand_controller_init(&host->base);
 	host->base.ops = &lpc32xx_nand_controller_ops;
 	nand_chip->controller = &host->base;
-	nand_chip->legacy.cmd_ctrl = lpc32xx_nand_cmd_ctrl;
-	nand_chip->legacy.dev_ready = lpc32xx_nand_device_ready;
-	nand_chip->legacy.chip_delay = 25; /* us */
-	nand_chip->legacy.IO_ADDR_R = MLC_DATA(host->io_base);
-	nand_chip->legacy.IO_ADDR_W = MLC_DATA(host->io_base);
 
 	/* Init NAND controller */
 	lpc32xx_nand_setup(host);
@@ -836,7 +772,6 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	nand_chip->ecc.read_oob = lpc32xx_read_oob;
 	nand_chip->ecc.strength = 4;
 	nand_chip->ecc.bytes = 10;
-	nand_chip->legacy.waitfunc = lpc32xx_waitfunc;
 
 	nand_chip->options = NAND_NO_SUBPAGE_WRITE;
 	nand_chip->bbt_options = NAND_BBT_USE_FLASH | NAND_BBT_NO_OOB;
