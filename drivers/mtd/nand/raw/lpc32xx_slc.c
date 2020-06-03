@@ -615,7 +615,7 @@ static int lpc32xx_nand_read_page_syndrome(struct nand_chip *chip, uint8_t *buf,
 	status = lpc32xx_xfer(mtd, buf, chip->ecc.steps, 1);
 
 	/* Get OOB data */
-	chip->legacy.read_buf(chip, chip->oob_poi, mtd->oobsize);
+	nand_read_data_op(chip, chip->oob_poi, mtd->oobsize, false, false);
 
 	/* Convert to stored ECC format */
 	lpc32xx_slc_ecc_copy(tmpecc, (uint32_t *) host->ecc_buf, chip->ecc.steps);
@@ -652,12 +652,9 @@ static int lpc32xx_nand_read_page_raw_syndrome(struct nand_chip *chip,
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 
-	/* Issue read command */
-	nand_read_page_op(chip, page, 0, NULL, 0);
-
-	/* Raw reads can just use the FIFO interface */
-	chip->legacy.read_buf(chip, buf, chip->ecc.size * chip->ecc.steps);
-	chip->legacy.read_buf(chip, chip->oob_poi, mtd->oobsize);
+	/* Issue read command (raw reads can just use the FIFO interface). */
+	nand_read_page_op(chip, page, 0, buf, chip->ecc.size * chip->ecc.steps);
+	nand_read_data_op(chip, chip->oob_poi, mtd->oobsize, false, false);
 
 	return 0;
 }
@@ -695,7 +692,7 @@ static int lpc32xx_nand_write_page_syndrome(struct nand_chip *chip,
 	lpc32xx_slc_ecc_copy(pb, (uint32_t *)host->ecc_buf, chip->ecc.steps);
 
 	/* Write ECC data to device */
-	chip->legacy.write_buf(chip, chip->oob_poi, mtd->oobsize);
+	nand_write_data_op(chip, chip->oob_poi, mtd->oobsize, false);
 
 	return nand_prog_page_end_op(chip);
 }
@@ -713,7 +710,7 @@ static int lpc32xx_nand_write_page_raw_syndrome(struct nand_chip *chip,
 	/* Raw writes can just use the FIFO interface */
 	nand_prog_page_begin_op(chip, page, 0, buf,
 				chip->ecc.size * chip->ecc.steps);
-	chip->legacy.write_buf(chip, chip->oob_poi, mtd->oobsize);
+	nand_write_data_op(chip, chip->oob_poi, mtd->oobsize, false);
 
 	return nand_prog_page_end_op(chip);
 }
