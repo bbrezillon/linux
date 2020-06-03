@@ -215,6 +215,7 @@ struct lpc32xx_nand_cfg_slc {
 };
 
 struct lpc32xx_nand_host {
+	struct nand_controller	base;
 	struct nand_chip	nand_chip;
 	struct lpc32xx_slc_platform_data *pdata;
 	struct clk		*clk;
@@ -865,6 +866,10 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	if (res)
 		goto enable_wp;
 
+	nand_controller_init(&host->base);
+	host->base.ops = &lpc32xx_nand_controller_ops;
+	chip->controller = &host->base;
+
 	/* Set NAND IO addresses and command/ready functions */
 	chip->legacy.IO_ADDR_R = SLC_DATA(host->io_base);
 	chip->legacy.IO_ADDR_W = SLC_DATA(host->io_base);
@@ -912,7 +917,6 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	}
 
 	/* Find NAND device */
-	chip->legacy.dummy_controller.ops = &lpc32xx_nand_controller_ops;
 	res = nand_scan(chip, 1);
 	if (res)
 		goto release_dma;
