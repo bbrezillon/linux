@@ -41,40 +41,6 @@ struct ndfc_controller {
 
 static struct ndfc_controller ndfc_ctrl[NDFC_MAX_CS];
 
-static void ndfc_select_chip(struct nand_chip *nchip, int chip)
-{
-	uint32_t ccr;
-	struct ndfc_controller *ndfc = nand_get_controller_data(nchip);
-
-	ccr = in_be32(ndfc->ndfcbase + NDFC_CCR);
-	if (chip >= 0) {
-		ccr &= ~NDFC_CCR_BS_MASK;
-		ccr |= NDFC_CCR_BS(chip + ndfc->chip_select);
-	} else
-		ccr |= NDFC_CCR_RESET_CE;
-	out_be32(ndfc->ndfcbase + NDFC_CCR, ccr);
-}
-
-static void ndfc_hwcontrol(struct nand_chip *chip, int cmd, unsigned int ctrl)
-{
-	struct ndfc_controller *ndfc = nand_get_controller_data(chip);
-
-	if (cmd == NAND_CMD_NONE)
-		return;
-
-	if (ctrl & NAND_CLE)
-		writel(cmd & 0xFF, ndfc->ndfcbase + NDFC_CMD);
-	else
-		writel(cmd & 0xFF, ndfc->ndfcbase + NDFC_ALE);
-}
-
-static int ndfc_ready(struct nand_chip *chip)
-{
-	struct ndfc_controller *ndfc = nand_get_controller_data(chip);
-
-	return in_be32(ndfc->ndfcbase + NDFC_STAT) & NDFC_STAT_IS_READY;
-}
-
 static void ndfc_enable_hwecc(struct nand_chip *chip, int mode)
 {
 	uint32_t ccr;
@@ -104,31 +70,6 @@ static int ndfc_calculate_ecc(struct nand_chip *chip,
 }
 
 /*
- * Speedups for buffer read/write/verify
- *
- * NDFC allows 32bit read/write of data. So we can speed up the buffer
- * functions. No further checking, as nand_base will always read/write
- * page aligned.
- */
-static void ndfc_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
-{
-	struct ndfc_controller *ndfc = nand_get_controller_data(chip);
-	uint32_t *p = (uint32_t *) buf;
-
-	for(;len > 0; len -= 4)
-		*p++ = in_be32(ndfc->ndfcbase + NDFC_DATA);
-}
-
-static void ndfc_write_buf(struct nand_chip *chip, const uint8_t *buf, int len)
-{
-	struct ndfc_controller *ndfc = nand_get_controller_data(chip);
-	uint32_t *p = (uint32_t *) buf;
-
-	for(;len > 0; len -= 4)
-		out_be32(ndfc->ndfcbase + NDFC_DATA, *p++);
-}
-
-/*
  * Initialize chip structure
  */
 static int ndfc_chip_init(struct ndfc_controller *ndfc,
@@ -139,15 +80,7 @@ static int ndfc_chip_init(struct ndfc_controller *ndfc,
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	int ret;
 
-	chip->legacy.IO_ADDR_R = ndfc->ndfcbase + NDFC_DATA;
-	chip->legacy.IO_ADDR_W = ndfc->ndfcbase + NDFC_DATA;
-	chip->legacy.cmd_ctrl = ndfc_hwcontrol;
-	chip->legacy.dev_ready = ndfc_ready;
-	chip->legacy.select_chip = ndfc_select_chip;
-	chip->legacy.chip_delay = 50;
 	chip->controller = &ndfc->ndfc_control;
-	chip->legacy.read_buf = ndfc_read_buf;
-	chip->legacy.write_buf = ndfc_write_buf;
 	chip->ecc.correct = nand_correct_data;
 	chip->ecc.hwctl = ndfc_enable_hwecc;
 	chip->ecc.calculate = ndfc_calculate_ecc;
