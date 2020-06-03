@@ -268,45 +268,6 @@ static void lpc32xx_nand_setup(struct lpc32xx_nand_host *host)
 }
 
 /*
- * Hardware specific access to control lines
- */
-static void lpc32xx_nand_cmd_ctrl(struct nand_chip *chip, int cmd,
-				  unsigned int ctrl)
-{
-	uint32_t tmp;
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-
-	/* Does CE state need to be changed? */
-	tmp = readl(SLC_CFG(host->io_base));
-	if (ctrl & NAND_NCE)
-		tmp |= SLCCFG_CE_LOW;
-	else
-		tmp &= ~SLCCFG_CE_LOW;
-	writel(tmp, SLC_CFG(host->io_base));
-
-	if (cmd != NAND_CMD_NONE) {
-		if (ctrl & NAND_CLE)
-			writel(cmd, SLC_CMD(host->io_base));
-		else
-			writel(cmd, SLC_ADDR(host->io_base));
-	}
-}
-
-/*
- * Read the Device Ready pin
- */
-static int lpc32xx_nand_device_ready(struct nand_chip *chip)
-{
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-	int rdy = 0;
-
-	if ((readl(SLC_STAT(host->io_base)) & SLCSTAT_NAND_READY) != 0)
-		rdy = 1;
-
-	return rdy;
-}
-
-/*
  * Enable NAND write protect
  */
 static void lpc32xx_wp_enable(struct lpc32xx_nand_host *host)
@@ -344,41 +305,6 @@ static int lpc32xx_nand_ecc_calculate(struct nand_chip *chip,
 	 * and write operations, so it doesn't need to be calculated here.
 	 */
 	return 0;
-}
-
-/*
- * Read a single byte from NAND device
- */
-static uint8_t lpc32xx_nand_read_byte(struct nand_chip *chip)
-{
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-
-	return (uint8_t)readl(SLC_DATA(host->io_base));
-}
-
-/*
- * Simple device read without ECC
- */
-static void lpc32xx_nand_read_buf(struct nand_chip *chip, u_char *buf, int len)
-{
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-
-	/* Direct device read with no ECC */
-	while (len-- > 0)
-		*buf++ = (uint8_t)readl(SLC_DATA(host->io_base));
-}
-
-/*
- * Simple device write without ECC
- */
-static void lpc32xx_nand_write_buf(struct nand_chip *chip, const uint8_t *buf,
-				   int len)
-{
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-
-	/* Direct device write with no ECC */
-	while (len-- > 0)
-		writel((uint32_t)*buf++, SLC_DATA(host->io_base));
 }
 
 /*
@@ -953,13 +879,6 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	host->base.ops = &lpc32xx_nand_controller_ops;
 	chip->controller = &host->base;
 
-	/* Set NAND IO addresses and command/ready functions */
-	chip->legacy.IO_ADDR_R = SLC_DATA(host->io_base);
-	chip->legacy.IO_ADDR_W = SLC_DATA(host->io_base);
-	chip->legacy.cmd_ctrl = lpc32xx_nand_cmd_ctrl;
-	chip->legacy.dev_ready = lpc32xx_nand_device_ready;
-	chip->legacy.chip_delay = 20; /* 20us command delay time */
-
 	/* Init NAND controller */
 	lpc32xx_nand_setup(host);
 
@@ -967,9 +886,6 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 
 	/* NAND callbacks for LPC32xx SLC hardware */
 	chip->ecc.mode = NAND_ECC_HW_SYNDROME;
-	chip->legacy.read_byte = lpc32xx_nand_read_byte;
-	chip->legacy.read_buf = lpc32xx_nand_read_buf;
-	chip->legacy.write_buf = lpc32xx_nand_write_buf;
 	chip->ecc.read_page_raw = lpc32xx_nand_read_page_raw_syndrome;
 	chip->ecc.read_page = lpc32xx_nand_read_page_syndrome;
 	chip->ecc.write_page_raw = lpc32xx_nand_write_page_raw_syndrome;
