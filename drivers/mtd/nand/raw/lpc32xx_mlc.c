@@ -288,26 +288,6 @@ static irqreturn_t lpc3xxx_nand_irq(int irq, struct lpc32xx_nand_host *host)
 	return IRQ_HANDLED;
 }
 
-static int lpc32xx_waitfunc_controller(struct nand_chip *chip)
-{
-	struct mtd_info *mtd = nand_to_mtd(chip);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-
-	if (readb(MLC_ISR(host->io_base)) & MLCISR_CONTROLLER_READY)
-		goto exit;
-
-	wait_for_completion(&host->comp_controller);
-
-	while (!(readb(MLC_ISR(host->io_base)) &
-		 MLCISR_CONTROLLER_READY)) {
-		dev_dbg(&mtd->dev, "Warning: Controller not ready.\n");
-		cpu_relax();
-	}
-
-exit:
-	return NAND_STATUS_READY;
-}
-
 /*
  * Enable NAND write protect
  */
@@ -393,6 +373,9 @@ static int lpc32xx_read_page(struct nand_chip *chip, uint8_t *buf,
 		dma_mapped = false;
 	}
 
+	/* Re-initialize the completion object. */
+	reinit_completion(&host->comp_controller);
+
 	/* Writing Command and Address */
 	nand_read_page_op(chip, page, 0, NULL, 0);
 
@@ -402,7 +385,10 @@ static int lpc32xx_read_page(struct nand_chip *chip, uint8_t *buf,
 		writeb(0x00, MLC_ECC_AUTO_DEC_REG(host->io_base));
 
 		/* Wait for Controller Ready */
-		lpc32xx_waitfunc_controller(chip);
+		if (!wait_for_completion_timeout(&host->comp_controller,
+						 msecs_to_jiffies(1000)) &&
+		    !(readb(MLC_ISR(host->io_base)) & MLCISR_CONTROLLER_READY))
+			return -ETIMEDOUT;
 
 		/* Check ECC Error status */
 		mlc_isr = readl(MLC_ISR(host->io_base));
@@ -455,6 +441,9 @@ static int lpc32xx_write_page_lowlevel(struct nand_chip *chip,
 		memcpy(dma_buf, buf, mtd->writesize);
 	}
 
+	/* Re-initialize the completion object. */
+	reinit_completion(&host->comp_controller);
+
 	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 
 	for (i = 0; i < host->mlcsubpages; i++) {
@@ -483,7 +472,10 @@ static int lpc32xx_write_page_lowlevel(struct nand_chip *chip,
 		writeb(0x00, MLC_ECC_AUTO_ENC_REG(host->io_base));
 
 		/* Wait for Controller Ready */
-		lpc32xx_waitfunc_controller(chip);
+		if (!wait_for_completion_timeout(&host->comp_controller,
+						 msecs_to_jiffies(1000)) &&
+		    !(readb(MLC_ISR(host->io_base)) & MLCISR_CONTROLLER_READY))
+			return -ETIMEDOUT;
 	}
 
 	return nand_prog_page_end_op(chip);
