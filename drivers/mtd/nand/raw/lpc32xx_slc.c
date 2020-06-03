@@ -19,7 +19,7 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/delay.h>
-#include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
@@ -804,8 +804,91 @@ static int lpc32xx_nand_attach_chip(struct nand_chip *chip)
 	return 0;
 }
 
+static int lpc32xx_nand_exec_instr(struct nand_chip *nand_chip,
+				   const struct nand_op_instr *instr)
+{
+	struct lpc32xx_nand_host *host = nand_get_controller_data(nand_chip);
+	unsigned int i;
+	u32 stat;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		writel(instr->ctx.cmd.opcode, SLC_CMD(host->io_base));
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			writel(instr->ctx.addr.addrs[i], SLC_ADDR(host->io_base));
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		if ((nand_chip->options & NAND_BUSWIDTH_16) &&
+		    !instr->ctx.data.force_8bit)
+			ioread16_rep(SLC_DATA(host->io_base),
+				     instr->ctx.data.buf.in,
+				     instr->ctx.data.len / 2);
+		else
+			ioread8_rep(SLC_DATA(host->io_base),
+				    instr->ctx.data.buf.in,
+				    instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		if ((nand_chip->options & NAND_BUSWIDTH_16) &&
+		    !instr->ctx.data.force_8bit)
+			iowrite16_rep(SLC_DATA(host->io_base),
+				      instr->ctx.data.buf.out,
+				      instr->ctx.data.len / 2);
+		else
+			iowrite8_rep(SLC_DATA(host->io_base),
+				     instr->ctx.data.buf.out,
+				     instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		return readl_poll_timeout_atomic(SLC_STAT(host->io_base), stat,
+						 stat & SLCSTAT_NAND_READY, 10,
+						 instr->ctx.waitrdy.timeout_ms * 1000);
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int lpc32xx_nand_exec_op(struct nand_chip *nand_chip,
+				const struct nand_operation *op,
+				bool check_only)
+{
+	struct lpc32xx_nand_host *host = nand_get_controller_data(nand_chip);
+	unsigned int i;
+	int ret = 0;
+	u32 cfg;
+
+	if (check_only)
+		return 0;
+
+	cfg = readl(SLC_CFG(host->io_base));
+	writel(cfg | SLCCFG_CE_LOW, SLC_CFG(host->io_base));
+
+	for (i = 0; i < op->ninstrs; i++) {
+		ret = lpc32xx_nand_exec_instr(nand_chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_ns)
+			ndelay(op->instrs[i].delay_ns);
+	}
+
+	writel(cfg, SLC_CFG(host->io_base));
+
+	return ret;
+}
+
 static const struct nand_controller_ops lpc32xx_nand_controller_ops = {
 	.attach_chip = lpc32xx_nand_attach_chip,
+	.exec_op = lpc32xx_nand_exec_op,
 };
 
 /*
