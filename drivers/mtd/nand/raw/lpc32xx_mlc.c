@@ -174,6 +174,7 @@ static struct nand_bbt_descr lpc32xx_nand_bbt_mirror = {
 };
 
 struct lpc32xx_nand_host {
+	struct nand_controller	base;
 	struct platform_device	*pdev;
 	struct nand_chip	nand_chip;
 	struct lpc32xx_mlc_platform_data *pdata;
@@ -729,6 +730,9 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	if (res)
 		goto put_clk;
 
+	nand_controller_init(&host->base);
+	host->base.ops = &lpc32xx_nand_controller_ops;
+	nand_chip->controller = &host->base;
 	nand_chip->legacy.cmd_ctrl = lpc32xx_nand_cmd_ctrl;
 	nand_chip->legacy.dev_ready = lpc32xx_nand_device_ready;
 	nand_chip->legacy.chip_delay = 25; /* us */
@@ -788,7 +792,6 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	 * Scan to find existence of the device and get the type of NAND device:
 	 * SMALL block or LARGE block.
 	 */
-	nand_chip->legacy.dummy_controller.ops = &lpc32xx_nand_controller_ops;
 	res = nand_scan(nand_chip, 1);
 	if (res)
 		goto free_irq;
