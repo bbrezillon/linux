@@ -1534,7 +1534,7 @@ static int omap_write_page_bch(struct nand_chip *chip, const uint8_t *buf,
 	chip->ecc.hwctl(chip, NAND_ECC_WRITE);
 
 	/* Write data */
-	chip->legacy.write_buf(chip, buf, mtd->writesize);
+	nand_write_data_op(chip, buf, mtd->writesize, false);
 
 	/* Update ecc vector from GPMC result registers */
 	omap_calculate_ecc_bch_multi(mtd, buf, &ecc_calc[0]);
@@ -1545,7 +1545,7 @@ static int omap_write_page_bch(struct nand_chip *chip, const uint8_t *buf,
 		return ret;
 
 	/* Write ecc vector to OOB area */
-	chip->legacy.write_buf(chip, chip->oob_poi, mtd->oobsize);
+	nand_write_data_op(chip, chip->oob_poi, mtd->oobsize, false);
 
 	return nand_prog_page_end_op(chip);
 }
@@ -1586,7 +1586,7 @@ static int omap_write_subpage_bch(struct nand_chip *chip, u32 offset,
 	chip->ecc.hwctl(chip, NAND_ECC_WRITE);
 
 	/* Write data */
-	chip->legacy.write_buf(chip, buf, mtd->writesize);
+	nand_write_data_op(chip, buf, mtd->writesize, false);
 
 	for (step = 0; step < ecc_steps; step++) {
 		/* mask ECC of un-touched subpages by padding 0xFF */
@@ -1611,7 +1611,7 @@ static int omap_write_subpage_bch(struct nand_chip *chip, u32 offset,
 		return ret;
 
 	/* write OOB buffer to NAND device */
-	chip->legacy.write_buf(chip, chip->oob_poi, mtd->oobsize);
+	nand_write_data_op(chip, chip->oob_poi, mtd->oobsize, false);
 
 	return nand_prog_page_end_op(chip);
 }
@@ -1645,7 +1645,7 @@ static int omap_read_page_bch(struct nand_chip *chip, uint8_t *buf,
 	chip->ecc.hwctl(chip, NAND_ECC_READ);
 
 	/* Read data */
-	chip->legacy.read_buf(chip, buf, mtd->writesize);
+	nand_read_data_op(chip, buf, mtd->writesize, false, false);
 
 	/* Read oob bytes */
 	nand_change_read_column_op(chip,
