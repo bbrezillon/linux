@@ -753,12 +753,35 @@ static void cafe_nand_detach_chip(struct nand_chip *chip)
 	dma_free_coherent(&cafe->pdev->dev, 2112, cafe->dmabuf, cafe->dmaaddr);
 }
 
+static void cafe_data_out(struct cafe_priv *cafe,
+                          const void *buf, unsigned int len)
+{
+	if (cafe->usedma)
+		memcpy(cafe->dmabuf, buf, len);
+	else
+		memcpy_toio(cafe->mmio + CAFE_NAND_WRITE_DATA, buf, len);
+}
+
+static void cafe_data_in(struct cafe_priv *cafe, bool non_mem_read,
+                         void *buf, unsigned int len)
+{
+	if (non_mem_read) {
+		u32 rd = cafe_readl(cafe, NAND_NONMEM_READ_DATA);
+
+		memcpy(buf, &rd, min_t(unsigned int, len, 4));
+	} else if (cafe->usedma) {
+		memcpy(buf, cafe->dmabuf, len);
+	} else {
+		memcpy_fromio(buf, cafe->mmio + CAFE_NAND_READ_DATA, len);
+	}
+}
+
 static int cafe_nand_exec_subop(struct nand_chip *chip,
 				const struct nand_subop *subop)
 {
 	struct cafe_priv *cafe = nand_get_controller_data(chip);
 	u32 ctrl1 = 0, ctrl2 = cafe->ctl2, addr1 = 0, addr2 = 0;
-	u32 status, wait = CAFE_NAND_IRQ_CMD_DONE;
+	u32 status, dmactrl = 0, wait = CAFE_NAND_IRQ_CMD_DONE;
 	int ret, data_instr = -1;
 	bool waitrdy = false;
 	unsigned int i, j;
@@ -801,16 +824,21 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 
 		case NAND_OP_DATA_IN_INSTR:
 			data_instr = i;
-			ctrl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
+			if (ctrl1 & CAFE_NAND_CTRL1_HAS_ADDR) {
+				ctrl1 |= CAFE_NAND_CTRL1_HAS_DATA_IN;
+			} else {
+				ctrl1 |= CAFE_FIELD_PREP(NAND_CTRL1,
+							 NUM_NONMEM_READ_LOW,
+							 instr->ctx.data.len & 1) |
+					 CAFE_FIELD_PREP(NAND_CTRL1,
+							 NUM_NONMEM_READ_HIGH,
+							 instr->ctx.data.len >> 1);
+			}
 			break;
 
 		case NAND_OP_DATA_OUT_INSTR:
 			data_instr = i;
 			ctrl1 |= CAFE_NAND_CTRL1_HAS_DATA_OUT;
-			cafe_write_buf(chip,
-				       instr->ctx.data.buf.out +
-				       nand_subop_get_data_start_off(subop, i),
-				       nand_subop_get_data_len(subop, i));
 			break;
 
 		case NAND_OP_WAITRDY_INSTR:
@@ -825,17 +853,15 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 			    NAND_DATA_LEN);
 	}
 
-	if (cafe->usedma && data_instr >= 0) {
-		u32 dmactrl = CAFE_NAND_DMA_CTRL_ENABLE |
-			      CAFE_NAND_DMA_CTRL_RESERVED;
-
-		dmactrl |= CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
+	if (cafe->usedma && data_instr >= 0 &&
+	    (ctrl1 & CAFE_NAND_CTRL1_HAS_ADDR)) {
+		dmactrl |= CAFE_NAND_DMA_CTRL_ENABLE |
+			   CAFE_NAND_DMA_CTRL_RESERVED |
+			   CAFE_FIELD_PREP(NAND_DMA_CTRL, DATA_LEN,
 					   nand_subop_get_data_len(subop,
 								   data_instr));
 		if (ctrl1 & CAFE_NAND_CTRL1_HAS_DATA_IN)
 			dmactrl |= CAFE_NAND_DMA_CTRL_DATA_IN;
-
-		cafe_writel(cafe, dmactrl, NAND_DMA_CTRL);
 
 		/*
 		 * If the last instruction is a data transfer and we're using
@@ -848,9 +874,17 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 		}
 	}
 
+	if (ctrl1 & CAFE_NAND_CTRL1_HAS_DATA_OUT) {
+		cafe_data_out(cafe,
+			      subop->instrs[data_instr].ctx.data.buf.out +
+			      nand_subop_get_data_start_off(subop, data_instr),
+			      nand_subop_get_data_len(subop, data_instr));
+	}
+
 	/* Clear pending interrupts before starting the operation. */
 	cafe_writel(cafe, wait, NAND_IRQ);
 
+	cafe_writel(cafe, dmactrl, NAND_DMA_CTRL);
 	cafe_writel(cafe, ctrl2, NAND_CTRL2);
 	cafe_writel(cafe, ctrl1, NAND_CTRL1);
 
@@ -861,10 +895,10 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 		return ret;
 
 	if (ctrl1 & CAFE_NAND_CTRL1_HAS_DATA_IN) {
-		cafe_read_buf(chip,
-			      subop->instrs[data_instr].ctx.data.buf.in +
-			      nand_subop_get_data_start_off(subop, data_instr),
-			      nand_subop_get_data_len(subop, data_instr));
+		cafe_data_in(cafe, !!(ctrl1 & CAFE_NAND_CTRL1_HAS_ADDR),
+			     subop->instrs[data_instr].ctx.data.buf.in +
+			     nand_subop_get_data_start_off(subop, data_instr),
+			     nand_subop_get_data_len(subop, data_instr));
 	}
 
 	return 0;
@@ -872,16 +906,20 @@ static int cafe_nand_exec_subop(struct nand_chip *chip,
 
 static const struct nand_op_parser cafe_nand_op_parser = NAND_OP_PARSER(
 	NAND_OP_PARSER_PATTERN(cafe_nand_exec_subop,
-			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
-			       NAND_OP_PARSER_PAT_ADDR_ELEM(true, 5),
+			       NAND_OP_PARSER_PAT_CMD_ELEM(false),
+			       NAND_OP_PARSER_PAT_ADDR_ELEM(false, 5),
 			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
 			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(true),
 			       NAND_OP_PARSER_PAT_DATA_IN_ELEM(true, 2112)),
 	NAND_OP_PARSER_PATTERN(cafe_nand_exec_subop,
-			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
-			       NAND_OP_PARSER_PAT_ADDR_ELEM(true, 5),
+			       NAND_OP_PARSER_PAT_CMD_ELEM(false),
+			       NAND_OP_PARSER_PAT_ADDR_ELEM(false, 5),
 			       NAND_OP_PARSER_PAT_DATA_OUT_ELEM(true, 2112),
 			       NAND_OP_PARSER_PAT_CMD_ELEM(true),
+			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(true)),
+	NAND_OP_PARSER_PATTERN(cafe_nand_exec_subop,
+			       NAND_OP_PARSER_PAT_CMD_ELEM(false),
+			       NAND_OP_PARSER_PAT_DATA_IN_ELEM(true, 4),
 			       NAND_OP_PARSER_PAT_WAITRDY_ELEM(true))
 );
 
