@@ -22,6 +22,7 @@
 #include <linux/platform_data/mtd-orion_nand.h>
 
 struct orion_nand_info {
+	struct nand_controller base;
 	struct nand_chip chip;
 	struct clk *clk;
 };
@@ -134,6 +135,8 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 
 	mtd->dev.parent = &pdev->dev;
 
+	nand_controller_init(&info->base);
+	nc->controller = &info->base;
 	nand_set_controller_data(nc, board);
 	nand_set_flash_node(nc, pdev->dev.of_node);
 	nc->legacy.IO_ADDR_R = nc->legacy.IO_ADDR_W = io_base;
