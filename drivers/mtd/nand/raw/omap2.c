@@ -237,33 +237,6 @@ static int omap_prefetch_reset(int cs, struct omap_nand_info *info)
 }
 
 /**
- * omap_hwcontrol - hardware specific access to control-lines
- * @chip: NAND chip object
- * @cmd: command to device
- * @ctrl:
- * NAND_NCE: bit 0 -> don't care
- * NAND_CLE: bit 1 -> Command Latch
- * NAND_ALE: bit 2 -> Address Latch
- *
- * NOTE: boards may use different bits for these!!
- */
-static void omap_hwcontrol(struct nand_chip *chip, int cmd, unsigned int ctrl)
-{
-	struct omap_nand_info *info = mtd_to_omap(nand_to_mtd(chip));
-
-	if (cmd != NAND_CMD_NONE) {
-		if (ctrl & NAND_CLE)
-			writeb(cmd, info->reg.gpmc_nand_command);
-
-		else if (ctrl & NAND_ALE)
-			writeb(cmd, info->reg.gpmc_nand_address);
-
-		else /* NAND_NCE */
-			writeb(cmd, info->reg.gpmc_nand_data);
-	}
-}
-
-/**
  * omap_read_buf8 - read data from NAND controller into buffer
  * @mtd: MTD device structure
  * @buf: buffer to store date
@@ -975,50 +948,6 @@ static void omap_enable_hwecc(struct nand_chip *chip, int mode)
 	/* (ECC 16 or 8 bit col) | ( CS  )  | ECC Enable */
 	val = (dev_width << 7) | (info->gpmc_cs << 1) | (0x1);
 	writel(val, info->reg.gpmc_ecc_config);
-}
-
-/**
- * omap_wait - wait until the command is done
- * @this: NAND Chip structure
- *
- * Wait function is called during Program and erase operations and
- * the way it is called from MTD layer, we should wait till the NAND
- * chip is ready after the programming/erase operation has completed.
- *
- * Erase can take up to 400ms and program up to 20ms according to
- * general NAND and SmartMedia specs
- */
-static int omap_wait(struct nand_chip *this)
-{
-	struct omap_nand_info *info = mtd_to_omap(nand_to_mtd(this));
-	unsigned long timeo = jiffies;
-	int status;
-
-	timeo += msecs_to_jiffies(400);
-
-	writeb(NAND_CMD_STATUS & 0xFF, info->reg.gpmc_nand_command);
-	while (time_before(jiffies, timeo)) {
-		status = readb(info->reg.gpmc_nand_data);
-		if (status & NAND_STATUS_READY)
-			break;
-		cond_resched();
-	}
-
-	status = readb(info->reg.gpmc_nand_data);
-	return status;
-}
-
-/**
- * omap_dev_ready - checks the NAND Ready GPIO line
- * @mtd: MTD device structure
- *
- * Returns true if ready and false if busy.
- */
-static int omap_dev_ready(struct nand_chip *chip)
-{
-	struct omap_nand_info *info = mtd_to_omap(nand_to_mtd(chip));
-
-	return gpiod_get_value(info->ready_gpiod);
 }
 
 /**
@@ -1928,12 +1857,8 @@ static int omap_nand_attach_chip(struct nand_chip *chip)
 	/* Re-populate low-level callbacks based on xfer modes */
 	switch (info->xfer_type) {
 	case NAND_OMAP_PREFETCH_POLLED:
-		chip->legacy.read_buf = omap_read_buf_pref;
-		chip->legacy.write_buf = omap_write_buf_pref;
-		break;
-
 	case NAND_OMAP_POLLED:
-		/* Use nand_base defaults for {read,write}_buf */
+		/* Nothing to prepare. */
 		break;
 
 	case NAND_OMAP_PREFETCH_DMA:
@@ -1961,8 +1886,6 @@ static int omap_nand_attach_chip(struct nand_chip *chip)
 					err);
 				return err;
 			}
-			chip->legacy.read_buf = omap_read_buf_dma_pref;
-			chip->legacy.write_buf = omap_write_buf_dma_pref;
 		}
 		break;
 
@@ -1992,9 +1915,6 @@ static int omap_nand_attach_chip(struct nand_chip *chip)
 			info->gpmc_irq_count = 0;
 			return err;
 		}
-
-		chip->legacy.read_buf = omap_read_buf_irq_pref;
-		chip->legacy.write_buf = omap_write_buf_irq_pref;
 
 		break;
 
@@ -2352,30 +2272,11 @@ static int omap_nand_probe(struct platform_device *pdev)
 
 	nand_chip->controller = &omap_gpmc_controller;
 
-	nand_chip->legacy.IO_ADDR_R = info->io;
-	nand_chip->legacy.IO_ADDR_W = info->io;
-	nand_chip->legacy.cmd_ctrl  = omap_hwcontrol;
-
 	info->ready_gpiod = devm_gpiod_get_optional(&pdev->dev, "rb",
 						    GPIOD_IN);
 	if (IS_ERR(info->ready_gpiod)) {
 		dev_err(dev, "failed to get ready gpio\n");
 		return PTR_ERR(info->ready_gpiod);
-	}
-
-	/*
-	 * If RDY/BSY line is connected to OMAP then use the omap ready
-	 * function and the generic nand_wait function which reads the status
-	 * register after monitoring the RDY/BSY line. Otherwise use a standard
-	 * chip delay which is slightly more than tR (AC Timing) of the NAND
-	 * device and read status register until you get a failure or success
-	 */
-	if (info->ready_gpiod) {
-		nand_chip->legacy.dev_ready = omap_dev_ready;
-		nand_chip->legacy.chip_delay = 0;
-	} else {
-		nand_chip->legacy.waitfunc = omap_wait;
-		nand_chip->legacy.chip_delay = 50;
 	}
 
 	if (info->flash_bbt)
