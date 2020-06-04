@@ -94,7 +94,7 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 	dev_dbg(dev, "pasemi_nand at %pR\n", &res);
 
 	/* Allocate memory for MTD device structure and private data */
-	chip = kzalloc(sizeof(struct nand_chip), GFP_KERNEL);
+	chip = devm_kzalloc(&ofdev->dev, sizeof(struct nand_chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 
@@ -106,10 +106,8 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 	chip->legacy.IO_ADDR_R = of_iomap(np, 0);
 	chip->legacy.IO_ADDR_W = chip->legacy.IO_ADDR_R;
 
-	if (!chip->legacy.IO_ADDR_R) {
-		err = -EIO;
-		goto out_mtd;
-	}
+	if (!chip->legacy.IO_ADDR_R)
+		return -EIO;
 
 	pdev = pci_get_device(PCI_VENDOR_ID_PASEMI, 0xa008, NULL);
 	if (!pdev) {
@@ -158,8 +156,6 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 	release_region(lpcctl, 4);
  out_ior:
 	iounmap(chip->legacy.IO_ADDR_R);
- out_mtd:
-	kfree(chip);
 	return err;
 }
 
@@ -181,9 +177,6 @@ static int pasemi_nand_remove(struct platform_device *ofdev)
 	release_region(lpcctl, 4);
 
 	iounmap(chip->legacy.IO_ADDR_R);
-
-	/* Free the MTD device structure */
-	kfree(chip);
 
 	pasemi_nand_mtd = NULL;
 
