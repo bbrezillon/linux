@@ -2159,8 +2159,137 @@ static int omap_nand_attach_chip(struct nand_chip *chip)
 	return 0;
 }
 
+static void omap_nand_data_in(struct nand_chip *chip, void *buf,
+			      unsigned int len, bool force_8bit)
+{
+	struct omap_nand_info *info = mtd_to_omap(nand_to_mtd(chip));
+
+	if (force_8bit) {
+		ioread8_rep(info->io, buf, len);
+		return;
+	}
+
+	switch (info->xfer_type) {
+	case NAND_OMAP_PREFETCH_POLLED:
+		omap_read_buf_pref(chip, buf, len);
+		break;
+
+	case NAND_OMAP_POLLED:
+		if (chip->options & NAND_BUSWIDTH_16)
+			ioread16_rep(info->io, buf, len / 2);
+		else
+			ioread8_rep(info->io, buf, len);
+		break;
+
+	case NAND_OMAP_PREFETCH_DMA:
+		omap_read_buf_dma_pref(chip, buf, len);
+		break;
+
+	case NAND_OMAP_PREFETCH_IRQ:
+		omap_read_buf_irq_pref(chip, buf, len);
+		break;
+	}
+}
+
+static void omap_nand_data_out(struct nand_chip *chip, const void *buf,
+			       unsigned int len, bool force_8bit)
+{
+	struct omap_nand_info *info = mtd_to_omap(nand_to_mtd(chip));
+
+	if (force_8bit) {
+		iowrite8_rep(info->io, buf, len);
+		return;
+	}
+
+	switch (info->xfer_type) {
+	case NAND_OMAP_PREFETCH_POLLED:
+		omap_write_buf_pref(chip, buf, len);
+		break;
+
+	case NAND_OMAP_POLLED:
+		if (chip->options & NAND_BUSWIDTH_16)
+			iowrite16_rep(info->io, buf, len / 2);
+		else
+			iowrite8_rep(info->io, buf, len);
+		break;
+
+	case NAND_OMAP_PREFETCH_DMA:
+		omap_write_buf_dma_pref(chip, buf, len);
+		break;
+
+	case NAND_OMAP_PREFETCH_IRQ:
+		omap_write_buf_irq_pref(chip, buf, len);
+		break;
+	}
+}
+
+static int omap_nand_exec_instr(struct nand_chip *chip,
+				const struct nand_op_instr *instr)
+{
+	struct omap_nand_info *info = mtd_to_omap(nand_to_mtd(chip));
+	unsigned int i;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		writeb(instr->ctx.cmd.opcode, info->reg.gpmc_nand_command);
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			writeb(instr->ctx.addr.addrs[i], info->reg.gpmc_nand_address);
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		omap_nand_data_in(chip, instr->ctx.data.buf.in,
+				  instr->ctx.data.len,
+				  instr->ctx.data.force_8bit);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		omap_nand_data_out(chip, instr->ctx.data.buf.out,
+				   instr->ctx.data.len,
+				   instr->ctx.data.force_8bit);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		if (!info->ready_gpiod)
+			return nand_soft_waitrdy(chip, instr->ctx.waitrdy.timeout_ms);
+
+		return nand_gpio_waitrdy(chip, info->ready_gpiod,
+					 instr->ctx.waitrdy.timeout_ms);
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int omap_nand_exec_op(struct nand_chip *chip,
+			     const struct nand_operation *op,
+			     bool check_only)
+{
+	unsigned int i;
+	int ret = 0;
+
+	if (check_only)
+		return 0;
+
+	for (i = 0; i < op->ninstrs; i++) {
+		ret = omap_nand_exec_instr(chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_ns)
+			ndelay(op->instrs[i].delay_ns);
+	}
+
+	return ret;
+}
+
 static const struct nand_controller_ops omap_nand_controller_ops = {
 	.attach_chip = omap_nand_attach_chip,
+	.exec_op = omap_nand_exec_op,
 };
 
 /* Shared among all NAND instances to synchronize access to the ECC Engine */
