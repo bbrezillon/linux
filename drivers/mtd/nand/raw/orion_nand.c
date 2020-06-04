@@ -24,13 +24,20 @@
 struct orion_nand_info {
 	struct nand_controller base;
 	struct nand_chip chip;
+	void __iomem *io_base;
 	struct clk *clk;
 };
+
+static struct orion_nand_info *chip_to_info(struct nand_chip *nc)
+{
+	return container_of(nc, struct orion_nand_info, chip);
+}
 
 static void orion_nand_cmd_ctrl(struct nand_chip *nc, int cmd,
 				unsigned int ctrl)
 {
 	struct orion_nand_data *board = nand_get_controller_data(nc);
+	struct orion_nand_info *info = chip_to_info(nc);
 	u32 offs;
 
 	if (cmd == NAND_CMD_NONE)
@@ -46,12 +53,13 @@ static void orion_nand_cmd_ctrl(struct nand_chip *nc, int cmd,
 	if (nc->options & NAND_BUSWIDTH_16)
 		offs <<= 1;
 
-	writeb(cmd, nc->legacy.IO_ADDR_W + offs);
+	writeb(cmd, info->io_base + offs);
 }
 
 static void orion_nand_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
 {
-	void __iomem *io_base = chip->legacy.IO_ADDR_R;
+	struct orion_nand_info *info = chip_to_info(chip);
+	void __iomem *io_base = info->io_base;
 #if defined(__LINUX_ARM_ARCH__) && __LINUX_ARM_ARCH__ >= 5
 	uint64_t *buf64;
 #endif
@@ -90,7 +98,6 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	struct nand_chip *nc;
 	struct orion_nand_data *board;
 	struct resource *res;
-	void __iomem *io_base;
 	int ret = 0;
 	u32 val = 0;
 
@@ -103,10 +110,9 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	mtd = nand_to_mtd(nc);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	io_base = devm_ioremap_resource(&pdev->dev, res);
-
-	if (IS_ERR(io_base))
-		return PTR_ERR(io_base);
+	info->io_base = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(info->io_base))
+		return PTR_ERR(info->io_base);
 
 	if (pdev->dev.of_node) {
 		board = devm_kzalloc(&pdev->dev, sizeof(struct orion_nand_data),
@@ -139,7 +145,7 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	nc->controller = &info->base;
 	nand_set_controller_data(nc, board);
 	nand_set_flash_node(nc, pdev->dev.of_node);
-	nc->legacy.IO_ADDR_R = nc->legacy.IO_ADDR_W = io_base;
+	nc->legacy.IO_ADDR_R = nc->legacy.IO_ADDR_W = info->io_base;
 	nc->legacy.cmd_ctrl = orion_nand_cmd_ctrl;
 	nc->legacy.read_buf = orion_nand_read_buf;
 	nc->ecc.mode = NAND_ECC_SOFT;
