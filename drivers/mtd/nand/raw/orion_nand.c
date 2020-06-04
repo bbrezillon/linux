@@ -8,6 +8,7 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -84,6 +85,77 @@ static void orion_nand_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
 		buf[i++] = readb(io_base);
 }
 
+static int orion_nand_exec_instr(struct nand_chip *chip,
+				const struct nand_op_instr *instr)
+{
+	struct orion_nand_info *info = chip_to_info(chip);
+	unsigned int i;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		writeb(instr->ctx.cmd.opcode, info->io_base + info->cle_offs);
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			writeb(instr->ctx.addr.addrs[i], info->io_base + info->ale_offs);
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		if (instr->ctx.data.force_8bit)
+			ioread8_rep(info->io_base, instr->ctx.data.buf.in,
+				    instr->ctx.data.len);
+		else
+			orion_nand_read_buf(chip, instr->ctx.data.buf.in,
+					    instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		if ((chip->options & NAND_BUSWIDTH_16) &&
+		    !instr->ctx.data.force_8bit)
+			iowrite16_rep(info->io_base, instr->ctx.data.buf.out,
+				      instr->ctx.data.len / 2);
+		else
+			iowrite8_rep(info->io_base, instr->ctx.data.buf.out,
+				     instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		return nand_soft_waitrdy(chip, instr->ctx.waitrdy.timeout_ms);
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int orion_nand_exec_op(struct nand_chip *chip,
+			     const struct nand_operation *op,
+			     bool check_only)
+{
+	unsigned int i;
+	int ret = 0;
+
+	if (check_only)
+		return 0;
+
+	for (i = 0; i < op->ninstrs; i++) {
+		ret = orion_nand_exec_instr(chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_ns)
+			ndelay(op->instrs[i].delay_ns);
+	}
+
+	return ret;
+}
+
+static const struct nand_controller_ops orion_nand_ops = {
+	.exec_op = orion_nand_exec_op,
+};
+
 static int __init orion_nand_probe(struct platform_device *pdev)
 {
 	struct orion_nand_info *info;
@@ -135,6 +207,7 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	mtd->dev.parent = &pdev->dev;
 
 	nand_controller_init(&info->base);
+	info->base.ops = &orion_nand_ops;
 	nc->controller = &info->base;
 	nand_set_controller_data(nc, board);
 	nand_set_flash_node(nc, pdev->dev.of_node);
