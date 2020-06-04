@@ -14,6 +14,7 @@
 #include <linux/mtd/platnand.h>
 
 struct plat_nand_data {
+	struct nand_controller	base;
 	struct nand_chip	chip;
 	void __iomem		*io_base;
 };
@@ -51,10 +52,13 @@ static int plat_nand_probe(struct platform_device *pdev)
 	if (IS_ERR(data->io_base))
 		return PTR_ERR(data->io_base);
 
+	nand_controller_init(&data->base);
+
 	nand_set_flash_node(&data->chip, pdev->dev.of_node);
 	mtd = nand_to_mtd(&data->chip);
 	mtd->dev.parent = &pdev->dev;
 
+	data->chip.controller = &data->base;
 	data->chip.legacy.IO_ADDR_R = data->io_base;
 	data->chip.legacy.IO_ADDR_W = data->io_base;
 	data->chip.legacy.cmd_ctrl = pdata->ctrl.cmd_ctrl;
