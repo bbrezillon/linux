@@ -26,6 +26,8 @@ struct orion_nand_info {
 	struct nand_chip chip;
 	void __iomem *io_base;
 	struct clk *clk;
+	u32 cle_offs;
+	u32 ale_offs;
 };
 
 static struct orion_nand_info *chip_to_info(struct nand_chip *nc)
@@ -36,24 +38,15 @@ static struct orion_nand_info *chip_to_info(struct nand_chip *nc)
 static void orion_nand_cmd_ctrl(struct nand_chip *nc, int cmd,
 				unsigned int ctrl)
 {
-	struct orion_nand_data *board = nand_get_controller_data(nc);
 	struct orion_nand_info *info = chip_to_info(nc);
-	u32 offs;
 
 	if (cmd == NAND_CMD_NONE)
 		return;
 
 	if (ctrl & NAND_CLE)
-		offs = (1 << board->cle);
+		writeb(cmd, info->io_base + info->cle_offs);
 	else if (ctrl & NAND_ALE)
-		offs = (1 << board->ale);
-	else
-		return;
-
-	if (nc->options & NAND_BUSWIDTH_16)
-		offs <<= 1;
-
-	writeb(cmd, info->io_base + offs);
+		writeb(cmd, info->io_base + info->ale_offs);
 }
 
 static void orion_nand_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
@@ -158,8 +151,14 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 		"%d bit bus width out of range",
 		board->width);
 
-	if (board->width == 16)
+	info->cle_offs = 1 << board->cle;
+	info->ale_offs = 1 << board->ale;
+
+	if (board->width == 16) {
 		nc->options |= NAND_BUSWIDTH_16;
+		info->cle_offs <<= 1;
+		info->ale_offs <<= 1;
+	}
 
 	platform_set_drvdata(pdev, info);
 
