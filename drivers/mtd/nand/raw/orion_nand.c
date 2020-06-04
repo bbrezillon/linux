@@ -36,20 +36,6 @@ static struct orion_nand_info *chip_to_info(struct nand_chip *nc)
 	return container_of(nc, struct orion_nand_info, chip);
 }
 
-static void orion_nand_cmd_ctrl(struct nand_chip *nc, int cmd,
-				unsigned int ctrl)
-{
-	struct orion_nand_info *info = chip_to_info(nc);
-
-	if (cmd == NAND_CMD_NONE)
-		return;
-
-	if (ctrl & NAND_CLE)
-		writeb(cmd, info->io_base + info->cle_offs);
-	else if (ctrl & NAND_ALE)
-		writeb(cmd, info->io_base + info->ale_offs);
-}
-
 static void orion_nand_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
 {
 	struct orion_nand_info *info = chip_to_info(chip);
@@ -211,14 +197,8 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	nc->controller = &info->base;
 	nand_set_controller_data(nc, board);
 	nand_set_flash_node(nc, pdev->dev.of_node);
-	nc->legacy.IO_ADDR_R = nc->legacy.IO_ADDR_W = info->io_base;
-	nc->legacy.cmd_ctrl = orion_nand_cmd_ctrl;
-	nc->legacy.read_buf = orion_nand_read_buf;
 	nc->ecc.mode = NAND_ECC_SOFT;
 	nc->ecc.algo = NAND_ECC_HAMMING;
-
-	if (board->chip_delay)
-		nc->legacy.chip_delay = board->chip_delay;
 
 	WARN(board->width > 16,
 		"%d bit bus width out of range",
