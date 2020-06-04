@@ -10,6 +10,7 @@
 
 #undef DEBUG
 
+#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/mtd/mtd.h>
@@ -88,6 +89,86 @@ int pasemi_device_ready(struct nand_chip *chip)
 	return !!(inl(lpcctl) & LBICTRL_LPCCTL_NR);
 }
 
+static int pasemi_exec_instr(struct nand_chip *chip,
+			     const struct nand_op_instr *instr)
+{
+	struct pasemi_nand_controller *pasemi = chip_to_pasemi(chip);
+	unsigned int i;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		out_8(pasemi->io + (1 << CLE_PIN_CTL), instr->ctx.cmd.opcode);
+
+		/* Push out posted writes */
+		eieio();
+		inl(lpcctl);
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			out_8(pasemi->io + (1 << ALE_PIN_CTL),
+			      instr->ctx.addr.addrs[i]);
+
+		/* Push out posted writes */
+		eieio();
+		inl(lpcctl);
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		if (instr->ctx.data.force_8bit)
+			ioread8_rep(pasemi->io, instr->ctx.data.buf.in,
+				    instr->ctx.data.len);
+		else
+			pasemi_read_buf(chip, instr->ctx.data.buf.in,
+					instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		if (instr->ctx.data.force_8bit)
+			iowrite8_rep(pasemi->io, instr->ctx.data.buf.out,
+				     instr->ctx.data.len);
+		else
+			pasemi_write_buf(chip, instr->ctx.data.buf.out,
+					 instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		return nand_poll(inl(lpcctl) & LBICTRL_LPCCTL_NR, 10, 10,
+				 instr->ctx.waitrdy.timeout_ms, true);
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int pasemi_exec_op(struct nand_chip *chip,
+			  const struct nand_operation *op,
+			  bool check_only)
+{
+	unsigned int i;
+	int ret = 0;
+
+	if (check_only)
+		return 0;
+
+	for (i = 0; i < op->ninstrs; i++) {
+		ret = pasemi_exec_instr(chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_ns)
+			ndelay(op->instrs[i].delay_ns);
+	}
+
+	return ret;
+}
+
+static const struct nand_controller_ops pasemi_ops = {
+	.exec_op = pasemi_exec_op,
+};
+
 static int pasemi_nand_probe(struct platform_device *ofdev)
 {
 	struct pasemi_nand_controller *pasemi;
@@ -115,6 +196,7 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 		return -ENOMEM;
 
 	nand_controller_init(&pasemi->base);
+	pasemi->base.ops = &pasemi_ops;
 	chip = &pasemi->chip;
 	chip->controller = &pasemi->base;
 
