@@ -27,29 +27,44 @@
 #define CLE_PIN_CTL			15
 #define ALE_PIN_CTL			14
 
+struct pasemi_nand_controller {
+	struct nand_controller base;
+	struct nand_chip chip;
+	void __iomem *io;
+};
+
+static struct pasemi_nand_controller *chip_to_pasemi(struct nand_chip *chip)
+{
+	return container_of(chip->controller, struct pasemi_nand_controller, base);
+}
+
 static unsigned int lpcctl;
 static struct mtd_info *pasemi_nand_mtd;
 static const char driver_name[] = "pasemi-nand";
 
 static void pasemi_read_buf(struct nand_chip *chip, u_char *buf, int len)
 {
+	struct pasemi_nand_controller *pasemi = chip_to_pasemi(chip);
+
 	while (len > 0x800) {
-		memcpy_fromio(buf, chip->legacy.IO_ADDR_R, 0x800);
+		memcpy_fromio(buf, pasemi->io, 0x800);
 		buf += 0x800;
 		len -= 0x800;
 	}
-	memcpy_fromio(buf, chip->legacy.IO_ADDR_R, len);
+	memcpy_fromio(buf, pasemi->io, len);
 }
 
 static void pasemi_write_buf(struct nand_chip *chip, const u_char *buf,
 			     int len)
 {
+	struct pasemi_nand_controller *pasemi = chip_to_pasemi(chip);
+
 	while (len > 0x800) {
-		memcpy_toio(chip->legacy.IO_ADDR_R, buf, 0x800);
+		memcpy_toio(pasemi->io, buf, 0x800);
 		buf += 0x800;
 		len -= 0x800;
 	}
-	memcpy_toio(chip->legacy.IO_ADDR_R, buf, len);
+	memcpy_toio(pasemi->io, buf, len);
 }
 
 static void pasemi_hwcontrol(struct nand_chip *chip, int cmd,
@@ -75,6 +90,7 @@ int pasemi_device_ready(struct nand_chip *chip)
 
 static int pasemi_nand_probe(struct platform_device *ofdev)
 {
+	struct pasemi_nand_controller *pasemi;
 	struct device *dev = &ofdev->dev;
 	struct pci_dev *pdev;
 	struct device_node *np = dev->of_node;
@@ -93,19 +109,24 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 
 	dev_dbg(dev, "pasemi_nand at %pR\n", &res);
 
-	/* Allocate memory for MTD device structure and private data */
-	chip = devm_kzalloc(&ofdev->dev, sizeof(struct nand_chip), GFP_KERNEL);
-	if (!chip)
+	/* Allocate memory for NAND structure and private data */
+	pasemi = devm_kzalloc(&ofdev->dev, sizeof(*pasemi), GFP_KERNEL);
+	if (!pasemi)
 		return -ENOMEM;
+
+	nand_controller_init(&pasemi->base);
+	chip = &pasemi->chip;
+	chip->controller = &pasemi->base;
 
 	/* Link the private data with the MTD structure */
 	pasemi_nand_mtd->dev.parent = dev;
 
-	chip->legacy.IO_ADDR_R = of_iomap(np, 0);
-	chip->legacy.IO_ADDR_W = chip->legacy.IO_ADDR_R;
-
-	if (!chip->legacy.IO_ADDR_R)
+	pasemi->io = of_iomap(np, 0);
+	if (!pasemi->io)
 		return -EIO;
+
+	chip->legacy.IO_ADDR_R = pasemi->io;
+	chip->legacy.IO_ADDR_W = pasemi->io;
 
 	pdev = pci_get_device(PCI_VENDOR_ID_PASEMI, 0xa008, NULL);
 	if (!pdev) {
@@ -154,12 +175,13 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
  out_lpc:
 	release_region(lpcctl, 4);
  out_ior:
-	iounmap(chip->legacy.IO_ADDR_R);
+	iounmap(pasemi->io);
 	return err;
 }
 
 static int pasemi_nand_remove(struct platform_device *ofdev)
 {
+	struct pasemi_nand_controller *pasemi;
 	struct nand_chip *chip;
 	int ret;
 
@@ -167,6 +189,7 @@ static int pasemi_nand_remove(struct platform_device *ofdev)
 		return 0;
 
 	chip = mtd_to_nand(pasemi_nand_mtd);
+	pasemi = chip_to_pasemi(chip);
 
 	/* Release resources, unregister device */
 	ret = mtd_device_unregister(pasemi_nand_mtd);
@@ -175,7 +198,7 @@ static int pasemi_nand_remove(struct platform_device *ofdev)
 
 	release_region(lpcctl, 4);
 
-	iounmap(chip->legacy.IO_ADDR_R);
+	iounmap(pasemi->io);
 
 	pasemi_nand_mtd = NULL;
 
