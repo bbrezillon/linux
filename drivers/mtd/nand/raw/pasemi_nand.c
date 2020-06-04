@@ -68,27 +68,6 @@ static void pasemi_write_buf(struct nand_chip *chip, const u_char *buf,
 	memcpy_toio(pasemi->io, buf, len);
 }
 
-static void pasemi_hwcontrol(struct nand_chip *chip, int cmd,
-			     unsigned int ctrl)
-{
-	if (cmd == NAND_CMD_NONE)
-		return;
-
-	if (ctrl & NAND_CLE)
-		out_8(chip->legacy.IO_ADDR_W + (1 << CLE_PIN_CTL), cmd);
-	else
-		out_8(chip->legacy.IO_ADDR_W + (1 << ALE_PIN_CTL), cmd);
-
-	/* Push out posted writes */
-	eieio();
-	inl(lpcctl);
-}
-
-int pasemi_device_ready(struct nand_chip *chip)
-{
-	return !!(inl(lpcctl) & LBICTRL_LPCCTL_NR);
-}
-
 static int pasemi_exec_instr(struct nand_chip *chip,
 			     const struct nand_op_instr *instr)
 {
@@ -207,9 +186,6 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 	if (!pasemi->io)
 		return -EIO;
 
-	chip->legacy.IO_ADDR_R = pasemi->io;
-	chip->legacy.IO_ADDR_W = pasemi->io;
-
 	pdev = pci_get_device(PCI_VENDOR_ID_PASEMI, 0xa008, NULL);
 	if (!pdev) {
 		err = -ENODEV;
@@ -224,11 +200,6 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 		goto out_ior;
 	}
 
-	chip->legacy.cmd_ctrl = pasemi_hwcontrol;
-	chip->legacy.dev_ready = pasemi_device_ready;
-	chip->legacy.read_buf = pasemi_read_buf;
-	chip->legacy.write_buf = pasemi_write_buf;
-	chip->legacy.chip_delay = 0;
 	chip->ecc.mode = NAND_ECC_SOFT;
 	chip->ecc.algo = NAND_ECC_HAMMING;
 
