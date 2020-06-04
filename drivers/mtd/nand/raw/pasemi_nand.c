@@ -95,10 +95,8 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 
 	/* Allocate memory for MTD device structure and private data */
 	chip = kzalloc(sizeof(struct nand_chip), GFP_KERNEL);
-	if (!chip) {
-		err = -ENOMEM;
-		goto out;
-	}
+	if (!chip)
+		return -ENOMEM;
 
 	pasemi_nand_mtd = nand_to_mtd(chip);
 
@@ -162,7 +160,6 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 	iounmap(chip->legacy.IO_ADDR_R);
  out_mtd:
 	kfree(chip);
- out:
 	return err;
 }
 
