@@ -9,6 +9,7 @@
  * Copyright (C) 2012 John Crispin <blogic@openwrt.org>
  */
 
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/module.h>
@@ -69,6 +70,67 @@ static void oxnas_nand_cmd_ctrl(struct nand_chip *chip, int cmd,
 		writeb(cmd, oxnas->io_base + OXNAS_NAND_CMD_ALE);
 }
 
+static int oxnas_nand_exec_instr(struct nand_chip *chip,
+				const struct nand_op_instr *instr)
+{
+	struct oxnas_nand_ctrl *oxnas = nand_get_controller_data(chip);
+	unsigned int i;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		writeb(instr->ctx.cmd.opcode, oxnas->io_base + OXNAS_NAND_CMD_CLE);
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			writeb(instr->ctx.addr.addrs[i],
+			       oxnas->io_base + OXNAS_NAND_CMD_ALE);
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		ioread8_rep(oxnas->io_base, instr->ctx.data.buf.in, instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		iowrite8_rep(oxnas->io_base, instr->ctx.data.buf.out, instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		return nand_soft_waitrdy(chip, instr->ctx.waitrdy.timeout_ms);
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int oxnas_nand_exec_op(struct nand_chip *chip,
+			     const struct nand_operation *op,
+			     bool check_only)
+{
+	unsigned int i;
+	int ret = 0;
+
+	if (check_only)
+		return 0;
+
+	for (i = 0; i < op->ninstrs; i++) {
+		ret = oxnas_nand_exec_instr(chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_ns)
+			ndelay(op->instrs[i].delay_ns);
+	}
+
+	return ret;
+}
+
+static const struct nand_controller_ops oxnas_nand_ops = {
+	.exec_op = oxnas_nand_exec_op,
+};
+
 /*
  * Probe for the NAND device.
  */
@@ -91,6 +153,7 @@ static int oxnas_nand_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	nand_controller_init(&oxnas->base);
+	oxnas->base.ops = &oxnas_nand_ops;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	oxnas->io_base = devm_ioremap_resource(&pdev->dev, res);
