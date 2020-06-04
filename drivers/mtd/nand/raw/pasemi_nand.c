@@ -98,8 +98,6 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 	if (!chip)
 		return -ENOMEM;
 
-	pasemi_nand_mtd = nand_to_mtd(chip);
-
 	/* Link the private data with the MTD structure */
 	pasemi_nand_mtd->dev.parent = dev;
 
@@ -145,6 +143,7 @@ static int pasemi_nand_probe(struct platform_device *ofdev)
 		goto out_cleanup_nand;
 	}
 
+	pasemi_nand_mtd = nand_to_mtd(chip);
 	dev_info(dev, "PA Semi NAND flash at %pR, control at I/O %x\n", &res,
 		 lpcctl);
 
