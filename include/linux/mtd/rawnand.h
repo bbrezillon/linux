@@ -1440,4 +1440,43 @@ static inline void *nand_get_data_buf(struct nand_chip *chip)
 	return chip->data_buf;
 }
 
+/**
+ * nand_poll() - Poll for a state change
+ *
+ * @cond: condition to evaluate
+ * @delay_us: delay (in microseconds) to apply after each test
+ * @timeout_ms: timeout (in milliseconds)
+ *
+ * Evaluate a condition until it becomes true or the timeout expires.
+ * Used to poll ready/busy state changes, but can alos be used for any kind
+ * of polling-based waits.
+ *
+ * Return: 0 if @cond evaluates to true before the timeout expires,
+ *	   -ETIMEDOUT otherwise
+ */
+#define nand_poll(cond, delay_us_min, delay_us_max, timeout_ms, dont_sleep)	\
+({										\
+	unsigned long __delay_us_min = (delay_us_min);				\
+	unsigned long __delay_us_max = (delay_us_max);				\
+	u64 __timeout_ms = (timeout_ms);					\
+	ktime_t __timeout = ktime_add_ms(ktime_get(), __timeout_ms);		\
+	int __ret = -ETIMEDOUT;							\
+	while (1) {								\
+		if (cond) {							\
+			__ret = 0;						\
+			break;							\
+		}								\
+		if (__timeout_ms &&						\
+		    ktime_compare(ktime_get(), __timeout) > 0)			\
+			break;							\
+		if (__delay_us_min) {						\
+			if (dont_sleep)						\
+				udelay(__delay_us_min);				\
+			else							\
+				usleep_range(__delay_us_min, __delay_us_max);	\
+		}								\
+	}									\
+	!__ret || (cond) ? 0 : -ETIMEDOUT;					\
+})
+
 #endif /* __LINUX_MTD_RAWNAND_H */

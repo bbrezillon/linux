@@ -136,17 +136,8 @@ static int find_nand_cs(unsigned long nand_base)
 
 static int au1550nd_waitrdy(struct nand_chip *this, unsigned int timeout_ms)
 {
-	unsigned long timeout_jiffies = jiffies;
-
-	timeout_jiffies += msecs_to_jiffies(timeout_ms) + 1;
-	do {
-		if (alchemy_rdsmem(AU1000_MEM_STSTAT) & 0x1)
-			return 0;
-
-		usleep_range(10, 100);
-	} while (time_before(jiffies, timeout_jiffies));
-
-	return -ETIMEDOUT;
+	return nand_poll(alchemy_rdsmem(AU1000_MEM_STSTAT) & 0x1,
+			 10, 100, timeout_ms, false);
 }
 
 static int au1550nd_exec_instr(struct nand_chip *this,

@@ -746,6 +746,17 @@ static int nand_block_checkbad(struct nand_chip *chip, loff_t ofs, int allowbbt)
 	return nand_isbad_bbm(chip, ofs);
 }
 
+static bool nand_check_status_rdy_bit(struct nand_chip *chip, u8 *status)
+{
+	int ret;
+
+	ret = nand_read_data_op(chip, status, sizeof(*status), true, false);
+	if (ret)
+		return false;
+
+	return !!(*status & NAND_STATUS_READY);
+}
+
 /**
  * nand_soft_waitrdy - Poll STATUS reg until RDY bit is set to 1
  * @chip: NAND chip structure
@@ -780,28 +791,8 @@ int nand_soft_waitrdy(struct nand_chip *chip, unsigned long timeout_ms)
 	if (ret)
 		return ret;
 
-	/*
-	 * +1 below is necessary because if we are now in the last fraction
-	 * of jiffy and msecs_to_jiffies is 1 then we will wait only that
-	 * small jiffy fraction - possibly leading to false timeout
-	 */
-	timeout_ms = jiffies + msecs_to_jiffies(timeout_ms) + 1;
-	do {
-		ret = nand_read_data_op(chip, &status, sizeof(status), true,
-					false);
-		if (ret)
-			break;
-
-		if (status & NAND_STATUS_READY)
-			break;
-
-		/*
-		 * Typical lowest execution time for a tR on most NANDs is 10us,
-		 * use this as polling delay before doing something smarter (ie.
-		 * deriving a delay from the timeout value, timeout_ms/ratio).
-		 */
-		udelay(10);
-	} while	(time_before(jiffies, timeout_ms));
+	ret = nand_poll(nand_check_status_rdy_bit(chip, &status), 10, 10,
+			timeout_ms, true);
 
 	/*
 	 * We have to exit READ_STATUS mode in order to read real data on the
@@ -834,22 +825,7 @@ EXPORT_SYMBOL_GPL(nand_soft_waitrdy);
 int nand_gpio_waitrdy(struct nand_chip *chip, struct gpio_desc *gpiod,
 		      unsigned long timeout_ms)
 {
-
-	/*
-	 * Wait until R/B pin indicates chip is ready or timeout occurs.
-	 * +1 below is necessary because if we are now in the last fraction
-	 * of jiffy and msecs_to_jiffies is 1 then we will wait only that
-	 * small jiffy fraction - possibly leading to false timeout.
-	 */
-	timeout_ms = jiffies + msecs_to_jiffies(timeout_ms) + 1;
-	do {
-		if (gpiod_get_value_cansleep(gpiod))
-			return 0;
-
-		cond_resched();
-	} while	(time_before(jiffies, timeout_ms));
-
-	return gpiod_get_value_cansleep(gpiod) ? 0 : -ETIMEDOUT;
+	return nand_poll(gpiod_get_value_cansleep(gpiod), 0, 0, timeout_ms, false);
 };
 EXPORT_SYMBOL_GPL(nand_gpio_waitrdy);
 
