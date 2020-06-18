@@ -38,6 +38,7 @@ struct platform_nand_chip {
 
 /**
  * struct platform_nand_ctrl - controller level device structure
+ * @ops: platform specific NAND controller operations
  * @probe: platform specific function to probe/setup hardware
  * @remove: platform specific function to remove/teardown hardware
  * @dev_ready: platform specific function to read ready/busy pin
@@ -51,6 +52,7 @@ struct platform_nand_chip {
  * All fields are optional and depend on the hardware driver requirements
  */
 struct platform_nand_ctrl {
+	const struct nand_controller_ops *ops;
 	int (*probe)(struct platform_device *pdev);
 	void (*remove)(struct platform_device *pdev);
 	int (*dev_ready)(struct nand_chip *chip);
