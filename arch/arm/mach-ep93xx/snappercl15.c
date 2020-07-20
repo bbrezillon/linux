@@ -37,40 +37,8 @@
 #define SNAPPERCL15_NAND_CEN	(1 << 11) /* Chip enable (active low) */
 #define SNAPPERCL15_NAND_RDY	(1 << 14) /* Device ready */
 
-#define NAND_CTRL_ADDR(chip) 	(chip->legacy.IO_ADDR_W + 0x40)
-
-static void snappercl15_nand_cmd_ctrl(struct nand_chip *chip, int cmd,
-				      unsigned int ctrl)
-{
-	static u16 nand_state = SNAPPERCL15_NAND_WPN;
-	u16 set;
-
-	if (ctrl & NAND_CTRL_CHANGE) {
-		set = SNAPPERCL15_NAND_CEN | SNAPPERCL15_NAND_WPN;
-
-		if (ctrl & NAND_NCE)
-			set &= ~SNAPPERCL15_NAND_CEN;
-		if (ctrl & NAND_CLE)
-			set |= SNAPPERCL15_NAND_CLE;
-		if (ctrl & NAND_ALE)
-			set |= SNAPPERCL15_NAND_ALE;
-
-		nand_state &= ~(SNAPPERCL15_NAND_CEN |
-				SNAPPERCL15_NAND_CLE |
-				SNAPPERCL15_NAND_ALE);
-		nand_state |= set;
-		__raw_writew(nand_state, NAND_CTRL_ADDR(chip));
-	}
-
-	if (cmd != NAND_CMD_NONE)
-		__raw_writew((cmd & 0xff) | nand_state,
-			     chip->legacy.IO_ADDR_W);
-}
-
-static int snappercl15_nand_dev_ready(struct nand_chip *chip)
-{
-	return !!(__raw_readw(NAND_CTRL_ADDR(chip)) & SNAPPERCL15_NAND_RDY);
-}
+#define NAND_CTRL_ADDR(chip) 	(plat_nand_get_io_base(chip) + 0x40)
+#define NAND_CTRL_DATA(chip) 	plat_nand_get_io_base(chip)
 
 static struct mtd_partition snappercl15_nand_parts[] = {
 	{
@@ -85,16 +53,90 @@ static struct mtd_partition snappercl15_nand_parts[] = {
 	},
 };
 
+static int snappercl15_nand_exec_instr(struct nand_chip *chip,
+				       const struct nand_op_instr *instr)
+{
+	unsigned int i;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_CLE,
+			     NAND_CTRL_ADDR(chip));
+		__raw_writew(instr->ctx.cmd.opcode |
+			     SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_CLE,
+			     NAND_CTRL_DATA(chip));
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_ALE,
+			     NAND_CTRL_ADDR(chip));
+
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			__raw_writew(instr->ctx.addr.addrs[i] |
+				     SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_ALE,
+				     NAND_CTRL_DATA(chip));
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN, NAND_CTRL_ADDR(chip));
+		ioread8_rep(NAND_CTRL_DATA(chip), instr->ctx.data.buf.in,
+			    instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN, NAND_CTRL_ADDR(chip));
+		iowrite8_rep(NAND_CTRL_DATA(chip), instr->ctx.data.buf.out,
+			     instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		return nand_poll(__raw_readw(NAND_CTRL_ADDR(chip)) & SNAPPERCL15_NAND_RDY,
+				 0, 0, instr->ctx.waitrdy.timeout_ms, false);
+
+	default:
+		break;
+	}
+
+	return -EINVAL;
+}
+
+static int snappercl15_nand_exec_op(struct nand_chip *chip,
+				    const struct nand_operation *op,
+				    bool check_only)
+{
+	int ret = 0;
+
+	if (check_only)
+		return true;
+
+	__raw_writew(SNAPPERCL15_NAND_WPN, NAND_CTRL_ADDR(chip));
+	for (unsigned int i = 0; i < op->ninstrs; i++) {
+		ret = snappercl15_nand_exec_instr(chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_us)
+			udelay(op->instrs[i].delay_us);
+
+	}
+	__raw_writew(SNAPPERCL15_NAND_NCE | SNAPPERCL15_NAND_WPN,
+		     NAND_CTRL_ADDR(chip));
+
+	return ret;
+}
+
+static const struct nand_controller_ops snappercl15_nand_ops = {
+	.exec_op = snappercl15_nand_exec_op,
+};
+
 static struct platform_nand_data snappercl15_nand_data = {
 	.chip = {
 		.nr_chips		= 1,
 		.partitions		= snappercl15_nand_parts,
 		.nr_partitions		= ARRAY_SIZE(snappercl15_nand_parts),
-		.chip_delay		= 25,
 	},
 	.ctrl = {
-		.dev_ready		= snappercl15_nand_dev_ready,
-		.cmd_ctrl		= snappercl15_nand_cmd_ctrl,
+		.ops			= &snappercl15_nand_ops;
 	},
 };
 

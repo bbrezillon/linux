@@ -19,6 +19,13 @@ struct plat_nand_data {
 	void __iomem		*io_base;
 };
 
+void __iomem *plat_nand_get_io_base(struct nand_chip *chip)
+{
+	struct plat_nand_data *data = container_of(chip, struct plat_nand_data, chip);
+
+	return data->io_base;
+}
+
 /*
  * Probe for the NAND device.
  */
@@ -53,6 +60,7 @@ static int plat_nand_probe(struct platform_device *pdev)
 		return PTR_ERR(data->io_base);
 
 	nand_controller_init(&data->base);
+	data->base.ops = pdata->ctrl.ops;
 
 	nand_set_flash_node(&data->chip, pdev->dev.of_node);
 	mtd = nand_to_mtd(&data->chip);

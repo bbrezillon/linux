@@ -70,6 +70,9 @@ static void __init ts72xx_map_io(void)
  *************************************************************************/
 #define TS72XX_NAND_CONTROL_ADDR_LINE	22	/* 0xN0400000 */
 #define TS72XX_NAND_BUSY_ADDR_LINE	23	/* 0xN0800000 */
+#define TS72XX_NAND_NCE			BIT(2)
+#define TS72XX_NAND_CLE			BIT(1)
+#define TS72XX_NAND_ALE			BIT(0)
 
 static void ts72xx_nand_hwcontrol(struct nand_chip *chip,
 				  int cmd, unsigned int ctrl)
@@ -121,6 +124,84 @@ static struct mtd_partition ts72xx_nand_parts[] = {
 		.size		= MTDPART_SIZ_FULL,
 		.mask_flags	= MTD_WRITEABLE,	/* force read-only */
 	},
+};
+
+static int ts72xx_nand_exec_instr(struct nand_chip *chip,
+				  const struct nand_op_instr *instr)
+{
+	unsigned int i;
+
+	switch (instr->type) {
+	case NAND_OP_CMD_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_CLE,
+			     NAND_CTRL_ADDR(chip));
+		__raw_writew(instr->ctx.cmd.opcode |
+			     SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_CLE,
+			     NAND_CTRL_DATA(chip));
+		return 0;
+
+	case NAND_OP_ADDR_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_ALE,
+			     NAND_CTRL_ADDR(chip));
+
+		for (i = 0; i < instr->ctx.addr.naddrs; i++)
+			__raw_writew(instr->ctx.addr.addrs[i] |
+				     SNAPPERCL15_NAND_WPN | SNAPPERCL15_NAND_ALE,
+				     NAND_CTRL_DATA(chip));
+		return 0;
+
+	case NAND_OP_DATA_IN_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN, NAND_CTRL_ADDR(chip));
+		ioread8_rep(NAND_CTRL_DATA(chip), instr->ctx.data.buf.in,
+			    instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_DATA_OUT_INSTR:
+		__raw_writew(SNAPPERCL15_NAND_WPN, NAND_CTRL_ADDR(chip));
+		iowrite8_rep(NAND_CTRL_DATA(chip), instr->ctx.data.buf.out,
+			     instr->ctx.data.len);
+		return 0;
+
+	case NAND_OP_WAITRDY_INSTR:
+		return nand_poll(__raw_readw(NAND_CTRL_ADDR(chip)) & SNAPPERCL15_NAND_RDY,
+				 0, 0, instr->ctx.waitrdy.timeout_ms, false);
+
+	default:
+		break;
+	}
+
+	return -EINVAL;
+}
+
+static int ts72xx_nand_exec_op(struct nand_chip *chip,
+			       const struct nand_operation *op,
+			       bool check_only)
+{
+	void __iomem *io_base = plat_nand_get_io_base(chip);
+	int ret = 0;
+
+	if (check_only)
+		return true;
+
+
+	__raw_writeb(TS72XX_NAND_NCE,
+		     io_base + (1 << TS72XX_NAND_CONTROL_ADDR_LINE));
+	for (unsigned int i = 0; i < op->ninstrs; i++) {
+		ret = ts72xx_nand_exec_instr(chip, &op->instrs[i]);
+		if (ret)
+			break;
+
+		if (op->instrs[i].delay_us)
+			udelay(op->instrs[i].delay_us);
+
+	}
+	__raw_writeb(0, io_base + (1 << TS72XX_NAND_CONTROL_ADDR_LINE));
+
+	return ret;
+}
+
+static const struct nand_controller_ops ts72xx_nand_ops = {
+	.exec_op = ts72xx_nand_exec_op,
 };
 
 static struct platform_nand_data ts72xx_nand_data = {
