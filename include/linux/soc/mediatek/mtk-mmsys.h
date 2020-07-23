@@ -42,6 +42,21 @@ enum mtk_ddp_comp_id {
 	DDP_COMPONENT_ID_MAX,
 };
 
+struct mtk_mmsys_conn_funcs {
+	u32 (*mout_en)(enum mtk_ddp_comp_id cur,
+		       enum mtk_ddp_comp_id next,
+		       unsigned int *addr);
+	u32 (*sel_in)(enum mtk_ddp_comp_id cur,
+		      enum mtk_ddp_comp_id next,
+		      unsigned int *addr);
+	void (*sout_sel)(void __iomem *config_regs,
+			 enum mtk_ddp_comp_id cur,
+			 enum mtk_ddp_comp_id next);
+};
+
+void mtk_mmsys_register_conn_funcs(struct device *dev,
+				   struct mtk_mmsys_conn_funcs *funcs);
+
 void mtk_mmsys_ddp_connect(struct device *dev,
 			   enum mtk_ddp_comp_id cur,
 			   enum mtk_ddp_comp_id next);
