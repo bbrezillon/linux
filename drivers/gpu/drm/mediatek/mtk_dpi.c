@@ -832,6 +832,7 @@ static const struct of_device_id mtk_dpi_of_ids[] = {
 	},
 	{ },
 };
+MODULE_DEVICE_TABLE(of, mtk_dpi_of_ids);
 
 struct platform_driver mtk_dpi_driver = {
 	.probe = mtk_dpi_probe,
