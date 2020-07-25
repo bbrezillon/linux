@@ -227,6 +227,7 @@ static const struct mtk_ddp_data mt8183_ddp_driver_data = {
 	.mutex_sof = mt8183_mutex_sof,
 	.mutex_mod_reg = MT8183_DISP_MUTEX0_MOD0,
 	.mutex_sof_reg = MT8183_DISP_MUTEX0_SOF0,
+	.no_clk = true,
 };
 
 struct mtk_disp_mutex *mtk_disp_mutex_get(struct device *dev, unsigned int id)
