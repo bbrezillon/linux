@@ -2538,7 +2538,6 @@ static void it6505_bridge_detach(struct drm_bridge *bridge)
 
 static enum drm_mode_status
 it6505_bridge_mode_valid(struct drm_bridge *bridge,
-			 const struct drm_display_info *info,
 			 const struct drm_display_mode *mode)
 {
 	struct it6505 *it6505 = bridge_to_it6505(bridge);
