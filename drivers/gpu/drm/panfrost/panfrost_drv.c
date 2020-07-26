@@ -667,6 +667,15 @@ static const struct panfrost_compatible default_data = {
 	.pm_domain_names = NULL,
 };
 
+static const char * const mt8183_supplies[] = { "mali", "mali-sram" };
+static const char * const mt8183_pm_domains[] = { "core0", "core1", "core2" };
+static const struct panfrost_compatible mt8183_data = {
+	.num_supplies = ARRAY_SIZE(mt8183_supplies),
+	.supply_names = mt8183_supplies,
+	.num_pm_domains = ARRAY_SIZE(mt8183_pm_domains),
+	.pm_domain_names = mt8183_pm_domains,
+};
+
 static const struct of_device_id dt_match[] = {
 	{ .compatible = "arm,mali-t604", .data = &default_data, },
 	{ .compatible = "arm,mali-t624", .data = &default_data, },
@@ -677,6 +686,7 @@ static const struct of_device_id dt_match[] = {
 	{ .compatible = "arm,mali-t830", .data = &default_data, },
 	{ .compatible = "arm,mali-t860", .data = &default_data, },
 	{ .compatible = "arm,mali-t880", .data = &default_data, },
+	{ .compatible = "mediatek,mt8183-g72-mali", .data = &mt8183_data, },
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);

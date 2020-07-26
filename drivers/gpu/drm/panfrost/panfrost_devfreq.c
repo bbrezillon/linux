@@ -78,8 +78,25 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 	struct device *dev = &pfdev->pdev->dev;
 	struct devfreq *devfreq;
 	struct thermal_cooling_device *cooling;
+	struct opp_table *opp_table;
+	struct regulator **regulators;
+	unsigned i;
+
+	regulators = devm_kmalloc_array(dev, pfdev->comp->num_supplies,
+					sizeof(*regulators), GFP_KERNEL);
+	if (!regulators)
+		return -ENOMEM;
+
+	for (i = 0; i < pfdev->comp->num_supplies; i++)
+		regulators[i] = pfdev->regulators[i].consumer;
+
+	opp_table = dev_pm_opp_use_regulators(dev, regulators,
+					      pfdev->comp->num_supplies);
+	if (IS_ERR(opp_table))
+		return PTR_ERR(opp_table);
 
 	ret = dev_pm_opp_of_add_table(dev);
+	dev_pm_opp_put_opp_table(opp_table);
 	if (ret == -ENODEV) /* Optional, continue without devfreq */
 		return 0;
 	else if (ret)
@@ -90,8 +107,10 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 	cur_freq = clk_get_rate(pfdev->clock);
 
 	opp = devfreq_recommended_opp(dev, &cur_freq, 0);
-	if (IS_ERR(opp))
-		return PTR_ERR(opp);
+	if (IS_ERR(opp)) {
+		ret = PTR_ERR(opp);
+		goto err_remove_table;
+	}
 
 	panfrost_devfreq_profile.initial_freq = cur_freq;
 	dev_pm_opp_put(opp);
@@ -100,18 +119,22 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 					  DEVFREQ_GOV_SIMPLE_ONDEMAND, NULL);
 	if (IS_ERR(devfreq)) {
 		DRM_DEV_ERROR(dev, "Couldn't initialize GPU devfreq\n");
-		dev_pm_opp_of_remove_table(dev);
-		return PTR_ERR(devfreq);
+		ret = PTR_ERR(devfreq);
+		goto err_remove_table;
 	}
 	pfdev->devfreq.devfreq = devfreq;
 
 	cooling = of_devfreq_cooling_register(dev->of_node, devfreq);
 	if (IS_ERR(cooling))
-		DRM_DEV_INFO(dev, "Failed to register cooling device\n");
+		DRM_DEV_INFO(dev, "Failed to register cooling device (%ld)\n", PTR_ERR(cooling));
 	else
 		pfdev->devfreq.cooling = cooling;
 
 	return 0;
+
+err_remove_table:
+	dev_pm_opp_of_remove_table(dev);
+	return ret;
 }
 
 void panfrost_devfreq_fini(struct panfrost_device *pfdev)

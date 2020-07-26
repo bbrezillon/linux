@@ -476,6 +476,7 @@ of_devfreq_cooling_register_power(struct device_node *np, struct devfreq *df,
 	char dev_name[THERMAL_NAME_LENGTH];
 	int err;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	dfc = kzalloc(sizeof(*dfc), GFP_KERNEL);
 	if (!dfc)
 		return ERR_PTR(-ENOMEM);
@@ -491,21 +492,25 @@ of_devfreq_cooling_register_power(struct device_node *np, struct devfreq *df,
 		devfreq_cooling_ops.power2state = devfreq_cooling_power2state;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	err = devfreq_cooling_gen_tables(dfc);
 	if (err)
 		goto free_dfc;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	err = dev_pm_qos_add_request(df->dev.parent, &dfc->req_max_freq,
 				     DEV_PM_QOS_MAX_FREQUENCY,
 				     PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE);
 	if (err < 0)
 		goto free_tables;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	err = ida_simple_get(&devfreq_ida, 0, 0, GFP_KERNEL);
 	if (err < 0)
 		goto remove_qos_req;
 	dfc->id = err;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	snprintf(dev_name, sizeof(dev_name), "thermal-devfreq-%d", dfc->id);
 
 	cdev = thermal_of_cooling_device_register(np, dev_name, dfc,
@@ -518,6 +523,7 @@ of_devfreq_cooling_register_power(struct device_node *np, struct devfreq *df,
 		goto release_ida;
 	}
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	dfc->cdev = cdev;
 
 	return cdev;

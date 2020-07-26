@@ -1733,6 +1733,9 @@ static void clk_reparent(struct clk_core *core, struct clk_core *new_parent)
 	}
 
 	core->parent = new_parent;
+	if (!strcmp(core->name, "mfg_sel"))
+		pr_info("%s:%i clk %s new parent %s\n", __func__, __LINE__,
+			core->name, core->new_parent ? core->new_parent->name : "null");
 }
 
 static struct clk_core *__clk_set_parent_before(struct clk_core *core,
@@ -2021,56 +2024,6 @@ static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
 	return fail_clk;
 }
 
-static void clk_reparent_before_change_rate(struct clk_core *core)
-{
-	struct clk_core *temp_parent, *old_parent, *child;
-	struct hlist_node *tmp;
-
-	hlist_for_each_entry_safe(child, tmp, &core->children, child_node)
-		clk_reparent_before_change_rate(child);
-
-	/*
-	 * The 'reparent on live parent rate change' flag is not set, nothing
-	 * to do.
-	 */
-	if (!(core->flags & CLK_REPARENT_ON_LIVE_RATE_CHANGE))
-		return;
-
-	/*
-	 * There's no parent or the parent rate doesn't change => nothing to
-	 * do.
-	 */
-	if (!core->parent || core->parent->new_rate == core->parent->rate)
-		return;
-
-	/*
-	 * Changing the rate of the parent when the clock is gated should be
-	 * a problem.
-	 */
-	if (!clk_core_is_enabled(core))
-		return;
-
-	temp_parent = clk_core_get_parent_by_index(core,
-						   core->default_parent_index);
-	if (!temp_parent)
-		return;
-
-	if (clk_pm_runtime_get(core))
-		return;
-
-	old_parent = __clk_set_parent_before(core, temp_parent);
-	trace_clk_set_parent(core, temp_parent);
-
-	/* FIXME: support clks implementing ->set_rate_and_parent() ? */
-	if (core->ops->set_parent)
-		core->ops->set_parent(core->hw, core->default_parent_index);
-
-	trace_clk_set_parent_complete(core, temp_parent);
-	__clk_set_parent_after(core, core->new_parent, old_parent);
-
-	clk_pm_runtime_put(core);
-}
-
 /*
  * walk down a subtree and set the new rates notifying the rate
  * change on the way
@@ -2095,10 +2048,13 @@ static void clk_change_rate(struct clk_core *core)
 		best_parent_rate = core->parent->rate;
 	}
 
+	if (!strcmp(core->name, "mfg_sel"))
+		pr_info("%s:%i clk %s reparent from %s to %s\n", __func__, __LINE__,
+			core->name, core->parent ? core->parent->name : "null",
+			core->new_parent ? core->new_parent->name : "null");
+
 	if (clk_pm_runtime_get(core))
 		return;
-
-	clk_reparent_before_change_rate(core);
 
 	if (core->flags & CLK_SET_RATE_UNGATE) {
 		unsigned long flags;
@@ -2109,6 +2065,15 @@ static void clk_change_rate(struct clk_core *core)
 		clk_enable_unlock(flags);
 	}
 
+	hlist_for_each_entry(child, &core->children, child_node) {
+		if (child->ops->pre_parent_set_rate)
+			child->ops->pre_parent_set_rate(child->hw);
+	}
+
+	if (!strcmp(core->name, "mfg_sel"))
+		pr_info("%s:%i clk %s reparent from %s to %s\n", __func__, __LINE__,
+			core->name, core->parent ? core->parent->name : "null",
+			core->new_parent ? core->new_parent->name : "null");
 	if (core->new_parent && core->new_parent != core->parent) {
 		old_parent = __clk_set_parent_before(core, core->new_parent);
 		trace_clk_set_parent(core, core->new_parent);
@@ -2124,6 +2089,10 @@ static void clk_change_rate(struct clk_core *core)
 
 		trace_clk_set_parent_complete(core, core->new_parent);
 		__clk_set_parent_after(core, core->new_parent, old_parent);
+		if (!strcmp(core->name, "mfg_sel"))
+			pr_info("%s:%i clk %s reparent from %s to %s\n", __func__, __LINE__,
+				core->name, core->parent ? core->parent->name : "null",
+				core->new_parent ? core->new_parent->name : "null");
 	}
 
 	if (core->flags & CLK_OPS_PARENT_ENABLE)
@@ -2133,6 +2102,11 @@ static void clk_change_rate(struct clk_core *core)
 
 	if (!skip_set_rate && core->ops->set_rate)
 		core->ops->set_rate(core->hw, core->new_rate, best_parent_rate);
+
+	hlist_for_each_entry(child, &core->children, child_node) {
+		if (child->ops->post_parent_set_rate)
+			child->ops->post_parent_set_rate(child->hw);
+	}
 
 	trace_clk_set_rate_complete(core, core->new_rate);
 

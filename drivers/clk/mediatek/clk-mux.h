@@ -41,6 +41,7 @@ extern const struct clk_ops mtk_mux_ops;
 extern const struct clk_ops mtk_mux_clr_set_upd_ops;
 extern const struct clk_ops mtk_mux_gate_ops;
 extern const struct clk_ops mtk_mux_gate_clr_set_upd_ops;
+extern const struct clk_ops mtk_mfg_sel_ops;
 
 #define GATE_CLR_SET_UPD_FLAGS(_id, _name, _parents, _mux_ofs,		\
 			_mux_set_ofs, _mux_clr_ofs, _shift, _width,	\

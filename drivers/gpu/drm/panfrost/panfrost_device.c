@@ -56,6 +56,11 @@ static int panfrost_clk_init(struct panfrost_device *pfdev)
 	if (err)
 		return err;
 
+	pr_info("%s:%i\n", __func__, __LINE__);
+	err = clk_set_rate(pfdev->clock, 500000000);
+	if (err)
+		dev_err(pfdev->dev, "clk_set_rate() failed %d\n", err);
+
 	pfdev->bus_clock = devm_clk_get_optional(pfdev->dev, "bus");
 	if (IS_ERR(pfdev->bus_clock)) {
 		dev_err(pfdev->dev, "get bus_clock failed %ld\n",
