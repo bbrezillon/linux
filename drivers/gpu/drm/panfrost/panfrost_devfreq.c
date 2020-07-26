@@ -82,6 +82,7 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 	struct regulator **regulators;
 	unsigned i;
 
+	return 0;
 	regulators = devm_kmalloc_array(dev, pfdev->comp->num_supplies,
 					sizeof(*regulators), GFP_KERNEL);
 	if (!regulators)
@@ -139,6 +140,7 @@ err_remove_table:
 
 void panfrost_devfreq_fini(struct panfrost_device *pfdev)
 {
+	return;
 	if (pfdev->devfreq.cooling)
 		devfreq_cooling_unregister(pfdev->devfreq.cooling);
 	dev_pm_opp_of_remove_table(&pfdev->pdev->dev);

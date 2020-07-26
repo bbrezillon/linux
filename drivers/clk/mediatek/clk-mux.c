@@ -159,24 +159,30 @@ static void mtk_clk_mfg_sel_pre_parent_set_rate(struct clk_hw *hw)
 {
 	unsigned parent_idx = clk_hw_get_parent_index(hw);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/*
 	 * If the clk is running, reparent the clk to the 26MHz oscillator
 	 * before the parent rate change happens to avoid glitches.
 	 */
-	if (clk_hw_is_enabled(hw) && parent_idx != 0)
+	if (clk_hw_is_enabled(hw) && parent_idx != 0) {
 		mtk_clk_mux_set_parent_setclr_lock(hw, 0);
+		pr_info("%s:%i parent %d -> %d\n", __func__, __LINE__, parent_idx, 0);
+	}
 }
 
 static void mtk_clk_mfg_sel_post_parent_set_rate(struct clk_hw *hw)
 {
 	unsigned parent_idx = clk_hw_get_parent_index(hw);
 
+	pr_info("%s:%i\n", __func__, __LINE__);
 	/*
 	 * Reparent the clk to the actual parent when the parent is done
 	 * changing its rate.
 	 */
-	if (parent_idx != mtk_clk_mux_get_parent(hw))
+	if (parent_idx != mtk_clk_mux_get_parent(hw)) {
+		pr_info("%s:%i parent %d -> %d\n", __func__, __LINE__, mtk_clk_mux_get_parent(hw), parent_idx);
 		mtk_clk_mux_set_parent_setclr_lock(hw, parent_idx);
+	}
 }
 
 const struct clk_ops mtk_mfg_sel_ops = {
