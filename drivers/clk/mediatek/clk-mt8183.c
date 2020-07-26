@@ -548,9 +548,10 @@ static const struct mtk_mux top_muxes[] = {
 		ipu_if_parents, 0x50,
 		0x54, 0x58, 24, 4, 31, 0x004, 7),
 	/* CLK_CFG_2 */
-	MUX_GATE_CLR_SET_UPD(CLK_TOP_MUX_MFG, "mfg_sel",
+	MUX_GATE_CLR_SET_UPD_FLAGS(CLK_TOP_MUX_MFG, "mfg_sel",
 		mfg_parents, 0x60,
-		0x64, 0x68, 0, 2, 7, 0x004, 8),
+		0x64, 0x68, 0, 2, 7, 0x004, 8,
+		CLK_REPARENT_ON_LIVE_RATE_CHANGE),
 	MUX_GATE_CLR_SET_UPD(CLK_TOP_MUX_F52M_MFG, "f52m_mfg_sel",
 		f52m_mfg_parents, 0x60,
 		0x64, 0x68, 8, 2, 15, 0x004, 9),

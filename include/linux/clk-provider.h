@@ -32,6 +32,13 @@
 #define CLK_OPS_PARENT_ENABLE	BIT(12)
 /* duty cycle call may be forwarded to the parent clock */
 #define CLK_DUTY_CYCLE_PARENT	BIT(13)
+/*
+ * some clocks need to be updated without gating everything, but changing those
+ * clocks (especially PLLs), means the blocks using them get interrupted, which
+ * is sometimes not acceptable. Add a flag to reparent before changing the
+ * parent rate.
+ */
+#define CLK_REPARENT_ON_LIVE_RATE_CHANGE	BIT(14)
 
 struct clk;
 struct clk_hw;
@@ -236,6 +243,9 @@ struct clk_ops {
 					  struct clk_rate_request *req);
 	int		(*set_parent)(struct clk_hw *hw, u8 index);
 	u8		(*get_parent)(struct clk_hw *hw);
+	void		(*pre_set_rate)(struct clk_hw *hw,
+					unsigned long rate,
+					unsigned long parent_rate, u8 index);
 	int		(*set_rate)(struct clk_hw *hw, unsigned long rate,
 				    unsigned long parent_rate);
 	int		(*set_rate_and_parent)(struct clk_hw *hw,
@@ -280,6 +290,7 @@ struct clk_parent_data {
  * @parent_hws: array of pointers to all possible parents (when all parents
  *              are internal to the clk controller)
  * @num_parents: number of possible parents
+ * @default_parent: parent used when a live rate change is requested
  * @flags: framework-level hints and quirks
  */
 struct clk_init_data {
@@ -290,6 +301,7 @@ struct clk_init_data {
 	const struct clk_parent_data	*parent_data;
 	const struct clk_hw		**parent_hws;
 	u8			num_parents;
+	u8			default_parent;
 	unsigned long		flags;
 };
 

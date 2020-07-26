@@ -64,6 +64,7 @@ struct clk_core {
 	struct clk_parent_map	*parents;
 	u8			num_parents;
 	u8			new_parent_index;
+	u8			default_parent_index;
 	unsigned long		rate;
 	unsigned long		req_rate;
 	unsigned long		new_rate;
@@ -2020,6 +2021,56 @@ static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
 	return fail_clk;
 }
 
+static void clk_reparent_before_change_rate(struct clk_core *core)
+{
+	struct clk_core *temp_parent, *old_parent, *child;
+	struct hlist_node *tmp;
+
+	hlist_for_each_entry_safe(child, tmp, &core->children, child_node)
+		clk_reparent_before_change_rate(child);
+
+	/*
+	 * The 'reparent on live parent rate change' flag is not set, nothing
+	 * to do.
+	 */
+	if (!(core->flags & CLK_REPARENT_ON_LIVE_RATE_CHANGE))
+		return;
+
+	/*
+	 * There's no parent or the parent rate doesn't change => nothing to
+	 * do.
+	 */
+	if (!core->parent || core->parent->new_rate == core->parent->rate)
+		return;
+
+	/*
+	 * Changing the rate of the parent when the clock is gated should be
+	 * a problem.
+	 */
+	if (!clk_core_is_enabled(core))
+		return;
+
+	temp_parent = clk_core_get_parent_by_index(core,
+						   core->default_parent_index);
+	if (!temp_parent)
+		return;
+
+	if (clk_pm_runtime_get(core))
+		return;
+
+	old_parent = __clk_set_parent_before(core, temp_parent);
+	trace_clk_set_parent(core, temp_parent);
+
+	/* FIXME: support clks implementing ->set_rate_and_parent() ? */
+	if (core->ops->set_parent)
+		core->ops->set_parent(core->hw, core->default_parent_index);
+
+	trace_clk_set_parent_complete(core, temp_parent);
+	__clk_set_parent_after(core, core->new_parent, old_parent);
+
+	clk_pm_runtime_put(core);
+}
+
 /*
  * walk down a subtree and set the new rates notifying the rate
  * change on the way
@@ -2046,6 +2097,8 @@ static void clk_change_rate(struct clk_core *core)
 
 	if (clk_pm_runtime_get(core))
 		return;
+
+	clk_reparent_before_change_rate(core);
 
 	if (core->flags & CLK_SET_RATE_UNGATE) {
 		unsigned long flags;
@@ -3656,6 +3709,10 @@ static int clk_core_populate_parent_map(struct clk_core *core,
 	int i, ret = 0;
 	struct clk_parent_map *parents, *parent;
 
+	if ((init->flags & CLK_REPARENT_ON_LIVE_RATE_CHANGE) &&
+	    init->default_parent >= num_parents)
+		return -EINVAL;
+
 	if (!num_parents)
 		return 0;
 
@@ -3704,6 +3761,9 @@ static int clk_core_populate_parent_map(struct clk_core *core,
 			return ret;
 		}
 	}
+
+	if (init->flags & CLK_REPARENT_ON_LIVE_RATE_CHANGE)
+		core->default_parent_index = init->default_parent;
 
 	return 0;
 }
