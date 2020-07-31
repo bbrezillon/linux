@@ -629,6 +629,7 @@ static int panfrost_probe(struct platform_device *pdev)
 
 	panfrost_gem_shrinker_init(ddev);
 
+	pm_runtime_get_sync(pfdev->dev);
 	return 0;
 
 err_out2:
