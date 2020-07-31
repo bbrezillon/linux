@@ -831,7 +831,7 @@ int mtk_drm_crtc_create(struct drm_device *drm_dev,
 					 drm_crtc_index(&mtk_crtc->base),
 					 2000);
 	if (IS_ERR(mtk_crtc->cmdq_client)) {
-		dev_dbg(dev, "mtk_crtc %d failed to create mailbox client, writing register by CPU now\n",
+		dev_err(dev, "mtk_crtc %d failed to create mailbox client, writing register by CPU now\n",
 			drm_crtc_index(&mtk_crtc->base));
 		mtk_crtc->cmdq_client = NULL;
 	}
@@ -840,7 +840,7 @@ int mtk_drm_crtc_create(struct drm_device *drm_dev,
 					 drm_crtc_index(&mtk_crtc->base),
 					 &mtk_crtc->cmdq_event);
 	if (ret)
-		dev_dbg(dev, "mtk_crtc %d failed to get mediatek,gce-events property\n",
+		dev_err(dev, "mtk_crtc %d failed to get mediatek,gce-events property\n",
 			drm_crtc_index(&mtk_crtc->base));
 #endif
 	return 0;
