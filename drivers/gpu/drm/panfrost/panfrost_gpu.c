@@ -7,7 +7,6 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
-#include <linux/reset.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/platform_device.h>
@@ -53,7 +52,7 @@ static irqreturn_t panfrost_gpu_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-int panfrost_gpu_soft_reset(struct panfrost_device *pfdev)
+int panfrost_gpu_reset(struct panfrost_device *pfdev)
 {
 	int ret;
 	u32 val;
@@ -61,38 +60,21 @@ int panfrost_gpu_soft_reset(struct panfrost_device *pfdev)
 	gpu_write(pfdev, GPU_INT_MASK, 0);
 	gpu_write(pfdev, GPU_INT_CLEAR, GPU_IRQ_RESET_COMPLETED);
 
-	if (pfdev->comp->requires_external_reset) {
-		reset_control_assert(pfdev->rstc);
-		udelay(10);
-		reset_control_deassert(pfdev->rstc);
-	} else
+	if (pfdev->comp->gpu_reset)
+		pfdev->comp->gpu_reset(pfdev);
+	else
 		gpu_write(pfdev, GPU_CMD, GPU_CMD_SOFT_RESET);
 
 	ret = readl_relaxed_poll_timeout(pfdev->iomem + GPU_INT_RAWSTAT,
 		val, val & GPU_IRQ_RESET_COMPLETED, 100, 10000);
 
-	if (ret) {
-		dev_err(pfdev->dev, "gpu soft reset timed out\n");
-		return ret;
-	}
-
 	gpu_write(pfdev, GPU_INT_CLEAR, GPU_IRQ_MASK_ALL);
 	gpu_write(pfdev, GPU_INT_MASK, GPU_IRQ_MASK_ALL);
 
-	return 0;
-}
+	if (ret)
+		dev_err(pfdev->dev, "gpu soft reset timed out\n");
 
-void panfrost_gpu_amlogic_quirks(struct panfrost_device *pfdev)
-{
-	/*
-	 * The Amlogic integrated Mali-T820, Mali-G31 & Mali-G52 needs
-	 * these undocumented bits to be set in order to operate
-	 * correctly.
-	 * These GPU_PWR registers contains:
-	 * "device-specific power control value"
-	 */
-	gpu_write(pfdev, GPU_PWR_KEY, 0x2968A819);
-	gpu_write(pfdev, GPU_PWR_OVERRIDE1, 0xfff | (0x20 << 16));
+	return ret;
 }
 
 static void panfrost_gpu_init_quirks(struct panfrost_device *pfdev)
@@ -355,7 +337,7 @@ int panfrost_gpu_init(struct panfrost_device *pfdev)
 {
 	int err, irq;
 
-	err = panfrost_gpu_soft_reset(pfdev);
+	err = panfrost_gpu_reset(pfdev);
 	if (err)
 		return err;
 
