@@ -4,6 +4,7 @@
 /* Copyright 2019 Collabora ltd. */
 
 #include <linux/delay.h>
+#include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/pagemap.h>
@@ -688,11 +689,47 @@ static void amlogic_gpu_reset(struct panfrost_device *pfdev)
 	gpu_write(pfdev, GPU_PWR_OVERRIDE1, 0xfff | (0x20 << 16));
 }
 
+static void amlogic_gpu_power_on(struct panfrost_device *pfdev)
+{
+	int ret;
+	u32 val;
+
+	gpu_write(pfdev, GPU_INT_MASK, 0);
+	gpu_write(pfdev, GPU_INT_CLEAR, GPU_IRQ_MASK_ALL);
+	gpu_write(pfdev, TILER_PWRON_LO, pfdev->features.tiler_present);
+	gpu_write(pfdev, TILER_PWRON_HI, pfdev->features.tiler_present >> 32);
+	gpu_write(pfdev, L2_PWRON_LO, pfdev->features.l2_present);
+	gpu_write(pfdev, L2_PWRON_HI, pfdev->features.l2_present >> 32);
+	gpu_write(pfdev, SHADER_PWRON_LO, pfdev->features.shader_present);
+	gpu_write(pfdev, SHADER_PWRON_HI, pfdev->features.shader_present >> 32);
+
+	/*
+	 * Wait for Power On to complete. We can't use the READY registers here,
+	 * since the PWR_OVERRIDE we've done in amlogic_gpu_reset() seems to
+	 * make those registers inactive.
+	 */
+	ret = readl_poll_timeout(pfdev->iomem + GPU_INT_RAWSTAT, val,
+				 val & GPU_IRQ_POWER_CHANGED,
+				 100, 100000);
+	if (ret)
+		dev_err(pfdev->dev, "error powering up gpu");
+
+	gpu_write(pfdev, GPU_INT_CLEAR, GPU_IRQ_MASK_ALL);
+	gpu_write(pfdev, GPU_INT_MASK, GPU_IRQ_MASK_ALL);
+}
+
+static void amlogic_gpu_power_off(struct panfrost_device *pfdev)
+{
+	/* Nothing done here, we want to keep the GPU powered. */
+}
+
 static const struct panfrost_compatible amlogic_gxm_data = {
 	.num_supplies = ARRAY_SIZE(default_supplies),
 	.supply_names = default_supplies,
 	.requires_external_reset = true,
 	.gpu_reset = amlogic_gpu_reset,
+	.gpu_power_on = amlogic_gpu_power_on,
+	.gpu_power_off = amlogic_gpu_power_off,
 };
 
 static const struct panfrost_compatible amlogic_g12a_data = {
@@ -700,6 +737,8 @@ static const struct panfrost_compatible amlogic_g12a_data = {
 	.supply_names = default_supplies,
 	.requires_external_reset = true,
 	.gpu_reset = amlogic_gpu_reset,
+	.gpu_power_on = amlogic_gpu_power_on,
+	.gpu_power_off = amlogic_gpu_power_off,
 };
 
 static const struct of_device_id dt_match[] = {

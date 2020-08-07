@@ -306,6 +306,11 @@ void panfrost_gpu_power_on(struct panfrost_device *pfdev)
 	int ret;
 	u32 val;
 
+	if (pfdev->comp->gpu_power_on) {
+		pfdev->comp->gpu_power_on(pfdev);
+		return;
+	}
+
 	/* Just turn on everything for now */
 	gpu_write(pfdev, L2_PWRON_LO, pfdev->features.l2_present);
 	ret = readl_relaxed_poll_timeout(pfdev->iomem + L2_READY_LO,
@@ -328,6 +333,11 @@ void panfrost_gpu_power_on(struct panfrost_device *pfdev)
 
 void panfrost_gpu_power_off(struct panfrost_device *pfdev)
 {
+	if (pfdev->comp->gpu_power_off) {
+		pfdev->comp->gpu_power_off(pfdev);
+		return;
+	}
+
 	gpu_write(pfdev, TILER_PWROFF_LO, 0);
 	gpu_write(pfdev, SHADER_PWROFF_LO, 0);
 	gpu_write(pfdev, L2_PWROFF_LO, 0);

@@ -73,6 +73,8 @@ struct panfrost_compatible {
 	bool requires_external_reset;
 	/* Vendor implementation quirks callback */
 	void (*gpu_reset)(struct panfrost_device *pfdev);
+	void (*gpu_power_on)(struct panfrost_device *pfdev);
+	void (*gpu_power_off)(struct panfrost_device *pfdev);
 };
 
 struct panfrost_device {
