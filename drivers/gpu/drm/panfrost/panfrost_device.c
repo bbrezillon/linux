@@ -336,7 +336,7 @@ const char *panfrost_exception_name(struct panfrost_device *pfdev, u32 exception
 
 void panfrost_device_reset(struct panfrost_device *pfdev)
 {
-	panfrost_gpu_soft_reset(pfdev);
+	panfrost_gpu_reset(pfdev);
 
 	panfrost_gpu_power_on(pfdev);
 	panfrost_mmu_reset(pfdev);

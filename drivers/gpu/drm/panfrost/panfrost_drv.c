@@ -3,10 +3,12 @@
 /* Copyright 2019 Linaro, Ltd., Rob Herring <robh@kernel.org> */
 /* Copyright 2019 Collabora ltd. */
 
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/pagemap.h>
 #include <linux/pm_runtime.h>
+#include <linux/reset.h>
 #include <drm/panfrost_drm.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_ioctl.h>
@@ -20,6 +22,7 @@
 #include "panfrost_job.h"
 #include "panfrost_gpu.h"
 #include "panfrost_perfcnt.h"
+#include "panfrost_regs.h"
 
 static bool unstable_ioctls;
 module_param_unsafe(unstable_ioctls, bool, 0600);
@@ -667,17 +670,36 @@ static const struct panfrost_compatible default_data = {
 	.pm_domain_names = NULL,
 };
 
+static void amlogic_gpu_reset(struct panfrost_device *pfdev)
+{
+	reset_control_assert(pfdev->rstc);
+	udelay(10);
+	reset_control_deassert(pfdev->rstc);
+	udelay(10);
+
+	/*
+	 * The Amlogic integrated Mali-T820, Mali-G31 & Mali-G52 needs
+	 * these undocumented bits to be set in order to operate
+	 * correctly.
+	 * These GPU_PWR registers contains:
+	 * "device-specific power control value"
+	 */
+	gpu_write(pfdev, GPU_PWR_KEY, 0x2968A819);
+	gpu_write(pfdev, GPU_PWR_OVERRIDE1, 0xfff | (0x20 << 16));
+}
+
 static const struct panfrost_compatible amlogic_gxm_data = {
 	.num_supplies = ARRAY_SIZE(default_supplies),
 	.supply_names = default_supplies,
 	.requires_external_reset = true,
-	.vendor_quirks = panfrost_gpu_amlogic_quirks,
+	.gpu_reset = amlogic_gpu_reset,
 };
 
 static const struct panfrost_compatible amlogic_g12a_data = {
 	.num_supplies = ARRAY_SIZE(default_supplies),
 	.supply_names = default_supplies,
-	.vendor_quirks = panfrost_gpu_amlogic_quirks,
+	.requires_external_reset = true,
+	.gpu_reset = amlogic_gpu_reset,
 };
 
 static const struct of_device_id dt_match[] = {
