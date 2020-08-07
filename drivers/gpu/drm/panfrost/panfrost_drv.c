@@ -623,6 +623,7 @@ static int panfrost_probe(struct platform_device *pdev)
 	pm_runtime_set_autosuspend_delay(pfdev->dev, 50); /* ~3 frames */
 	pm_runtime_use_autosuspend(pfdev->dev);
 
+	pm_runtime_get_sync(pfdev->dev);
 	/*
 	 * Register the DRM device with the core and the connectors with
 	 * sysfs
