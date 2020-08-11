@@ -445,8 +445,8 @@ static arm_lpae_iopte arm_lpae_prot_to_pte(struct arm_lpae_io_pgtable *data,
 
 	if (prot & IOMMU_CACHE)
 		pte |= ARM_LPAE_PTE_SH_IS;
-	else
-		pte |= ARM_LPAE_PTE_SH_OS;
+//	else
+//		pte |= ARM_LPAE_PTE_SH_OS;
 
 	if (prot & IOMMU_NOEXEC)
 		pte |= ARM_LPAE_PTE_XN;
