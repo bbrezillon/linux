@@ -58,7 +58,9 @@
 static int meson_gxm_afbcd_pixel_fmt(u64 modifier, uint32_t format)
 {
 	switch (format) {
+	case DRM_FORMAT_XRGB8888:
 	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_ARGB8888:
 	case DRM_FORMAT_ABGR8888:
 		return OSD1_AFBCD_RGB32;
 	/* TOFIX support mode formats */
