@@ -661,6 +661,7 @@ static const struct panfrost_compatible default_data = {
 static const struct panfrost_compatible amlogic_data = {
 	.num_supplies = ARRAY_SIZE(default_supplies),
 	.supply_names = default_supplies,
+	.requires_external_reset = true,
 	.vendor_quirk = panfrost_gpu_amlogic_quirk,
 };
 
