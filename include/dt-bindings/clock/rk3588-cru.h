@@ -733,8 +733,9 @@
 #define ACLK_AV1_PRE			739
 #define PCLK_AV1_PRE			740
 #define HCLK_SDIO_PRE			741
+#define PCLK_VO1GRF			742
 
-#define CLK_NR_CLKS			(HCLK_SDIO_PRE + 1)
+#define CLK_NR_CLKS			(PCLK_VO1GRF + 1)
 
 /********Name=SOFTRST_CON01,Offset=0xA04********/
 #define SRST_A_TOP_BIU			19
