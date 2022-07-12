@@ -977,4 +977,8 @@ static inline void rockchip_register_softrst(struct device_node *np,
 }
 #endif
 
+int rockchip_pll_clk_scale_to_rate(struct clk *clk, unsigned int scale);
+int rockchip_pll_clk_rate_to_scale(struct clk *clk, unsigned long rate);
+int rockchip_pll_clk_adaptive_scaling(struct clk *clk, int sel);
+
 #endif
