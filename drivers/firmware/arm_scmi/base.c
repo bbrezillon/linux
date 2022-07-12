@@ -224,8 +224,8 @@ scmi_base_implementation_list_get(const struct scmi_protocol_handle *ph,
 			dev_err(dev,
 				"Malformed reply - real_sz:%zd  calc_sz:%u\n",
 				real_list_sz, calc_list_sz);
-			ret = -EPROTO;
-			break;
+//			ret = -EPROTO;
+//:			break;
 		}
 
 		for (loop = 0; loop < loop_num_ret; loop++)
